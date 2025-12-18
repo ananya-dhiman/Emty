@@ -17,6 +17,7 @@ function App() {
    * 2. Send token to backend
    * 3. Store user data
    */
+  var ok=1;
   const handleLogin = async () => {
     setLoading(true);
     setError('');
