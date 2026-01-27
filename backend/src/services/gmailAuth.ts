@@ -1,3 +1,4 @@
+import { GmailAccountModel } from "../model/GmailAccount";
 
 
   interface Tokens {
@@ -9,12 +10,16 @@
 }
 
 
+const isTokenExpired = (expiry?: number) => {
+  if (!expiry) return true;
+  return Date.now() >= expiry - 60_000; 
+};
 
 
   const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
    
   //Generates google_auth_url to request user consent
-export async function generateOAuthUrl(oauth2Client:any):Promise<string>{ 
+export async function generateOAuthUrl(oauth2Client:any,state:string):Promise<string>{ 
    
    
  
@@ -24,6 +29,7 @@ export async function generateOAuthUrl(oauth2Client:any):Promise<string>{
         access_type: 'offline',
         scope: scopes,
         include_granted_scopes: true,
+        state: state
     });
     return authorizationUrl;
 
@@ -48,7 +54,36 @@ export async function exchangeCodeForTokens(code:string,oauth2Client:any):Promis
    
 }
 
-export async function refreshAccessToken(refreshToken:string):Promise<Tokens>{
+export async function refreshAccessToken(emailAddress:String,oauth2Client:any):Promise<any>{
+    try{
+        const dets=await GmailAccountModel.findOne({emailAddress:emailAddress});
+        if(!dets){
+            throw new Error('No Gmail account found for the provided email address');
+        }
+        
+        if(isTokenExpired(dets.tokenExpiry.getTime())){
+              const { credentials } = await oauth2Client.refreshAccessToken();
+
+                // 4. Persist new token
+                dets.accessToken = credentials.access_token!;
+                dets.tokenExpiry = credentials.expiry_date!;
+                await dets.save();
+
+                // 5. Return ready client
+                oauth2Client.setCredentials(credentials);
+                
+
+
+            
+        }
+        //return with or without refresh
+        return oauth2Client;
+
+
+    }catch(error){
+        throw new Error('Error refreshing access token: ' + error);
+    }
+
   
     
 }
