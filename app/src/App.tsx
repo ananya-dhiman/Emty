@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import './App.css'
 import { signInWithGoogle, signOutUser } from './utils/firebase'
+import { GmailAuthTest } from './pages/GmailAuthTest'
 import axios from 'axios'
 
 // Backend API URL - update this to your backend URL
@@ -183,6 +184,9 @@ function App() {
           >
             {loading ? 'Loading...' : 'Logout'}
           </button>
+
+          {/* Gmail OAuth Testing Component */}
+          <GmailAuthTest firebaseToken={localStorage.getItem('firebaseToken')} />
         </div>
       )}
 

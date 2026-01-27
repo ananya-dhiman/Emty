@@ -1,4 +1,5 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthRequest } from '../middleware/authMiddleware';
 import { GmailAccountModel } from '../model/GmailAccount';
 import { google } from 'googleapis';
 import crypto from 'crypto';
@@ -13,7 +14,7 @@ import {UserModel} from '../model/User';
 // ✔ redis SET state → userId (TTL)
 // ✔ generate OAuth URL (pass state)
 // ✔ redirect
-export const initiateGoogleOAuth = async (req:Request, res:Response): Promise<void> => {
+export const initiateGoogleOAuth = async (req:AuthRequest, res:Response): Promise<void> => {
     const oauth2Client = createOAuthClient();
     const uid= req.user?.uid;
 
@@ -29,11 +30,13 @@ export const initiateGoogleOAuth = async (req:Request, res:Response): Promise<vo
 
 
     const state = crypto.randomBytes(32).toString('hex');
-      await client.set(
-            `oauth:state:${state}`,
-            uid,
-            { EX: 300 } // Time verification session is active for
-        );
+    const uidString = uid || '';
+    
+    await client.setEx(
+        `oauth:state:${state}`,
+        300, // TTL in seconds (5 minutes)
+        uidString
+    );
     try {
         const authorizationUrl = await generateOAuthUrl(oauth2Client,state);
 
@@ -67,7 +70,7 @@ export const initiateGoogleOAuth = async (req:Request, res:Response): Promise<vo
 // 6. Save/Update Gmail account in database
 // 7. Delete state from Redis (one-time use)
 
-export const store_credentials = async (req:Request, res:Response): Promise<void> => {
+export const store_credentials = async (req:AuthRequest, res:Response): Promise<void> => {
     const oauth2Client = createOAuthClient();
     const code: string = req.query.code as string;
     const state: string = req.query.state as string;

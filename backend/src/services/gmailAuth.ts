@@ -4,6 +4,7 @@ import { GmailAccountModel } from "../model/GmailAccount";
   interface Tokens {
   "access_token"?: string,
   "refresh_token"?: string,
+  "expiry_date"?: number,
   "expires_in"?: number,
   "scope"?: string,
   "token_type"?: string

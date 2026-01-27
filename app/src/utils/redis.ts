@@ -1,17 +1,25 @@
-import redis from 'redis';
+import { createClient } from 'redis';
 
-const client = redis.createClient({
-    port: 6379 ,
-    host: '127.0.0.1' 
+const client = createClient({
+    socket: {
+        host: '127.0.0.1',
+        port: 6379
+    }
 });
 
 client.on('connect', () => {
     console.log('Successfully connected to Redis!');
 });
 
-client.on('error', (err) => {
+client.on('error', (err: Error | string) => {
     console.error('Error connecting to Redis:', err);
 });
+
+// Connect to Redis
+client.connect().catch((err: Error | string) => {
+    console.error('Failed to connect to Redis:', err);
+});
+
 export default client;
 
 // 1️⃣ /auth/google (state creation)
