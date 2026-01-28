@@ -31,9 +31,9 @@ function App() {
         setLoading(false);
         return;
       }
-
+      console.log("---------------TOKEN------------------",result.token);
       console.log('Firebase login successful:', result.user);
-
+      
       // Step 2: Send token to backend for verification and user creation
       const response = await axios.post(`${API_URL}/api/auth/login`, {
         token: result.token
@@ -189,6 +189,7 @@ function App() {
           <GmailAuthTest firebaseToken={localStorage.getItem('firebaseToken')} />
         </div>
       )}
+
 
       <div style={{
         marginTop: '40px',

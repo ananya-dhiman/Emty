@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { GmailAccountModel } from '../model/GmailAccount';
+import { EmailModel } from '../model/Email';
 import { google } from 'googleapis';
 import crypto from 'crypto';
 import { client } from '../utils/redis';
@@ -165,6 +166,169 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         res.status(500).json({
             success: false,
             message: 'Failed to connect Gmail account: ' + error.message
+        });
+    }
+};
+
+// ========== FETCH USER EMAILS ==========
+// Fetches emails from user's Gmail account
+// Query params:
+//   - accountId: Gmail account ID to fetch emails from
+//   - query: Gmail search query (optional, e.g., "from:someone@example.com")
+//   - maxResults: Number of emails to fetch (default: 10, max: 100)
+//   - pageToken: For pagination
+export const fetchUserEmails = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const uid = req.user?.uid;
+        const { accountId, query = '', maxResults = 10, pageToken } = req.query;
+
+        if (!uid) {
+            res.status(401).json({
+                success: false,
+                message: 'User not authenticated'
+            });
+            return;
+        }
+
+        // ========== STEP 1: Get Gmail account and validate ownership ==========
+        const gmailAccount = await GmailAccountModel.findById(accountId);
+
+        if (!gmailAccount) {
+            res.status(404).json({
+                success: false,
+                message: 'Gmail account not found'
+            });
+            return;
+        }
+
+        // Security check: Verify user owns this Gmail account
+        if (gmailAccount.userId !== uid) {
+            res.status(403).json({
+                success: false,
+                message: 'Unauthorized: You do not own this Gmail account'
+            });
+            return;
+        }
+
+        // ========== STEP 2: Setup OAuth client with user's tokens ==========
+        const oauth2Client = createOAuthClient();
+
+        // Check if token needs refresh
+        const isExpired = gmailAccount.tokenExpiry && Date.now() >= (typeof gmailAccount.tokenExpiry === 'number' ? gmailAccount.tokenExpiry : gmailAccount.tokenExpiry.getTime()) - 60_000;
+
+        if (isExpired && gmailAccount.refreshToken) {
+            try {
+                // Refresh the access token
+                const tokens = await refreshAccessToken(gmailAccount.emailAddress, oauth2Client);
+                oauth2Client.setCredentials(tokens);
+
+                // Update tokens in database
+                await GmailAccountModel.updateOne(
+                    { _id: accountId },
+                    {
+                        $set: {
+                            accessToken: tokens.access_token,
+                            tokenExpiry: tokens.expiry_date
+                        }
+                    }
+                );
+            } catch (error) {
+                console.error('Failed to refresh token:', error);
+                res.status(401).json({
+                    success: false,
+                    message: 'Failed to refresh Gmail authorization. Please re-connect your Gmail account.'
+                });
+                return;
+            }
+        } else {
+            // Use existing access token
+            oauth2Client.setCredentials({
+                access_token: gmailAccount.accessToken,
+                refresh_token: gmailAccount.refreshToken,
+                expiry_date: typeof gmailAccount.tokenExpiry === 'number' ? gmailAccount.tokenExpiry : gmailAccount.tokenExpiry?.getTime()
+            });
+        }
+
+        // ========== STEP 3: Fetch email list from Gmail API ==========
+        const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+        const listResponse = await gmail.users.messages.list({
+            userId: 'me',
+            q: query as string,
+            maxResults: Math.min(parseInt(maxResults as string) || 10, 100), // Cap at 100
+            pageToken: pageToken as string
+        });
+
+        const messageIds = listResponse.data.messages || [];
+
+        if (messageIds.length === 0) {
+            res.status(200).json({
+                success: true,
+                emails: [],
+                nextPageToken: null,
+                message: 'No emails found'
+            });
+            return;
+        }
+
+        // ========== STEP 4: Fetch full email details ==========
+        const emailDetails = await Promise.all(
+            messageIds.map(async (msg) => {
+                try {
+                    const fullMessage = await gmail.users.messages.get({
+                        userId: 'me',
+                        id: msg.id!,
+                        format: 'full' // Get full message with headers and body
+                    });
+
+                    const headers = fullMessage.data.payload?.headers || [];
+                    const subject = headers.find(h => h.name === 'Subject')?.value || '(No Subject)';
+                    const from = headers.find(h => h.name === 'From')?.value || 'Unknown Sender';
+                    const to = headers.find(h => h.name === 'To')?.value || '';
+                    const date = headers.find(h => h.name === 'Date')?.value || '';
+
+                    // Extract body (simplified - handles text/plain only)
+                    let body = '';
+                    if (fullMessage.data.payload?.parts) {
+                        const textPart = fullMessage.data.payload.parts.find(p => p.mimeType === 'text/plain');
+                        if (textPart?.body?.data) {
+                            body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+                        }
+                    } else if (fullMessage.data.payload?.body?.data) {
+                        body = Buffer.from(fullMessage.data.payload.body.data, 'base64').toString('utf-8');
+                    }
+
+                    return {
+                        gmailMessageId: msg.id,
+                        subject,
+                        from,
+                        to: [to],
+                        body: body.substring(0, 500), // Preview (first 500 chars)
+                        date,
+                        snippet: fullMessage.data.snippet || ''
+                    };
+                } catch (error) {
+                    console.error(`Failed to fetch message ${msg.id}:`, error);
+                    return null;
+                }
+            })
+        );
+
+        // Filter out any null entries (failed fetches)
+        const validEmails = emailDetails.filter(email => email !== null);
+
+        res.status(200).json({
+            success: true,
+            emails: validEmails,
+            nextPageToken: listResponse.data.nextPageToken || null,
+            totalResults: listResponse.data.resultSizeEstimate || 0
+        });
+
+    } catch (error: any) {
+        console.error('Error fetching emails:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch emails: ' + error.message
         });
     }
 };

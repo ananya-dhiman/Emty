@@ -1,6 +1,6 @@
 import express from 'express';
 import { loginOrRegister, logout, verifyTokenEndpoint } from '../controllers/authController';
-import { initiateGoogleOAuth, store_credentials } from '../controllers/gmailAuthController';
+import { initiateGoogleOAuth, store_credentials, fetchUserEmails } from '../controllers/gmailAuthController';
 import { verifyToken } from '../middleware/authMiddleware';
 
 const router = express.Router();
@@ -48,5 +48,21 @@ router.post('/google/initiate', verifyToken, initiateGoogleOAuth);
 // Public route (state in Redis links it to user)
 // Returns: Success/failure of token exchange
 router.get('/google/callback', store_credentials);
+
+/**
+ * ========================================
+ * Email Fetch Routes
+ * ========================================
+ */
+
+// GET /api/auth/emails - Fetch user's emails from connected Gmail account
+// Headers: Authorization: Bearer <firebase-token>
+// Query params:
+//   - accountId: Gmail account MongoDB ID (required)
+//   - query: Gmail search query (optional, e.g., "from:user@example.com")
+//   - maxResults: Number of emails to fetch (default: 10, max: 100)
+//   - pageToken: For pagination (optional)
+// Returns: List of emails with subject, sender, body preview, etc.
+router.get('/emails', verifyToken, fetchUserEmails);
 
 export default router;
