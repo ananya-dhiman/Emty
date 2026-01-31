@@ -8,6 +8,7 @@ import { client } from '../utils/redis';
 import { createOAuthClient } from '../utils/createOAuth';
 import { generateOAuthUrl, exchangeCodeForTokens, refreshAccessToken, revokeToken } from '../services/gmailAuth';
 import {UserModel} from '../model/User';
+import { htmlToText } from 'html-to-text';
 
 // /auth/google
 // ✔ req.user exists
@@ -252,10 +253,15 @@ export const fetchUserEmails = async (req: AuthRequest, res: Response): Promise<
         // ========== STEP 3: Fetch email list from Gmail API ==========
         const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
+        // Limit maxResults to prevent memory issues (max 50 emails at once)
+        const maxResultsNum = Math.min(parseInt(maxResults as string) || 10, 50);
+
+        console.log(`📧 Fetching ${maxResultsNum} emails for user ${uid}`);
+
         const listResponse = await gmail.users.messages.list({
             userId: 'me',
             q: query as string,
-            maxResults: Math.min(parseInt(maxResults as string) || 10, 100), // Cap at 100
+            maxResults: maxResultsNum,
             pageToken: pageToken as string
         });
 
@@ -287,15 +293,70 @@ export const fetchUserEmails = async (req: AuthRequest, res: Response): Promise<
                     const to = headers.find(h => h.name === 'To')?.value || '';
                     const date = headers.find(h => h.name === 'Date')?.value || '';
 
-                    // Extract body (simplified - handles text/plain only)
+                    // Extract body - handles both text/plain and text/html emails
                     let body = '';
-                    if (fullMessage.data.payload?.parts) {
-                        const textPart = fullMessage.data.payload.parts.find(p => p.mimeType === 'text/plain');
+
+                    // Helper function to extract text from MIME parts
+                    const extractTextFromParts = (parts: any[]): string => {
+                        // First, try to find text/plain part (preferred)
+                        const textPart = parts.find(p => p.mimeType === 'text/plain');
                         if (textPart?.body?.data) {
-                            body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+                            return Buffer.from(textPart.body.data, 'base64').toString('utf-8');
                         }
-                    } else if (fullMessage.data.payload?.body?.data) {
-                        body = Buffer.from(fullMessage.data.payload.body.data, 'base64').toString('utf-8');
+
+                        // If no text/plain, try text/html and convert to text
+                        const htmlPart = parts.find(p => p.mimeType === 'text/html');
+                        if (htmlPart?.body?.data) {
+                            const htmlContent = Buffer.from(htmlPart.body.data, 'base64').toString('utf-8');
+                            return htmlToText(htmlContent, {
+                                wordwrap: false,
+                                selectors: [
+                                    { selector: 'a', options: { linkBrackets: false, hideLinkHrefIfSameAsText: true } },
+                                    { selector: 'img', format: 'skip' },
+                                    { selector: 'script', format: 'skip' },
+                                    { selector: 'style', format: 'skip' }
+                                ]
+                            });
+                        }
+
+                        // If parts have sub-parts (multipart), recursively search
+                        for (const part of parts) {
+                            if (part.parts) {
+                                const nestedText = extractTextFromParts(part.parts);
+                                if (nestedText) return nestedText;
+                            }
+                        }
+
+                        return '';
+                    };
+
+                    // Try to extract from parts first
+                    if (fullMessage.data.payload?.parts) {
+                        body = extractTextFromParts(fullMessage.data.payload.parts);
+                    }
+
+                    // Fallback to main body if no parts
+                    if (!body && fullMessage.data.payload?.body?.data) {
+                        const rawBody = Buffer.from(fullMessage.data.payload.body.data, 'base64').toString('utf-8');
+                        // Check if it's HTML or plain text
+                        if (rawBody.includes('<') && rawBody.includes('>')) {
+                            body = htmlToText(rawBody, {
+                                wordwrap: false,
+                                selectors: [
+                                    { selector: 'a', options: { linkBrackets: false, hideLinkHrefIfSameAsText: true } },
+                                    { selector: 'img', format: 'skip' },
+                                    { selector: 'script', format: 'skip' },
+                                    { selector: 'style', format: 'skip' }
+                                ]
+                            });
+                        } else {
+                            body = rawBody;
+                        }
+                    }
+
+                    // Final fallback: use Gmail's snippet
+                    if (!body.trim()) {
+                        body = fullMessage.data.snippet || 'No content available';
                     }
 
                     return {
@@ -303,9 +364,10 @@ export const fetchUserEmails = async (req: AuthRequest, res: Response): Promise<
                         subject,
                         from,
                         to: [to],
-                        body: body.substring(0, 500), // Preview (first 500 chars)
+                        body: body, // Full clean text content (HTML parsed, no truncation)
                         date,
-                        snippet: fullMessage.data.snippet || ''
+                        snippet: fullMessage.data.snippet || '',
+                        labels: fullMessage.data.labelIds || [] // Include email labels (INBOX, UNREAD, etc.)
                     };
                 } catch (error) {
                     console.error(`Failed to fetch message ${msg.id}:`, error);

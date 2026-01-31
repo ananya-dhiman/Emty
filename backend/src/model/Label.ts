@@ -8,6 +8,7 @@ export interface ILabel extends Document {
     accountId: Types.ObjectId;
     name: string;
     color?: string;
+    source: "system" | "ai" | "user";
 }
 
 const LabelSchema = new Schema<ILabel>(
@@ -16,6 +17,7 @@ const LabelSchema = new Schema<ILabel>(
         accountId: { type: Schema.Types.ObjectId, ref: "GmailAccount", required: true },
         name: { type: String, required: true },
         color: String,
+        source: { type: String, enum: ["system", "ai", "user"], default: "system" }
     },
     { timestamps: true }
 );
