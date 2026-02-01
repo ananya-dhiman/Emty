@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { GmailAccountModel } from '../model/GmailAccount';
-import { EmailModel } from '../model/Email';
 import { google } from 'googleapis';
 import crypto from 'crypto';
 import { client } from '../utils/redis';
@@ -179,6 +178,7 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
 //   - maxResults: Number of emails to fetch (default: 10, max: 100)
 //   - pageToken: For pagination
 export const fetchUserEmails = async (req: AuthRequest, res: Response): Promise<void> => {
+    const uid = req.user?.uid;
     try {
         const uid = req.user?.uid;
         const { accountId, query = '', maxResults = 10, pageToken } = req.query;

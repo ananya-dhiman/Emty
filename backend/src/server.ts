@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import cors from "cors";
 import dotenv from "dotenv";
 import authRoutes from "./routes/authRoutes";
+import emailRoutes from "./routes/emailRoutes";
 
 // Load environment variables
 dotenv.config();
@@ -15,6 +16,7 @@ app.use(express.json()); // Parse JSON bodies
 
 // Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/emails", emailRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => {
