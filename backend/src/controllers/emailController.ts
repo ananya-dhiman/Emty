@@ -40,13 +40,15 @@ const isRelevant = (metadata: any): boolean => {
     return false; // Default exclude if no include rule matches
 };
 
-//!TODO: Figure out better solution
+//!TODO: Figure out better solution     
 // Rate limiting: delay between API calls
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const scanMetadata = async (req: AuthRequest, res: Response): Promise<void> => {
     const uid = req.user?.uid;
-    const { maxResults = 100, pageToken } = req.body;
+    const maxResultsNum = parseInt(req.query.maxResults as string) || 100;
+    const pageToken = (req.query.pageToken as string) || undefined;
+    const accountId = (req.query.accountId as string) || undefined;
 
     if (!uid) {
         res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -55,11 +57,26 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
 
     try {
         // Find user's Gmail account
-        const gmailAccount = await GmailAccountModel.findOne({ userId: uid });
+        let gmailAccount;
+        
+            gmailAccount = await GmailAccountModel.findById(accountId);
+            if (gmailAccount && gmailAccount.userId !== uid) {
+                res.status(403).json({ success: false, message: 'Unauthorized: You do not own this Gmail account' });
+                return;
+            }
+        
         if (!gmailAccount) {
             res.status(400).json({ success: false, message: 'Gmail account not connected' });
             return;
         }
+
+        console.log('[DEBUG] Found Gmail account:', {
+            accountId: gmailAccount._id,
+            email: gmailAccount.emailAddress,
+            hasAccessToken: !!gmailAccount.accessToken,
+            hasRefreshToken: !!gmailAccount.refreshToken,
+            tokenExpiry: gmailAccount.tokenExpiry
+        });
 
         // Setup OAuth client
         const oauth2Client = createOAuthClient();
@@ -68,11 +85,13 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
         if (isExpired && gmailAccount.refreshToken) {
             const tokens = await refreshAccessToken(gmailAccount.emailAddress, oauth2Client);
             oauth2Client.setCredentials(tokens);
+            console.log('[DEBUG] Token refreshed and set');
             await GmailAccountModel.updateOne(
                 { _id: gmailAccount._id },
                 { $set: { accessToken: tokens.access_token, tokenExpiry: tokens.expiry_date } }
             );
         } else {
+            console.log('[DEBUG] Using existing tokens, isExpired:', isExpired);
             oauth2Client.setCredentials({
                 access_token: gmailAccount.accessToken,
                 refresh_token: gmailAccount.refreshToken,
@@ -81,12 +100,32 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
         }
 
         const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+        console.log('[DEBUG] Gmail client created with auth');
 
         // Fetch metadata
-        const listResponse = await gmail.users.messages.list({
+        console.log('[DEBUG] About to call Gmail API with:', {
             userId: 'me',
-            maxResults: Math.min(maxResults, 100), // Limit to 100
-            pageToken
+            q: '',
+            maxResults: Math.min(maxResultsNum, 100)
+        });
+
+        let listResponse;
+        try {
+            listResponse = await gmail.users.messages.list({
+                userId: 'me',
+                //q: '',
+                maxResults: Math.min(maxResultsNum, 100), // Limit to 100
+                pageToken: pageToken
+            });
+        } catch (gmailError: any) {
+            console.error('[ERROR] Gmail API call failed:', gmailError.message);
+            throw gmailError;
+        }
+
+        console.log('[DEBUG] Gmail API Response:', {
+            resultSizeEstimate: listResponse.data.resultSizeEstimate,
+            messagesCount: listResponse.data.messages?.length || 0,
+            hasNextPage: !!listResponse.data.nextPageToken
         });
 
         const messages = listResponse.data.messages || [];
@@ -125,6 +164,15 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
 
         // Apply filtering
         const filteredMetadata = metadataList.filter(isRelevant);
+
+        // Debug: Log what was filtered out
+        console.log(`[DEBUG] Total emails fetched: ${metadataList.length}, After filter: ${filteredMetadata.length}`);
+        if (metadataList.length > 0 && filteredMetadata.length === 0) {
+            console.log('[DEBUG] Sample of filtered emails:');
+            metadataList.slice(0, 3).forEach(email => {
+                console.log(`  - From: ${email.from}, Subject: ${email.subject}, Has attachments: ${email.hasAttachments}`);
+            });
+        }
 
         // Store in memory (temporary)
         metadataCache.set(uid, filteredMetadata);
