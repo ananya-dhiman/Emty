@@ -47,7 +47,8 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export const scanMetadata = async (req: AuthRequest, res: Response): Promise<void> => {
     const uid = req.user?.uid;
     const maxResultsNum = parseInt(req.query.maxResults as string) || 100;
-    const pageToken = (req.query.pageToken as string) || undefined;
+    let pageToken: string | undefined = (req.query.pageToken as string);
+    if (pageToken === 'undefined' || pageToken === 'null' || !pageToken) pageToken = undefined;
     const accountId = (req.query.accountId as string) || undefined;
 
     if (!uid) {
@@ -70,13 +71,7 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
             return;
         }
 
-        console.log('[DEBUG] Found Gmail account:', {
-            accountId: gmailAccount._id,
-            email: gmailAccount.emailAddress,
-            hasAccessToken: !!gmailAccount.accessToken,
-            hasRefreshToken: !!gmailAccount.refreshToken,
-            tokenExpiry: gmailAccount.tokenExpiry
-        });
+     
 
         // Setup OAuth client
         const oauth2Client = createOAuthClient();
@@ -85,13 +80,13 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
         if (isExpired && gmailAccount.refreshToken) {
             const tokens = await refreshAccessToken(gmailAccount.emailAddress, oauth2Client);
             oauth2Client.setCredentials(tokens);
-            console.log('[DEBUG] Token refreshed and set');
+      
             await GmailAccountModel.updateOne(
                 { _id: gmailAccount._id },
                 { $set: { accessToken: tokens.access_token, tokenExpiry: tokens.expiry_date } }
             );
         } else {
-            console.log('[DEBUG] Using existing tokens, isExpired:', isExpired);
+           
             oauth2Client.setCredentials({
                 access_token: gmailAccount.accessToken,
                 refresh_token: gmailAccount.refreshToken,
@@ -100,33 +95,24 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
         }
 
         const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-        console.log('[DEBUG] Gmail client created with auth');
+
 
         // Fetch metadata
-        console.log('[DEBUG] About to call Gmail API with:', {
+        const listParams = {
             userId: 'me',
-            q: '',
-            maxResults: Math.min(maxResultsNum, 100)
-        });
+            q: '', 
+            maxResults: Math.min(maxResultsNum, 100),
+            pageToken: pageToken as string
+        };
+  
 
         let listResponse;
         try {
-            listResponse = await gmail.users.messages.list({
-                userId: 'me',
-                //q: '',
-                maxResults: Math.min(maxResultsNum, 100), // Limit to 100
-                pageToken: pageToken
-            });
+            listResponse = await gmail.users.messages.list(listParams);
         } catch (gmailError: any) {
             console.error('[ERROR] Gmail API call failed:', gmailError.message);
             throw gmailError;
         }
-
-        console.log('[DEBUG] Gmail API Response:', {
-            resultSizeEstimate: listResponse.data.resultSizeEstimate,
-            messagesCount: listResponse.data.messages?.length || 0,
-            hasNextPage: !!listResponse.data.nextPageToken
-        });
 
         const messages = listResponse.data.messages || [];
         const metadataList: any[] = [];
@@ -165,10 +151,10 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
         // Apply filtering
         const filteredMetadata = metadataList.filter(isRelevant);
 
-        // Debug: Log what was filtered out
-        console.log(`[DEBUG] Total emails fetched: ${metadataList.length}, After filter: ${filteredMetadata.length}`);
+
+        console.log(`[FILTER] Total emails fetched (raw): ${messages.length}. Metadata list size: ${metadataList.length}. After filter: ${filteredMetadata.length}`);
         if (metadataList.length > 0 && filteredMetadata.length === 0) {
-            console.log('[DEBUG] Sample of filtered emails:');
+      
             metadataList.slice(0, 3).forEach(email => {
                 console.log(`  - From: ${email.from}, Subject: ${email.subject}, Has attachments: ${email.hasAttachments}`);
             });

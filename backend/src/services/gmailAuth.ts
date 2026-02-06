@@ -72,13 +72,10 @@ export async function refreshAccessToken(emailAddress:String,oauth2Client:any):P
 
                 // 5. Return ready client
                 oauth2Client.setCredentials(credentials);
-                
-
-
-            
+                return credentials;
         }
         //return with or without refresh
-        return oauth2Client;
+        return oauth2Client.credentials;
 
 
     }catch(error){
