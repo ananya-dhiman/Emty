@@ -16,7 +16,7 @@ export interface IInsight extends Document {
     accountId: Types.ObjectId;
     gmailThreadId: string;
   emailIds: string[];
-  threadId: Types.ObjectId;
+  threadId?: Types.ObjectId;
   from: {
     email: string;
     name?: string;
@@ -25,7 +25,7 @@ export interface IInsight extends Document {
   labels: Array<{
     name: string;
   }>;
-  importanceScore: number;
+  importanceScore?: number;
   summary: {
     shortSnippet: string;
     intent: ThreadIntent;
@@ -41,7 +41,7 @@ export interface IInsight extends Document {
     size: number;
     sourceEmailId: string;
   }>;
-  state: {
+  state?: {
     relevance: "active" | "expired" | "ignored";
     firstSeenAt: Date;
     lastSignalAt: Date;
@@ -64,25 +64,29 @@ const InsightSchema = new Schema<IInsight>(
         accountId: { type: Schema.Types.ObjectId, ref: "GmailAccount", required: true },
         gmailThreadId: { type: String, required: true },
         emailIds: [{ type: String }],
-        threadId: { type: Schema.Types.ObjectId, ref: "Thread", unique: true },
-        from:{
+        threadId: { type: Schema.Types.ObjectId, ref: "Thread", unique: false },
+        from: {
             email: { type: String, required: true },
             name: { type: String },
             domain: { type: String }, // derived for cheap filtering (.edu, company)
         },
         labels: [
-      {
-        name: {
-          type: String,
-          required: true,
-        },
-      },
-    ],
+          {
+            name: {
+              type: String,
+              required: true,
+            },
+            matchScore: {
+              type: Number,
+              min: 0,
+            },
+          },
+        ],
        importanceScore: {
       type: Number,
       min: 0,
       max: 1,
-      required: true,
+      required: false,
       index: true,
     },
 
@@ -106,48 +110,48 @@ const InsightSchema = new Schema<IInsight>(
       },
     },
        dates: [
-      {
-        type: {
-          type: String,
-          enum: ["deadline", "event", "followup"],
-          required: true,
+        {
+          type: {
+            type: String,
+            enum: ["deadline", "event", "followup"],
+            required: true,
+          },
+          date: {
+            type: Date,
+            required: true,
+          },
+          sourceEmailId: { type: String, required: true },
         },
-        date: {
-          type: Date,
-          required: true,
-        },
-        sourceEmailId: { type: String, required: true },
-      },
-    ],
+      ],
 
      attachments: [
-      {
-        filename: { type: String, required: true },
-        mimeType: { type: String, required: true },
-        size: { type: Number, required: true },
-        sourceEmailId: { type: String, required: true },
-      },
-    ],
+        {
+          filename: { type: String, required: true },
+          mimeType: { type: String, required: true },
+          size: { type: Number, required: true },
+          sourceEmailId: { type: String, required: true },
+        },
+      ],
 
     state: {
       relevance: {
         type: String,
         enum: ["active", "expired", "ignored"],
-        required: true,
+        required: false,
         index: true,
       },
       firstSeenAt: {
         type: Date,
-        required: true,
+        required: false,
       },
       lastSignalAt: {
         type: Date,
-        required: true,
+        required: false,
         index: true,
       },
       lastVerifiedAt: {
         type: Date,
-        required: true,
+        required: false,
       },
     },
 
