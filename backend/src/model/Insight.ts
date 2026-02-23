@@ -12,7 +12,7 @@ export type ThreadIntent =
   | "noise";
 
 export interface IInsight extends Document {
-    userId: Types.ObjectId;
+    userId: string;
     accountId: Types.ObjectId;
     gmailThreadId: string;
   emailIds: string[];
@@ -57,7 +57,7 @@ export interface IInsight extends Document {
 const InsightSchema = new Schema<IInsight>(
     {
         userId: {
-        type: Types.ObjectId,
+        type: String,
         required: true,
         index: true,
         },

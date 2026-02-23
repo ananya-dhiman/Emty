@@ -9,6 +9,7 @@ export interface IGmailAccount extends Document {
     accessToken: string;
     refreshToken: string;
     tokenExpiry: Date;
+    syncCheckpointId?: Types.ObjectId; // Optional reference to SyncCheckpoint
 }
 
 const GmailAccountSchema = new Schema<IGmailAccount>(
@@ -18,6 +19,11 @@ const GmailAccountSchema = new Schema<IGmailAccount>(
         accessToken: { type: String, required: true },
         refreshToken: { type: String, required: true },
         tokenExpiry: { type: Date, required: true },
+        syncCheckpointId: {
+            type: Schema.Types.ObjectId,
+            ref: "SyncCheckpoint",
+            default: null,
+        },
     },
     { timestamps: true }
 );

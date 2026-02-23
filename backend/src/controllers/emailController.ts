@@ -6,41 +6,11 @@ import { google } from 'googleapis';
 import { createOAuthClient } from '../utils/createOAuth';
 import { refreshAccessToken } from '../services/gmailAuth';
 import { processEmailDeep, ProcessedEmailInsight } from '../services/emailProcessingService';
+import rulesEngine from '../services/rulesEngine';
+import incrementalSyncService from '../services/incrementalSyncService';
 
 // Temporary in-memory storage for metadata (keyed by userId)
 const metadataCache: Map<string, any[]> = new Map();
-
-//!TODO: Enhance to make this customizable per user
-// Cheap filtering 
-const isRelevant = (metadata: any): boolean => {
-    const { from, subject, snippet, hasAttachments } = metadata;
-
-    // Extract domain from 'from' (e.g., user@domain.com -> domain.com)
-    const domainMatch = from.match(/@(.+)/);
-    const domain = domainMatch ? domainMatch[1].toLowerCase() : '';
-
-    // Include rules
-    if (domain.includes('.edu') || ['linkedin.com', 'indeed.com', 'glassdoor.com'].includes(domain)) {
-        return true;
-    }
-    if (hasAttachments) {
-        return true;
-    }
-    const text = `${subject} ${snippet}`.toLowerCase();
-    if (/\b(job|interview|application|deadline|event|opportunity)\b/.test(text)) {
-        return true;
-    }
-
-    // Exclude rules
-    if (from.toLowerCase().includes('no-reply@') || from.toLowerCase().includes('noreply@')) {
-        return false;
-    }
-    if (/\b(weekly digest|newsletter|promotion|unsubscribe)\b/i.test(text)) {
-        return false;
-    }
-
-    return false; // Default exclude if no include rule matches
-};
 
 //!TODO: Figure out better solution     
 // Rate limiting: delay between API calls
@@ -150,9 +120,8 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
             }
         }
 
-        // Apply filtering
-        const filteredMetadata = metadataList.filter(isRelevant);
-
+        // Apply filtering using RulesEngine
+        const filteredMetadata = rulesEngine.applyRulesAndRelevance(metadataList);
 
         console.log(`[FILTER] Total emails fetched (raw): ${messages.length}. Metadata list size: ${metadataList.length}. After filter: ${filteredMetadata.length}`);
         if (metadataList.length > 0 && filteredMetadata.length === 0) {
@@ -188,6 +157,7 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
  */
 export const deepProcessEmails = async (req: AuthRequest, res: Response): Promise<void> => {
     const uid = req.user?.uid;
+    
     const { accountId, filteredMetadata } = req.body;
 
     if (!uid || !accountId || !Array.isArray(filteredMetadata) || filteredMetadata.length === 0) {
@@ -299,6 +269,55 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
         res.status(500).json({
             success: false,
             message: 'Failed to process emails: ' + error.message,
+        });
+    }
+};
+
+/**
+ * Sync Endpoint - Incremental Email Sync
+ * Fetches new/changed emails and processes them incrementally
+ * Uses atomic locking to prevent concurrent syncs
+ * Supports fallback strategies: historyId → timestamp → full scan
+ */
+export const syncEmails = async (req: AuthRequest, res: Response): Promise<void> => {
+    const uid = req.user?.uid;
+    const { accountId } = req.body;
+
+    if (!uid || !accountId) {
+        res.status(400).json({
+            success: false,
+            message: 'Missing required fields: accountId',
+        });
+        return;
+    }
+
+    try {
+        // Validate user owns this account
+        const gmailAccount = await GmailAccountModel.findById(accountId);
+        if (!gmailAccount || gmailAccount.userId !== uid) {
+            res.status(403).json({
+                success: false,
+                message: 'Unauthorized: Invalid Gmail account',
+            });
+            return;
+        }
+
+        // Trigger incremental sync
+        const result = await incrementalSyncService.sync(accountId);
+
+        res.status(result.success ? 200 : 400).json({
+            success: result.success,
+            processed: result.processed,
+            succeeded: result.succeeded,
+            failed: result.failed,
+            errors: result.errors.length > 0 ? result.errors : undefined,
+            message: result.message || 'Sync completed',
+        });
+    } catch (error: any) {
+        console.error('Error in sync endpoint:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to sync emails: ' + error.message,
         });
     }
 };
