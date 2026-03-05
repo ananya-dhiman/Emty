@@ -18,9 +18,10 @@ export interface IProcessedEmailLog extends Document {
   previousLabels?: string[]; // Optional: previous labels for debugging
   internalDate: Date; // Gmail's email date
   processedAt: Date; // When this email was first processed
-  retryCount: number; // Number of failed attempts (for retry strategy)
-  lastRetryAt?: Date; // Timestamp of last retry attempt
-  lastErrorMessage?: string; // Last error encountered during processing
+  retryCount: number; // Number of failed attempts; check retryCount < MAX_RETRIES to determine if eligible for retry
+  lastRetryAt?: Date; // Timestamp of last retry attempt (for debugging/observability)
+  lastErrorMessage?: string; // Last error message encountered during processing
+  errorType?: 'transient' | 'permanent' | 'unknown'; // Classification of error type for handling strategy
   createdAt: Date;
   updatedAt: Date;
 }
@@ -46,6 +47,7 @@ const ProcessedEmailLogSchema = new Schema<IProcessedEmailLog>(
     retryCount: { type: Number, default: 0 },
     lastRetryAt: { type: Date, default: null },
     lastErrorMessage: { type: String, default: null },
+    errorType: { type: String, enum: ['transient', 'permanent', 'unknown'], default: 'unknown' },
   },
   { timestamps: true }
 );
@@ -54,8 +56,8 @@ const ProcessedEmailLogSchema = new Schema<IProcessedEmailLog>(
 ProcessedEmailLogSchema.index({ accountId: 1, messageId: 1 }, { unique: true });
 // Index to find emails by account (for cleanup or debugging)
 ProcessedEmailLogSchema.index({ accountId: 1 });
-// Index to find retry candidates (retryCount > 0)
-ProcessedEmailLogSchema.index({ accountId: 1, retryCount: 1 });
+// Index to find retry candidates (retryCount > 0 and errorType !== 'permanent')
+ProcessedEmailLogSchema.index({ accountId: 1, retryCount: 1, errorType: 1 });
 
 export const ProcessedEmailLogModel = mongoose.model<IProcessedEmailLog>(
   "ProcessedEmailLog",

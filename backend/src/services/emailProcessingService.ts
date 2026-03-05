@@ -5,7 +5,7 @@
 
 import { google } from 'googleapis';
 import { htmlToText } from 'html-to-text';
-import { extractInsightsFromEmail, AIInsightExtraction } from './aiService';
+import { extractInsightsFromEmail, AIInsightExtraction, AIParsingError } from './aiService';
 
 export interface ProcessedEmailInsight {
     messageId: string;
@@ -189,6 +189,10 @@ export const processEmailDeep = async (
             attachmentMetadata,
         };
     } catch (error) {
+        if (error instanceof AIParsingError) {
+            console.error(`AI parsing failed for email ${messageId}. Raw response below:`);
+            console.error(error.raw);
+        }
         console.error(`Error processing email ${messageId}:`, error);
         throw error;
     }

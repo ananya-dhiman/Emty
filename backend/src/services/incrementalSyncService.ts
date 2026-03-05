@@ -16,9 +16,38 @@ import rulesEngine, { EmailMetadata } from "./rulesEngine";
 import { processEmailDeep } from "./emailProcessingService";
 import { refreshAccessToken } from "./gmailAuth";
 import { createOAuthClient } from "../utils/createOAuth";
+import classifyError from "./errorClassifier";
 
-const SYNC_LOCK_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT  ? parseInt(process.env.SYNC_LOCK_TIMEOUT): 3 * 60 * 1000;
+const TEST_MODE = true; // Set to false for production
+const MAX_EMAILS_TEST_MODE = 20;
+const MAX_RETRIES = process.env.MAX_RETRIES ? parseInt(process.env.MAX_RETRIES) : 5;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Safely parse various date formats produced by AI: ISO strings, numeric strings,
+ * epoch seconds, or milliseconds. Returns Date or null if unparseable.
+ */
+const safeParseDate = (val: any): Date | null => {
+  if (!val && val !== 0) return null;
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+  if (typeof val === 'number') {
+    // seconds vs milliseconds heuristic
+    if (val.toString().length <= 10) return new Date(val * 1000);
+    return new Date(val);
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const n = Number(trimmed);
+      if (trimmed.length <= 10) return new Date(n * 1000);
+      return new Date(n);
+    }
+    const parsed = Date.parse(trimmed);
+    if (!isNaN(parsed)) return new Date(parsed);
+  }
+  return null;
+};
 
 export interface SyncResult {
   success: boolean;
@@ -323,7 +352,24 @@ export class IncrementalSyncService {
     );
 
     try {
-      // ===== STEP 1: Acquire Lock =====
+      // ===== STEP 1: Ensure checkpoint record exists =====
+      // If this is the first time we're syncing for this account there will be
+      // no SyncCheckpoint document yet.  We need an "idle" record so that the
+      // subsequent atomic lock acquisition can succeed.  Previously the code
+      // only created a checkpoint *after* trying to acquire the lock which
+      // meant the first sync would always fail with "Another sync is already
+      // running" and the document would never be created.
+      let checkpoint = await SyncCheckpointModel.findOne({
+        accountId: objectIdAccountId,
+      });
+      if (!checkpoint) {
+        checkpoint = await SyncCheckpointModel.create({
+          accountId: objectIdAccountId,
+          syncState: "idle",
+        });
+      }
+
+      // ===== STEP 2: Acquire Lock =====
       const lockAcquired = await this.acquireSyncLock(objectIdAccountId);
       if (!lockAcquired) {
         return {
@@ -339,7 +385,7 @@ export class IncrementalSyncService {
         };
       }
 
-      // ===== STEP 2: Setup OAuth & Gmail API =====
+      // ===== STEP 3: Setup OAuth & Gmail API =====
       const gmailAccount = await GmailAccountModel.findById(accountId);
       if (!gmailAccount) {
         throw new Error("Gmail account not found");
@@ -383,16 +429,122 @@ export class IncrementalSyncService {
 
       const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
-      // ===== STEP 3: Get or Create SyncCheckpoint =====
-      let checkpoint = await SyncCheckpointModel.findOne({
+      // ===== PRIORITY: Process pending retry candidates (DB-driven) =====
+      // Find emails from previous syncs that failed but haven't exceeded max retries and aren't permanently failed
+      const retryCandidates = await ProcessedEmailLogModel.find({
         accountId: objectIdAccountId,
+        retryCount: { $gt: 0 },
+        errorType: { $ne: 'permanent' },
       });
-      if (!checkpoint) {
-        checkpoint = await SyncCheckpointModel.create({
-          accountId: objectIdAccountId,
-          syncState: "idle",
-        });
+
+      const retriedSet = new Set<string>();
+      if (retryCandidates && retryCandidates.length > 0) {
+        console.log(`[SYNC] Found ${retryCandidates.length} retry candidates, processing them first`);
+        for (const candidate of retryCandidates) {
+          const messageId = candidate.messageId;
+          try {
+            // Fetch metadata and attempt deep processing
+            const metadata = await this.fetchEmailMetadata(gmail, messageId);
+            const stateHash = this.computeStateHash(metadata);
+            const shouldProcess = await this.shouldDeepProcess(accountId, messageId, stateHash);
+
+            if (shouldProcess) {
+              const deepResult = await this.deepProcessing(
+                gmail,
+                messageId,
+                metadata.threadId,
+                metadata
+              );
+
+              // Upsert Insight (reuse existing logic)
+              const insightData = {
+                userId: gmailAccount.userId,
+                accountId: objectIdAccountId,
+                gmailThreadId: metadata.threadId,
+                emailIds: [messageId],
+                from: deepResult.from,
+                labels: deepResult.insights.labels.map((label: string) => ({ name: label })),
+                summary: {
+                  shortSnippet: deepResult.insights.shortSnippet,
+                  intent: deepResult.insights.intent,
+                },
+                dates: deepResult.insights.dates
+                  .map((d: any) => {
+                    const parsed = safeParseDate(d.date);
+                    if (!parsed) return null;
+                    return {
+                      type: d.type,
+                      date: parsed,
+                      sourceEmailId: messageId,
+                    };
+                  })
+                  .filter(Boolean),
+                attachments: deepResult.attachmentMetadata,
+                extractedFacts: deepResult.insights.extractedFacts,
+                state: {
+                  relevance: "active",
+                  firstSeenAt: new Date(),
+                  lastSignalAt: new Date(),
+                  lastVerifiedAt: new Date(),
+                },
+              };
+
+              const insight = await InsightModel.findOneAndUpdate(
+                {
+                  userId: gmailAccount.userId,
+                  gmailThreadId: metadata.threadId,
+                },
+                insightData,
+                { upsert: true, new: true }
+              );
+
+              if (insight) {
+                // Clear retry state on successful processing
+                await ProcessedEmailLogModel.findOneAndUpdate(
+                  { accountId: objectIdAccountId, messageId },
+                  {
+                    insightId: insight._id,
+                    threadId: metadata.threadId,
+                    previousStateHash: stateHash,
+                    previousLabels: metadata.labels,
+                    internalDate: metadata.internalDate,
+                    processedAt: new Date(),
+                    retryCount: 0,
+                    lastRetryAt: null,
+                    lastErrorMessage: null,
+                    errorType: 'unknown',
+                  },
+                  { upsert: true }
+                );
+
+                retriedSet.add(messageId);
+              }
+            }
+          } catch (err: any) {
+            console.error(`[SYNC] Retry candidate failed for ${messageId}:`, err.message || err);
+            // Classification: mark as permanent if errorType is 'permanent' or if retryCount hit max
+            const errorType = classifyError(err);
+            const existing = await ProcessedEmailLogModel.findOne({ accountId: objectIdAccountId, messageId });
+            const newRetryCount = (existing?.retryCount || 0) + 1;
+            const isPermanent = errorType === 'permanent' || newRetryCount >= MAX_RETRIES;
+            const finalErrorType = isPermanent ? 'permanent' : errorType;
+
+            await ProcessedEmailLogModel.findOneAndUpdate(
+              { accountId: objectIdAccountId, messageId },
+              {
+                retryCount: newRetryCount,
+                lastRetryAt: new Date(),
+                lastErrorMessage: err.message || String(err),
+                errorType: finalErrorType,
+              },
+              { upsert: true }
+            );
+          }
+        }
       }
+
+      // ===== STEP 4: Determine Sync Strategy & Fetch Candidates =====
+      // (checkpoint variable already exists from earlier creation)
 
       // ===== STEP 4: Determine Sync Strategy & Fetch Candidates =====
       const emailSource = this.determineEmailSource(checkpoint);
@@ -475,12 +627,26 @@ export class IncrementalSyncService {
         `[SYNC] Filtered: ${metadataList.length} → ${filteredEmails.length}`
       );
 
+      // Remove any emails we already retried above so we don't double-process
+      const filteredWithoutRetried = filteredEmails.filter((e) => !retriedSet.has(e.messageId));
+
+      // Limit emails in test mode
+      const emailsToProcess = TEST_MODE
+        ? filteredWithoutRetried.slice(0, MAX_EMAILS_TEST_MODE)
+        : filteredWithoutRetried;
+
+      if (TEST_MODE && filteredWithoutRetried.length > MAX_EMAILS_TEST_MODE) {
+        console.log(
+          `[SYNC] TEST_MODE active: limiting to ${MAX_EMAILS_TEST_MODE} emails (${filteredWithoutRetried.length} total available)`
+        );
+      }
+
       // ===== STEP 6: Process Each Email =====
       let processed = 0;
       let succeeded = 0;
       let failed = 0;
 
-      for (const email of filteredEmails) {
+      for (const email of emailsToProcess) {
         processed++;
         try {
           // Compute current state hash
@@ -518,11 +684,17 @@ export class IncrementalSyncService {
                 shortSnippet: deepResult.insights.shortSnippet,
                 intent: deepResult.insights.intent,
               },
-              dates: deepResult.insights.dates.map((d: any) => ({
-                type: d.type,
-                date: new Date(d.date),
-                sourceEmailId: email.messageId,
-              })),
+              dates: deepResult.insights.dates
+                .map((d: any) => {
+                  const parsed = safeParseDate(d.date);
+                  if (!parsed) return null;
+                  return {
+                    type: d.type,
+                    date: parsed,
+                    sourceEmailId: email.messageId,
+                  };
+                })
+                .filter(Boolean),
               attachments: deepResult.attachmentMetadata,
               extractedFacts: deepResult.insights.extractedFacts,
               state: {
@@ -579,25 +751,24 @@ export class IncrementalSyncService {
             succeeded++;
           }
         } catch (error: any) {
-          console.error(
-            `[SYNC] Error processing ${email.messageId}: ${error.message}`
-          );
+          console.error(`[SYNC] Error processing ${email.messageId}: ${error.message}`);
           failed++;
-          errors.push({
-            messageId: email.messageId,
-            reason: error.message,
-          });
+          errors.push({ messageId: email.messageId, reason: error.message });
 
-          // Track retry count for next sync
+          // Classification: mark as permanent if errorType is 'permanent' or if retryCount hit max
+          const errorType = classifyError(error);
+          const existing = await ProcessedEmailLogModel.findOne({ accountId: objectIdAccountId, messageId: email.messageId });
+          const newRetryCount = (existing?.retryCount || 0) + 1;
+          const isPermanent = errorType === 'permanent' || newRetryCount >= MAX_RETRIES;
+          const finalErrorType = isPermanent ? 'permanent' : errorType;
+
           await ProcessedEmailLogModel.findOneAndUpdate(
+            { accountId: objectIdAccountId, messageId: email.messageId },
             {
-              accountId: objectIdAccountId,
-              messageId: email.messageId,
-            },
-            {
-              $inc: { retryCount: 1 },
+              retryCount: newRetryCount,
               lastRetryAt: new Date(),
               lastErrorMessage: error.message,
+              errorType: finalErrorType,
             },
             { upsert: true }
           );
