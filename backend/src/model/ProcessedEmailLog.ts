@@ -21,7 +21,7 @@ export interface IProcessedEmailLog extends Document {
   retryCount: number; // Number of failed attempts; check retryCount < MAX_RETRIES to determine if eligible for retry
   lastRetryAt?: Date; // Timestamp of last retry attempt (for debugging/observability)
   lastErrorMessage?: string; // Last error message encountered during processing
-  errorType?: 'transient' | 'permanent' | 'unknown'; // Classification of error type for handling strategy
+  errorType?: 'transient' | 'permanent' | 'unknown' | 'none'; // Classification of error type for handling strategy
   createdAt: Date;
   updatedAt: Date;
 }
@@ -47,7 +47,7 @@ const ProcessedEmailLogSchema = new Schema<IProcessedEmailLog>(
     retryCount: { type: Number, default: 0 },
     lastRetryAt: { type: Date, default: null },
     lastErrorMessage: { type: String, default: null },
-    errorType: { type: String, enum: ['transient', 'permanent', 'unknown'], default: 'unknown' },
+    errorType: { type: String, enum: ['transient', 'permanent', 'unknown', 'none'], default: 'none' },
   },
   { timestamps: true }
 );

@@ -21,6 +21,7 @@ import classifyError from "./errorClassifier";
 const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT  ? parseInt(process.env.SYNC_LOCK_TIMEOUT): 3 * 60 * 1000;
 const TEST_MODE = true; // Set to false for production
 const MAX_EMAILS_TEST_MODE = 20;
+const MAX_FETCH_TEST_MODE = 50; // cap fetched candidate messages in test mode
 const MAX_RETRIES = process.env.MAX_RETRIES ? parseInt(process.env.MAX_RETRIES) : 5;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -512,7 +513,7 @@ export class IncrementalSyncService {
                     retryCount: 0,
                     lastRetryAt: null,
                     lastErrorMessage: null,
-                    errorType: 'unknown',
+                    errorType: 'none',
                   },
                   { upsert: true }
                 );
@@ -587,6 +588,14 @@ export class IncrementalSyncService {
             candidates = await this.fetchAllEmails(gmail);
           }
         }
+      }
+
+      // TEST_MODE: limit fetched candidate set to avoid heavy fetches
+      if (TEST_MODE && candidates.length > MAX_FETCH_TEST_MODE) {
+        console.log(
+          `[SYNC] TEST_MODE fetch cap: limiting fetched candidates ${candidates.length} -> ${MAX_FETCH_TEST_MODE}`
+        );
+        candidates = candidates.slice(0, MAX_FETCH_TEST_MODE);
       }
 
       if (candidates.length === 0) {
@@ -743,7 +752,8 @@ export class IncrementalSyncService {
                 previousLabels: email.labels,
                 internalDate: email.internalDate,
                 processedAt: new Date(),
-                retryCount: 0,
+                  retryCount: 0,
+                  errorType: 'none',
               },
               { upsert: true }
             );
