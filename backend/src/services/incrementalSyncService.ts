@@ -12,6 +12,7 @@ import { SyncCheckpointModel, ISyncCheckpoint } from "../model/SyncCheckpoint";
 import { ProcessedEmailLogModel } from "../model/ProcessedEmailLog";
 import { GmailAccountModel } from "../model/GmailAccount";
 import { InsightModel } from "../model/Insight";
+import { LabelModel } from "../model/Label";
 import rulesEngine, { EmailMetadata } from "./rulesEngine";
 import { processEmailDeep } from "./emailProcessingService";
 import { refreshAccessToken } from "./gmailAuth";
@@ -269,7 +270,8 @@ export class IncrementalSyncService {
     gmail: any,
     messageId: string,
     threadId: string,
-    metadata: EmailMetadata
+    metadata: EmailMetadata,
+    relevantLabels: Array<{ name: string; description?: string }> = []
   ): Promise<any> {
     return processEmailDeep(
       gmail,
@@ -280,7 +282,8 @@ export class IncrementalSyncService {
         from: metadata.from,
         subject: metadata.subject,
         snippet: metadata.snippet,
-      }
+      },
+      relevantLabels
     );
   }
 
@@ -428,6 +431,16 @@ export class IncrementalSyncService {
         });
       }
 
+      const userLabels = await LabelModel.find({
+        userId: gmailAccount.userId,
+        accountId: objectIdAccountId,
+      });
+
+      const labelCandidates = userLabels.map((label) => ({
+        name: label.name,
+        description: label.description || "",
+      }));
+
       const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
       // ===== PRIORITY: Process pending retry candidates (DB-driven) =====
@@ -450,11 +463,16 @@ export class IncrementalSyncService {
             const shouldProcess = await this.shouldDeepProcess(accountId, messageId, stateHash);
 
             if (shouldProcess) {
+              const relevantLabels = rulesEngine.getRelevantLabels(
+                `${metadata.subject}\n${metadata.snippet}`,
+                labelCandidates
+              );
               const deepResult = await this.deepProcessing(
                 gmail,
                 messageId,
                 metadata.threadId,
-                metadata
+                metadata,
+                relevantLabels
               );
 
               // Upsert Insight (reuse existing logic)
@@ -672,11 +690,16 @@ export class IncrementalSyncService {
 
           if (shouldProcess) {
             // Deep process: fetch full body and extract insights
+            const relevantLabels = rulesEngine.getRelevantLabels(
+              `${email.subject}\n${email.snippet}`,
+              labelCandidates
+            );
             const deepResult = await this.deepProcessing(
               gmail,
               email.messageId,
               email.threadId,
-              email
+              email,
+              relevantLabels
             );
 
             // Upsert Insight

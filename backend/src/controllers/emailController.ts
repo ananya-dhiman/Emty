@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { GmailAccountModel } from '../model/GmailAccount';
 import { InsightModel } from '../model/Insight';
+import { LabelModel } from '../model/Label';
 import { google } from 'googleapis';
 import { createOAuthClient } from '../utils/createOAuth';
 import { refreshAccessToken } from '../services/gmailAuth';
@@ -147,6 +148,62 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
     }
 };
 
+export const createLabel = async (req: AuthRequest, res: Response): Promise<void> => {
+    const uid = req.user?.uid;
+    const { accountId, name, description, color } = req.body;
+
+    if (!uid || !accountId || !name) {
+        res.status(400).json({ success: false, message: 'accountId and name are required' });
+        return;
+    }
+
+    try {
+        const gmailAccount = await GmailAccountModel.findById(accountId);
+        if (!gmailAccount || gmailAccount.userId !== uid) {
+            res.status(403).json({ success: false, message: 'Unauthorized: invalid account' });
+            return;
+        }
+
+        const label = await LabelModel.create({
+            userId: uid,
+            accountId,
+            name: name.trim(),
+            description: description?.trim() || '',
+            color: color?.trim() || undefined,
+            source: 'user',
+        });
+
+        res.status(201).json({ success: true, label });
+    } catch (error: any) {
+        console.error('Error creating label:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to create label: ' + error.message });
+    }
+};
+
+export const listLabels = async (req: AuthRequest, res: Response): Promise<void> => {
+    const uid = req.user?.uid;
+    const accountId = req.query.accountId as string;
+
+    if (!uid || !accountId) {
+        res.status(400).json({ success: false, message: 'accountId is required in query' });
+        return;
+    }
+
+    try {
+        const gmailAccount = await GmailAccountModel.findById(accountId);
+        if (!gmailAccount || gmailAccount.userId !== uid) {
+            res.status(403).json({ success: false, message: 'Unauthorized: invalid account' });
+            return;
+        }
+
+        const labels = await LabelModel.find({ userId: uid, accountId });
+        res.status(200).json({ success: true, labels });
+    } catch (error: any) {
+        console.error('Error listing labels:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to list labels: ' + error.message });
+    }
+};
+
 /**
  * Deep Process Emails Controller
  * Takes filtered metadata and processes each email:
@@ -201,11 +258,25 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
         const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
         // Process each filtered email
+        const userLabels = await LabelModel.find({
+            userId: uid,
+            accountId: gmailAccount._id,
+        });
+        const labelCandidates = userLabels.map((label) => ({
+            name: label.name,
+            description: label.description || "",
+        }));
+
         const processedInsights: any[] = [];
         const errors: any[] = [];
 
         for (const metadata of filteredMetadata) {
             try {
+                const relevantLabels = rulesEngine.getRelevantLabels(
+                    `${metadata.subject}\n${metadata.snippet}`,
+                    labelCandidates
+                );
+
                 const processed = await processEmailDeep(
                     gmail,
                     metadata.messageId,
@@ -215,7 +286,8 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
                         from: metadata.from,
                         subject: metadata.subject,
                         snippet: metadata.snippet,
-                    }
+                    },
+                    relevantLabels
                 );
 
                 // Persist to Intelligence Index

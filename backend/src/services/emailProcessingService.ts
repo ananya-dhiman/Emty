@@ -151,7 +151,8 @@ export const processEmailDeep = async (
     messageId: string,
     threadId: string,
     internalDate: string,
-    metadata: { from: string; subject: string; snippet: string }
+    metadata: { from: string; subject: string; snippet: string },
+    relevantLabels: Array<{ name: string; description?: string }> = []
 ): Promise<ProcessedEmailInsight> => {
     try {
         // Fetch full message
@@ -177,6 +178,7 @@ export const processEmailDeep = async (
             subject,
             body,
             internalDate,
+            relevantLabels,
         });
 
         return {

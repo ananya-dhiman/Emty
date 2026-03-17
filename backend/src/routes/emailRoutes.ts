@@ -1,6 +1,6 @@
 import express from 'express';
 import { verifyToken } from '../middleware/authMiddleware';
-import { scanMetadata, deepProcessEmails, syncEmails } from '../controllers/emailController';
+import { scanMetadata, deepProcessEmails, syncEmails, createLabel, listLabels } from '../controllers/emailController';
 
 const router = express.Router();
 
@@ -20,6 +20,8 @@ router.post('/scan-metadata', verifyToken, scanMetadata);
 // Body: { accountId: string, filteredMetadata: array }
 // Returns: processed insights and persistence status
 router.post('/deep-process', verifyToken, deepProcessEmails);
+router.post('/labels', verifyToken, createLabel);
+router.get('/labels', verifyToken, listLabels);
 
 // POST /api/emails/sync - Incremental email sync (manual trigger)
 // Protected route (needs verifyToken middleware)

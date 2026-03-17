@@ -134,6 +134,80 @@ export class RulesEngine {
 
     return Math.min(score, 100);
   }
+
+  getRelevantLabels(
+    emailText: string,
+    userLabels: Array<{ name: string; description?: string }> = []
+  ): Array<{ name: string; description: string; source: string; score: number }> {
+    const DEFAULT_LABELS = [
+      {
+        name: "Needs Action",
+        description: "Emails that require a response, deadline, or task",
+        source: "system",
+      },
+      {
+        name: "Finance",
+        description: "Bills, transactions, payments",
+        source: "system",
+      },
+    ];
+
+    const normalizedEmailText = emailText.toLowerCase();
+    const allLabels = [
+      ...DEFAULT_LABELS,
+      ...userLabels.map((l) => ({
+        name: l.name,
+        description: l.description || "",
+        source: "user",
+      })),
+    ];
+
+    const seen = new Set<string>();
+    const uniqueLabels = allLabels.filter((label) => {
+      const key = label.name.trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const scored: Array<{ name: string; description: string; source: string; score: number }> = uniqueLabels.map((label) => {
+      const text = `${label.name} ${label.description}`.toLowerCase();
+      const words = text.split(/\W+/).filter(Boolean);
+      let score = 0;
+      for (const word of words) {
+        if (normalizedEmailText.includes(word)) {
+          score += 1;
+        }
+      }
+      return { ...label, score };
+    });
+
+    const matches = scored
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+
+    if (matches.length === 0) {
+      return [
+        {
+          name: "Other",
+          description: "Fallback label for unmatched emails",
+          source: "system",
+          score: 0,
+        },
+      ];
+    }
+
+    const top = matches.slice(0, 5);
+    if (!top.some((l) => l.name.toLowerCase() === "other")) {
+      top.push({
+        name: "Other",
+        description: "Fallback label for unmatched emails",
+        source: "system",
+        score: 0,
+      });
+    }
+    return top;
+  }
 }
 
 export default new RulesEngine();

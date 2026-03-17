@@ -7,15 +7,16 @@ export interface ILabel extends Document {
     userId: Types.ObjectId;
     accountId: Types.ObjectId;
     name: string;
+    description?: string;
     color?: string;
     source: "system" | "ai" | "user";
 }
-
 const LabelSchema = new Schema<ILabel>(
     {
         userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
         accountId: { type: Schema.Types.ObjectId, ref: "GmailAccount", required: true },
         name: { type: String, required: true },
+        description: { type: String, default: "" },
         color: String,
         source: { type: String, enum: ["system", "ai", "user"], default: "system" }
     },

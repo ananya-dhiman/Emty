@@ -69,11 +69,16 @@ export const extractInsightsFromEmail = async (
         subject: string;
         body: string;
         internalDate?: string;
+        relevantLabels?: Array<{ name: string; description?: string }>;
     }
 ): Promise<AIInsightExtraction> => {
     if (!OPENROUTER_API_KEY) {
         throw new Error('OPENROUTER_API_KEY not configured');
     }
+
+    const candidates = emailContent.relevantLabels?.length
+        ? emailContent.relevantLabels.map((l) => `- ${l.name}: ${l.description || 'No description'}`).join('\n')
+        : '- Needs Action: Emails that require a response, deadline, or task\n- Finance: Bills, transactions, payments\n- Other: If none of the above labels apply';
 
     const prompt = `You are an email insight extraction AI. Analyze the following email and extract structured insights.
 
@@ -81,13 +86,16 @@ From: ${emailContent.from}
 Subject: ${emailContent.subject}
 Date: ${emailContent.internalDate || 'Unknown'}
 
+Label candidates:
+${candidates}
+
 Body:
 ${emailContent.body.substring(0, 2000)}
 
 Extract and return a JSON object with:
 1. intent: One of 'action_required', 'event', 'opportunity', 'information', 'waiting', 'noise'
 2. shortSnippet: A 1-2 sentence summary of the email (max 150 chars)
-3. labels: Array of 1-3 smart labels categorizing the email (e.g., ['job', 'internship'], ['event', 'tech'])
+3. labels: Array of 1-3 smart labels categorizing the email. Choose from the provided label candidates when possible, and use 'Other' as fallback.
 4. dates: Array of important dates with type ('deadline', 'event', 'followup') and ISO date string
 5. extractedFacts: Object with any important facts (e.g., company, position, salary, event details)
 
