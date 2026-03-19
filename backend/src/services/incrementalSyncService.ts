@@ -433,7 +433,7 @@ export class IncrementalSyncService {
 
       const userLabels = await LabelModel.find({
         userId: gmailAccount.userId,
-        accountId: objectIdAccountId,
+        accountId: objectIdAccountId.toString(),
       });
 
       const labelCandidates = userLabels.map((label) => ({

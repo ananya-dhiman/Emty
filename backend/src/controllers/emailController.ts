@@ -260,7 +260,7 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
         // Process each filtered email
         const userLabels = await LabelModel.find({
             userId: uid,
-            accountId: gmailAccount._id,
+            accountId: gmailAccount._id.toString(),
         });
         const labelCandidates = userLabels.map((label) => ({
             name: label.name,

@@ -4,8 +4,8 @@ import mongoose, { Schema, Document, Types } from "mongoose";
 // Label Model (Organization)
 // ================================
 export interface ILabel extends Document {
-    userId: Types.ObjectId;
-    accountId: Types.ObjectId;
+    userId: string;
+    accountId: string;
     name: string;
     description?: string;
     color?: string;
@@ -13,8 +13,8 @@ export interface ILabel extends Document {
 }
 const LabelSchema = new Schema<ILabel>(
     {
-        userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-        accountId: { type: Schema.Types.ObjectId, ref: "GmailAccount", required: true },
+        userId: { type: String, required: true },
+        accountId: { type: String, required: true },
         name: { type: String, required: true },
         description: { type: String, default: "" },
         color: String,
