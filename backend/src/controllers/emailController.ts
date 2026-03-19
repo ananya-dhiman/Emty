@@ -151,8 +151,9 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
 export const createLabel = async (req: AuthRequest, res: Response): Promise<void> => {
     const uid = req.user?.uid;
     const { accountId, name, description, color } = req.body;
+    const normalizedName = typeof name === 'string' ? name.trim().toLowerCase() : '';
 
-    if (!uid || !accountId || !name) {
+    if (!uid || !accountId || !normalizedName) {
         res.status(400).json({ success: false, message: 'accountId and name are required' });
         return;
     }
@@ -164,10 +165,22 @@ export const createLabel = async (req: AuthRequest, res: Response): Promise<void
             return;
         }
 
+        const existingLabel = await LabelModel.findOne({
+            userId: uid,
+            accountId,
+            nameNormalized: normalizedName,
+        });
+
+        if (existingLabel) {
+            res.status(409).json({ success: false, message: 'Label already exists' });
+            return;
+        }
+
         const label = await LabelModel.create({
             userId: uid,
             accountId,
             name: name.trim(),
+            nameNormalized: normalizedName,
             description: description?.trim() || '',
             color: color?.trim() || undefined,
             source: 'user',
@@ -175,6 +188,10 @@ export const createLabel = async (req: AuthRequest, res: Response): Promise<void
 
         res.status(201).json({ success: true, label });
     } catch (error: any) {
+        if (error?.code === 11000) {
+            res.status(409).json({ success: false, message: 'Label already exists' });
+            return;
+        }
         console.error('Error creating label:', error.message);
         res.status(500).json({ success: false, message: 'Failed to create label: ' + error.message });
     }
