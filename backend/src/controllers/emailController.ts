@@ -9,6 +9,14 @@ import { refreshAccessToken } from '../services/gmailAuth';
 import { processEmailDeep, ProcessedEmailInsight } from '../services/emailProcessingService';
 import rulesEngine from '../services/rulesEngine';
 import incrementalSyncService from '../services/incrementalSyncService';
+import {
+    AI_LABEL_SUGGESTION_MIN_MATCHES,
+    getAssignableLabels,
+    getVisibleLabels,
+    normalizeAIClassification,
+    normalizeLabelName,
+    recordSuggestedLabel,
+} from '../services/labelLifecycleService';
 
 // Temporary in-memory storage for metadata (keyed by userId)
 const metadataCache: Map<string, any[]> = new Map();
@@ -151,7 +159,7 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
 export const createLabel = async (req: AuthRequest, res: Response): Promise<void> => {
     const uid = req.user?.uid;
     const { accountId, name, description, color } = req.body;
-    const normalizedName = typeof name === 'string' ? name.trim().toLowerCase() : '';
+    const normalizedName = typeof name === 'string' ? normalizeLabelName(name) : '';
 
     if (!uid || !accountId || !normalizedName) {
         res.status(400).json({ success: false, message: 'accountId and name are required' });
@@ -172,6 +180,18 @@ export const createLabel = async (req: AuthRequest, res: Response): Promise<void
         });
 
         if (existingLabel) {
+            if (existingLabel.source === 'ai') {
+                existingLabel.name = name.trim();
+                existingLabel.nameNormalized = normalizedName;
+                existingLabel.description = description?.trim() || existingLabel.description || '';
+                existingLabel.color = color?.trim() || existingLabel.color;
+                existingLabel.source = 'user';
+                existingLabel.status = 'active';
+                await existingLabel.save();
+                res.status(200).json({ success: true, label: existingLabel });
+                return;
+            }
+
             res.status(409).json({ success: false, message: 'Label already exists' });
             return;
         }
@@ -184,6 +204,7 @@ export const createLabel = async (req: AuthRequest, res: Response): Promise<void
             description: description?.trim() || '',
             color: color?.trim() || undefined,
             source: 'user',
+            status: 'active',
         });
 
         res.status(201).json({ success: true, label });
@@ -200,6 +221,7 @@ export const createLabel = async (req: AuthRequest, res: Response): Promise<void
 export const listLabels = async (req: AuthRequest, res: Response): Promise<void> => {
     const uid = req.user?.uid;
     const accountId = req.query.accountId as string;
+    const status = req.query.status as 'active' | 'suggested' | 'rejected' | undefined;
 
     if (!uid || !accountId) {
         res.status(400).json({ success: false, message: 'accountId is required in query' });
@@ -213,11 +235,64 @@ export const listLabels = async (req: AuthRequest, res: Response): Promise<void>
             return;
         }
 
-        const labels = await LabelModel.find({ userId: uid, accountId });
+        const labels = await getVisibleLabels(uid, accountId, status);
         res.status(200).json({ success: true, labels });
     } catch (error: any) {
         console.error('Error listing labels:', error.message);
         res.status(500).json({ success: false, message: 'Failed to list labels: ' + error.message });
+    }
+};
+
+export const acceptSuggestedLabel = async (req: AuthRequest, res: Response): Promise<void> => {
+    const uid = req.user?.uid;
+    const { labelId } = req.params;
+
+    if (!uid || !labelId) {
+        res.status(400).json({ success: false, message: 'labelId is required' });
+        return;
+    }
+
+    try {
+        const label = await LabelModel.findById(labelId);
+        if (!label || label.userId !== uid) {
+            res.status(404).json({ success: false, message: 'Label not found' });
+            return;
+        }
+
+        label.source = 'user';
+        label.status = 'active';
+        await label.save();
+
+        res.status(200).json({ success: true, label });
+    } catch (error: any) {
+        console.error('Error accepting suggested label:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to accept label: ' + error.message });
+    }
+};
+
+export const rejectSuggestedLabel = async (req: AuthRequest, res: Response): Promise<void> => {
+    const uid = req.user?.uid;
+    const { labelId } = req.params;
+
+    if (!uid || !labelId) {
+        res.status(400).json({ success: false, message: 'labelId is required' });
+        return;
+    }
+
+    try {
+        const label = await LabelModel.findById(labelId);
+        if (!label || label.userId !== uid) {
+            res.status(404).json({ success: false, message: 'Label not found' });
+            return;
+        }
+
+        label.status = 'rejected';
+        await label.save();
+
+        res.status(200).json({ success: true, label });
+    } catch (error: any) {
+        console.error('Error rejecting suggested label:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to reject label: ' + error.message });
     }
 };
 
@@ -275,11 +350,8 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
         const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
         // Process each filtered email
-        const userLabels = await LabelModel.find({
-            userId: uid,
-            accountId: gmailAccount._id.toString(),
-        });
-        const labelCandidates = userLabels.map((label) => ({
+        const assignableLabels = await getAssignableLabels(uid, gmailAccount._id.toString());
+        const labelCandidates = assignableLabels.map((label) => ({
             name: label.name,
             description: label.description || "",
         }));
@@ -307,6 +379,19 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
                     relevantLabels
                 );
 
+                const normalizedLabels = normalizeAIClassification(
+                    processed.insights.labels,
+                    processed.insights.suggestedLabel || undefined,
+                    assignableLabels
+                );
+
+                const suggestedLabel = await recordSuggestedLabel({
+                    userId: uid,
+                    accountId: gmailAccount._id.toString(),
+                    suggestionName: normalizedLabels.suggestedLabelName,
+                    threadId: metadata.threadId,
+                });
+
                 // Persist to Intelligence Index
                 const insight = new InsightModel({
                     userId: uid,
@@ -315,7 +400,22 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
                     emailIds: [metadata.messageId],
                     threadId: null, // Will be updated when Thread model is available
                     from: processed.from,
-                    labels: processed.insights.labels.map((label) => ({ name: label })),
+                    labels: normalizedLabels.assignedLabels.map((label) => ({
+                        labelId: label._id,
+                        name: label.name,
+                        source: label.source,
+                        statusSnapshot: label.status,
+                    })),
+                    labelSuggestions: suggestedLabel && suggestedLabel.status !== 'rejected'
+                        ? [{
+                            labelId: suggestedLabel._id,
+                            name: suggestedLabel.name,
+                            source: 'ai',
+                            status: suggestedLabel.status,
+                            confidence: Math.min((suggestedLabel.suggestionCount || 0) / AI_LABEL_SUGGESTION_MIN_MATCHES, 1),
+                            generatedAt: new Date(),
+                        }]
+                        : [],
                     importanceScore: null, // Will be calculated later
                     summary: {
                         shortSnippet: processed.insights.shortSnippet,

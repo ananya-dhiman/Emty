@@ -1,6 +1,6 @@
 import express from 'express';
 import { verifyToken } from '../middleware/authMiddleware';
-import { scanMetadata, deepProcessEmails, syncEmails, createLabel, listLabels } from '../controllers/emailController';
+import { scanMetadata, deepProcessEmails, syncEmails, createLabel, listLabels, acceptSuggestedLabel, rejectSuggestedLabel } from '../controllers/emailController';
 
 const router = express.Router();
 
@@ -22,6 +22,8 @@ router.post('/scan-metadata', verifyToken, scanMetadata);
 router.post('/deep-process', verifyToken, deepProcessEmails);
 router.post('/labels', verifyToken, createLabel);
 router.get('/labels', verifyToken, listLabels);
+router.post('/labels/:labelId/accept', verifyToken, acceptSuggestedLabel);
+router.post('/labels/:labelId/reject', verifyToken, rejectSuggestedLabel);
 
 // POST /api/emails/sync - Incremental email sync (manual trigger)
 // Protected route (needs verifyToken middleware)

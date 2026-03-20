@@ -21,6 +21,13 @@ export interface UserPreferences {
   // For now, use system defaults
 }
 
+export interface RelevantLabelCandidate {
+  name: string;
+  description: string;
+  source: string;
+  score: number;
+}
+
 export class RulesEngine {
   /**
    * Check if email matches inclusion rules
@@ -138,7 +145,7 @@ export class RulesEngine {
   getRelevantLabels(
     emailText: string,
     userLabels: Array<{ name: string; description?: string }> = []
-  ): Array<{ name: string; description: string; source: string; score: number }> {
+  ): RelevantLabelCandidate[] {
     const DEFAULT_LABELS = [
       {
         name: "Needs Action",
@@ -170,7 +177,7 @@ export class RulesEngine {
       return true;
     });
 
-    const scored: Array<{ name: string; description: string; source: string; score: number }> = uniqueLabels.map((label) => {
+    const scored: RelevantLabelCandidate[] = uniqueLabels.map((label) => {
       const text = `${label.name} ${label.description}`.toLowerCase();
       const words = text.split(/\W+/).filter(Boolean);
       let score = 0;
@@ -187,26 +194,10 @@ export class RulesEngine {
       .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 
     if (matches.length === 0) {
-      return [
-        {
-          name: "Other",
-          description: "Fallback label for unmatched emails",
-          source: "system",
-          score: 0,
-        },
-      ];
+      return [];
     }
 
-    const top = matches.slice(0, 5);
-    if (!top.some((l) => l.name.toLowerCase() === "other")) {
-      top.push({
-        name: "Other",
-        description: "Fallback label for unmatched emails",
-        source: "system",
-        score: 0,
-      });
-    }
-    return top;
+    return matches.slice(0, 5);
   }
 }
 

@@ -23,7 +23,19 @@ export interface IInsight extends Document {
     domain?: string;
   };
   labels: Array<{
+    labelId?: Types.ObjectId;
     name: string;
+    source: "system" | "user" | "ai";
+    statusSnapshot: "active" | "suggested" | "rejected";
+    matchScore?: number;
+  }>;
+  labelSuggestions?: Array<{
+    labelId?: Types.ObjectId;
+    name: string;
+    source: "ai";
+    status: "suggested" | "rejected";
+    confidence?: number;
+    generatedAt: Date;
   }>;
   importanceScore?: number;
   summary: {
@@ -72,8 +84,23 @@ const InsightSchema = new Schema<IInsight>(
         },
         labels: [
           {
+            labelId: {
+              type: Schema.Types.ObjectId,
+              ref: "Label",
+              required: false,
+            },
             name: {
               type: String,
+              required: true,
+            },
+            source: {
+              type: String,
+              enum: ["system", "user", "ai"],
+              required: true,
+            },
+            statusSnapshot: {
+              type: String,
+              enum: ["active", "suggested", "rejected"],
               required: true,
             },
             matchScore: {
@@ -82,6 +109,39 @@ const InsightSchema = new Schema<IInsight>(
             },
           },
         ],
+       labelSuggestions: [
+        {
+          labelId: {
+            type: Schema.Types.ObjectId,
+            ref: "Label",
+            required: false,
+          },
+          name: {
+            type: String,
+            required: true,
+          },
+          source: {
+            type: String,
+            enum: ["ai"],
+            required: true,
+          },
+          status: {
+            type: String,
+            enum: ["suggested", "rejected"],
+            required: true,
+          },
+          confidence: {
+            type: Number,
+            min: 0,
+            max: 1,
+            required: false,
+          },
+          generatedAt: {
+            type: Date,
+            required: true,
+          },
+        },
+       ],
        importanceScore: {
       type: Number,
       min: 0,

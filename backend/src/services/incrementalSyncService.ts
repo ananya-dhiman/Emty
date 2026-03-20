@@ -18,6 +18,12 @@ import { processEmailDeep } from "./emailProcessingService";
 import { refreshAccessToken } from "./gmailAuth";
 import { createOAuthClient } from "../utils/createOAuth";
 import classifyError from "./errorClassifier";
+import {
+  AI_LABEL_SUGGESTION_MIN_MATCHES,
+  getAssignableLabels,
+  normalizeAIClassification,
+  recordSuggestedLabel,
+} from "./labelLifecycleService";
 
 const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT  ? parseInt(process.env.SYNC_LOCK_TIMEOUT): 3 * 60 * 1000;
 const TEST_MODE = true; // Set to false for production
@@ -431,12 +437,12 @@ export class IncrementalSyncService {
         });
       }
 
-      const userLabels = await LabelModel.find({
-        userId: gmailAccount.userId,
-        accountId: objectIdAccountId.toString(),
-      });
+      const assignableLabels = await getAssignableLabels(
+        gmailAccount.userId,
+        objectIdAccountId.toString()
+      );
 
-      const labelCandidates = userLabels.map((label) => ({
+      const labelCandidates = assignableLabels.map((label) => ({
         name: label.name,
         description: label.description || "",
       }));
@@ -476,13 +482,46 @@ export class IncrementalSyncService {
               );
 
               // Upsert Insight (reuse existing logic)
+              const normalizedLabels = normalizeAIClassification(
+                deepResult.insights.labels,
+                deepResult.insights.suggestedLabel || undefined,
+                assignableLabels
+              );
+              const suggestedLabel = await recordSuggestedLabel({
+                userId: gmailAccount.userId,
+                accountId: objectIdAccountId.toString(),
+                suggestionName: normalizedLabels.suggestedLabelName,
+                threadId: metadata.threadId,
+              });
+
               const insightData = {
                 userId: gmailAccount.userId,
                 accountId: objectIdAccountId,
                 gmailThreadId: metadata.threadId,
                 emailIds: [messageId],
                 from: deepResult.from,
-                labels: deepResult.insights.labels.map((label: string) => ({ name: label })),
+                labels: normalizedLabels.assignedLabels.map((label) => ({
+                  labelId: label._id,
+                  name: label.name,
+                  source: label.source,
+                  statusSnapshot: label.status,
+                })),
+                labelSuggestions: suggestedLabel && suggestedLabel.status !== "rejected"
+                  ? [
+                      {
+                        labelId: suggestedLabel._id,
+                        name: suggestedLabel.name,
+                        source: "ai",
+                        status: suggestedLabel.status,
+                        confidence: Math.min(
+                          (suggestedLabel.suggestionCount || 0) /
+                            AI_LABEL_SUGGESTION_MIN_MATCHES,
+                          1
+                        ),
+                        generatedAt: new Date(),
+                      },
+                    ]
+                  : [],
                 summary: {
                   shortSnippet: deepResult.insights.shortSnippet,
                   intent: deepResult.insights.intent,
@@ -562,8 +601,7 @@ export class IncrementalSyncService {
         }
       }
 
-      // ===== STEP 4: Determine Sync Strategy & Fetch Candidates =====
-      // (checkpoint variable already exists from earlier creation)
+   
 
       // ===== STEP 4: Determine Sync Strategy & Fetch Candidates =====
       const emailSource = this.determineEmailSource(checkpoint);
@@ -703,15 +741,46 @@ export class IncrementalSyncService {
             );
 
             // Upsert Insight
+            const normalizedLabels = normalizeAIClassification(
+              deepResult.insights.labels,
+              deepResult.insights.suggestedLabel || undefined,
+              assignableLabels
+            );
+            const suggestedLabel = await recordSuggestedLabel({
+              userId: gmailAccount.userId,
+              accountId: objectIdAccountId.toString(),
+              suggestionName: normalizedLabels.suggestedLabelName,
+              threadId: email.threadId,
+            });
+
             const insightData = {
               userId: gmailAccount.userId,
               accountId: objectIdAccountId,
               gmailThreadId: email.threadId,
               emailIds: [email.messageId],
               from: deepResult.from,
-              labels: deepResult.insights.labels.map((label: string) => ({
-                name: label,
+              labels: normalizedLabels.assignedLabels.map((label) => ({
+                labelId: label._id,
+                name: label.name,
+                source: label.source,
+                statusSnapshot: label.status,
               })),
+              labelSuggestions: suggestedLabel && suggestedLabel.status !== "rejected"
+                ? [
+                    {
+                      labelId: suggestedLabel._id,
+                      name: suggestedLabel.name,
+                      source: "ai",
+                      status: suggestedLabel.status,
+                      confidence: Math.min(
+                        (suggestedLabel.suggestionCount || 0) /
+                          AI_LABEL_SUGGESTION_MIN_MATCHES,
+                        1
+                      ),
+                      generatedAt: new Date(),
+                    },
+                  ]
+                : [],
               summary: {
                 shortSnippet: deepResult.insights.shortSnippet,
                 intent: deepResult.insights.intent,
@@ -756,6 +825,8 @@ export class IncrementalSyncService {
             if (insight) {
               insight.labels = email.labels?.map((label: string) => ({
                 name: label,
+                source: "system",
+                statusSnapshot: "active",
               })) || [];
               await insight.save();
             }

@@ -9,7 +9,8 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 export interface AIInsightExtraction {
     intent: 'action_required' | 'event' | 'opportunity' | 'information' | 'waiting' | 'noise';
     shortSnippet: string;
-    labels: string[]; // AI-generated labels
+    labels: string[]; // Labels chosen from active system/user candidates
+    suggestedLabel?: string | null; // Optional new label candidate when no active label fits
     dates: Array<{
         type: 'deadline' | 'event' | 'followup';
         date: string; // ISO date string
@@ -78,7 +79,7 @@ export const extractInsightsFromEmail = async (
 
     const candidates = emailContent.relevantLabels?.length
         ? emailContent.relevantLabels.map((l) => `- ${l.name}: ${l.description || 'No description'}`).join('\n')
-        : '- Needs Action: Emails that require a response, deadline, or task\n- Finance: Bills, transactions, payments\n- Other: If none of the above labels apply';
+        : '- Needs Action: Emails that require a response, deadline, or task\n- Finance: Bills, transactions, payments';
 
     const prompt = `You are an email insight extraction AI. Analyze the following email and extract structured insights.
 
@@ -95,9 +96,10 @@ ${emailContent.body.substring(0, 2000)}
 Extract and return a JSON object with:
 1. intent: One of 'action_required', 'event', 'opportunity', 'information', 'waiting', 'noise'
 2. shortSnippet: A 1-2 sentence summary of the email (max 150 chars)
-3. labels: Array of 1-3 smart labels categorizing the email. Choose from the provided label candidates when possible, and use 'Other' as fallback.
-4. dates: Array of important dates with type ('deadline', 'event', 'followup') and ISO date string
-5. extractedFacts: Object with any important facts (e.g., company, position, salary, event details)
+3. labels: Array of 0-3 labels. Use ONLY labels from the provided label candidates when they genuinely fit. Return an empty array if none fit.
+4. suggestedLabel: Optional short label name if the email clearly belongs to a repeated category that is not covered by the provided candidates. Otherwise return null.
+5. dates: Array of important dates with type ('deadline', 'event', 'followup') and ISO date string
+6. extractedFacts: Object with any important facts (e.g., company, position, salary, event details)
 
 Return ONLY valid JSON, no markdown code blocks.`;
 
@@ -262,6 +264,10 @@ Return ONLY valid JSON, no markdown code blocks.`;
         // Validate response structure
         if (!insights.intent || !insights.shortSnippet || !Array.isArray(insights.labels)) {
             throw new Error('Invalid insight structure from AI');
+        }
+
+        if (typeof insights.suggestedLabel !== 'string') {
+            insights.suggestedLabel = null;
         }
 
         return insights;
