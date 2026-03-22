@@ -6,7 +6,7 @@ import { LabelModel } from '../model/Label';
 import { google } from 'googleapis';
 import { createOAuthClient } from '../utils/createOAuth';
 import { refreshAccessToken } from '../services/gmailAuth';
-import { processEmailDeep, ProcessedEmailInsight } from '../services/emailProcessingService';
+import { processEmailDeep } from '../services/emailProcessingService';
 import rulesEngine from '../services/rulesEngine';
 import incrementalSyncService from '../services/incrementalSyncService';
 import {
@@ -17,6 +17,13 @@ import {
     normalizeLabelName,
     recordSuggestedLabel,
 } from '../services/labelLifecycleService';
+import {
+    appendLabelToPriorityConfig,
+    getFocusBoard,
+    getLabelPriorities,
+    markLabelPrioritiesReviewed,
+    reorderLabelPriorities,
+} from '../services/focusBoardService';
 
 // Temporary in-memory storage for metadata (keyed by userId)
 const metadataCache: Map<string, any[]> = new Map();
@@ -188,6 +195,7 @@ export const createLabel = async (req: AuthRequest, res: Response): Promise<void
                 existingLabel.source = 'user';
                 existingLabel.status = 'active';
                 await existingLabel.save();
+                await appendLabelToPriorityConfig(uid, accountId, existingLabel._id);
                 res.status(200).json({ success: true, label: existingLabel });
                 return;
             }
@@ -206,6 +214,7 @@ export const createLabel = async (req: AuthRequest, res: Response): Promise<void
             source: 'user',
             status: 'active',
         });
+        await appendLabelToPriorityConfig(uid, accountId, label._id);
 
         res.status(201).json({ success: true, label });
     } catch (error: any) {
@@ -262,6 +271,7 @@ export const acceptSuggestedLabel = async (req: AuthRequest, res: Response): Pro
         label.source = 'user';
         label.status = 'active';
         await label.save();
+        await appendLabelToPriorityConfig(label.userId, label.accountId, label._id);
 
         res.status(200).json({ success: true, label });
     } catch (error: any) {
@@ -508,5 +518,146 @@ export const syncEmails = async (req: AuthRequest, res: Response): Promise<void>
             success: false,
             message: 'Failed to sync emails: ' + error.message,
         });
+    }
+};
+
+export const getLabelPriorityOrder = async (req: AuthRequest, res: Response): Promise<void> => {
+    const uid = req.user?.uid;
+    const accountId = req.query.accountId as string;
+
+    if (!uid || !accountId) {
+        res.status(400).json({ success: false, message: 'accountId is required in query' });
+        return;
+    }
+
+    try {
+        const gmailAccount = await GmailAccountModel.findById(accountId);
+        if (!gmailAccount || gmailAccount.userId !== uid) {
+            res.status(403).json({ success: false, message: 'Unauthorized: invalid account' });
+            return;
+        }
+
+        const config = await getLabelPriorities(uid, accountId);
+        res.status(200).json({
+            success: true,
+            accountId,
+            isReviewedByUser: config.isReviewedByUser,
+            priorities: config.priorities.sort((a, b) => a.rank - b.rank),
+            initializedAt: config.initializedAt,
+            lastComputedAt: config.lastComputedAt,
+            lastEditedAt: config.lastEditedAt,
+        });
+    } catch (error: any) {
+        console.error('Error getting label priorities:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to get label priorities: ' + error.message });
+    }
+};
+
+export const updateLabelPriorityOrder = async (req: AuthRequest, res: Response): Promise<void> => {
+    const uid = req.user?.uid;
+    const { accountId, orderedLabelIds } = req.body as { accountId?: string; orderedLabelIds?: string[] };
+
+    if (!uid || !accountId || !Array.isArray(orderedLabelIds)) {
+        res.status(400).json({ success: false, message: 'accountId and orderedLabelIds are required' });
+        return;
+    }
+
+    try {
+        const gmailAccount = await GmailAccountModel.findById(accountId);
+        if (!gmailAccount || gmailAccount.userId !== uid) {
+            res.status(403).json({ success: false, message: 'Unauthorized: invalid account' });
+            return;
+        }
+
+        const config = await reorderLabelPriorities({
+            userId: uid,
+            accountId,
+            orderedLabelIds,
+        });
+
+        res.status(200).json({
+            success: true,
+            accountId,
+            isReviewedByUser: config.isReviewedByUser,
+            priorities: config.priorities.sort((a, b) => a.rank - b.rank),
+            lastEditedAt: config.lastEditedAt,
+        });
+    } catch (error: any) {
+        if (error?.message?.includes('orderedLabelIds')) {
+            res.status(400).json({ success: false, message: error.message });
+            return;
+        }
+        console.error('Error updating label priorities:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to update label priorities: ' + error.message });
+    }
+};
+
+export const reviewLabelPriorityOrder = async (req: AuthRequest, res: Response): Promise<void> => {
+    const uid = req.user?.uid;
+    const { accountId } = req.body as { accountId?: string };
+
+    if (!uid || !accountId) {
+        res.status(400).json({ success: false, message: 'accountId is required' });
+        return;
+    }
+
+    try {
+        const gmailAccount = await GmailAccountModel.findById(accountId);
+        if (!gmailAccount || gmailAccount.userId !== uid) {
+            res.status(403).json({ success: false, message: 'Unauthorized: invalid account' });
+            return;
+        }
+
+        const config = await markLabelPrioritiesReviewed(uid, accountId);
+        res.status(200).json({
+            success: true,
+            accountId,
+            isReviewedByUser: config.isReviewedByUser,
+            lastEditedAt: config.lastEditedAt,
+        });
+    } catch (error: any) {
+        console.error('Error marking label priorities reviewed:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to mark label priorities reviewed: ' + error.message });
+    }
+};
+
+export const getFocusBoardInsights = async (req: AuthRequest, res: Response): Promise<void> => {
+    const uid = req.user?.uid;
+    const accountId = req.query.accountId as string;
+    const limitInput = parseInt((req.query.limit as string) || '5', 10);
+    const limit = Number.isFinite(limitInput) ? Math.min(Math.max(limitInput, 1), 50) : 5;
+
+    if (!uid || !accountId) {
+        res.status(400).json({ success: false, message: 'accountId is required in query' });
+        return;
+    }
+
+    try {
+        const gmailAccount = await GmailAccountModel.findById(accountId);
+        if (!gmailAccount || gmailAccount.userId !== uid) {
+            res.status(403).json({ success: false, message: 'Unauthorized: invalid account' });
+            return;
+        }
+
+        const result = await getFocusBoard({
+            userId: uid,
+            accountId,
+            limit,
+        });
+
+        res.status(200).json({
+            success: true,
+            accountId,
+            isReviewedByUser: result.config.isReviewedByUser,
+            prioritiesCount: result.config.priorities.length,
+            items: result.items,
+        });
+    } catch (error: any) {
+        if (error?.message === 'Invalid accountId') {
+            res.status(400).json({ success: false, message: 'Invalid accountId' });
+            return;
+        }
+        console.error('Error getting focus board insights:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to get focus board insights: ' + error.message });
     }
 };

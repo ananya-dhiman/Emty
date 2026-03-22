@@ -1,6 +1,18 @@
 import express from 'express';
 import { verifyToken } from '../middleware/authMiddleware';
-import { scanMetadata, deepProcessEmails, syncEmails, createLabel, listLabels, acceptSuggestedLabel, rejectSuggestedLabel } from '../controllers/emailController';
+import {
+  scanMetadata,
+  deepProcessEmails,
+  syncEmails,
+  createLabel,
+  listLabels,
+  acceptSuggestedLabel,
+  rejectSuggestedLabel,
+  getLabelPriorityOrder,
+  updateLabelPriorityOrder,
+  reviewLabelPriorityOrder,
+  getFocusBoardInsights,
+} from '../controllers/emailController';
 
 const router = express.Router();
 
@@ -24,6 +36,10 @@ router.post('/labels', verifyToken, createLabel);
 router.get('/labels', verifyToken, listLabels);
 router.post('/labels/:labelId/accept', verifyToken, acceptSuggestedLabel);
 router.post('/labels/:labelId/reject', verifyToken, rejectSuggestedLabel);
+router.get('/label-priorities', verifyToken, getLabelPriorityOrder);
+router.put('/label-priorities', verifyToken, updateLabelPriorityOrder);
+router.post('/label-priorities/review', verifyToken, reviewLabelPriorityOrder);
+router.get('/focus-board', verifyToken, getFocusBoardInsights);
 
 // POST /api/emails/sync - Incremental email sync (manual trigger)
 // Protected route (needs verifyToken middleware)
