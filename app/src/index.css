@@ -1,68 +1,83 @@
+/* ══════════════════════════════════════════════
+   COLOUR SYSTEM — Single theme, Light + Dark
+   Primary:   Orange #E8520A
+   Secondary: Warm off-white panels (light) / dark charcoal (dark)
+══════════════════════════════════════════════ */
+
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+  --red:          #C0351A;
+  --red-bg:       #FCEEE9;
+  --red-border:   #F0BFB0;
+  --amber:        #9A5405;
+  --amber-bg:     #FBF0E0;
+  --amber-border: #E8C88A;
+  --blue:         #1854A0;
+  --blue-bg:      #E8F0FA;
+  --blue-border:  #B0CAEC;
+  --green:        #186845;
+  --green-bg:     #E4F3EC;
+  --green-border: #9ACFB8;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --font-ui:   'IBM Plex Sans', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
+[data-mode="light"] {
+  --bg:          #F0EDE6;   /* warm off-white page */
+  --panel:       #E8E4DC;   /* sidebar */
+  --surface:     #FAF8F4;   /* cards, rows, main area */
+  --surface-2:   #EDE9E0;   /* hover states */
+  --border:      #C0BBB0;   /* structural 2px borders */
+  --border-lt:   #D8D3C8;   /* internal 1px dividers */
+  --text-1:      #18160E;   /* primary — near black */
+  --text-2:      #4A4740;   /* secondary */
+  --text-3:      #908880;   /* muted / meta */
+  --accent:      #E8520A;   /* orange — CTAs, active states, left-bar */
+  --accent-inv:  #FFFFFF;   /* text on orange */
+  --accent-lt:   #FDF0EA;   /* very light orange tint */
+  --accent-border:#F5C4A8;  /* orange border */
 }
-a:hover {
-  color: #535bf2;
+
+[data-mode="dark"] {
+  --bg:          #141210;   /* deep warm charcoal */
+  --panel:       #1C1A16;   /* sidebar — slightly lighter than bg */
+  --surface:     #201E1A;   /* cards, rows */
+  --surface-2:   #2A2720;   /* hover states */
+  --border:      #3A3630;   /* structural borders */
+  --border-lt:   #2E2B24;   /* internal dividers */
+  --text-1:      #EDE8DC;   /* primary — warm off-white */
+  --text-2:      #9A9488;   /* secondary */
+  --text-3:      #605A50;   /* muted */
+  --accent:      #F06030;   /* orange — slightly brighter in dark */
+  --accent-inv:  #FFFFFF;
+  --accent-lt:   #2A1A10;   /* dark orange tint */
+  --accent-border:#6A2C10;
+  
+  --red-bg:      #2A1008;
+  --red-border:  #5A2018;
+  --amber-bg:    #241408;
+  --amber-border:#5A3810;
+  --blue-bg:     #0A1828;
+  --blue-border: #183858;
+  --green-bg:    #081C10;
+  --green-border:#184028;
 }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
+  font-family: var(--font-ui);
+  background: var(--bg);
+  color: var(--text-1);
   min-height: 100vh;
+  margin: 0;
+  transition: background .2s, color .2s;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+#root {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
 }

@@ -28,8 +28,8 @@ export function GmailAuthTest({ firebaseToken }: GmailAuthTestProps) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
-    const [gmailAccounts, setGmailAccounts] = useState<GmailAccount[]>([]);
-    const [fetchingAccounts, setFetchingAccounts] = useState(false);
+    const [gmailAccounts] = useState<GmailAccount[]>([]);
+    // const [fetchingAccounts, setFetchingAccounts] = useState(false);
 
     /**
      * Step 1: Initiate Gmail OAuth Flow
@@ -119,7 +119,7 @@ export function GmailAuthTest({ firebaseToken }: GmailAuthTestProps) {
     const fetchGmailAccounts = async () => {
         if (!firebaseToken) return;
 
-        setFetchingAccounts(true);
+        // setFetchingAccounts(true);
         try {
             // TODO: Create this endpoint in backend
             // const response = await axios.get(
@@ -135,7 +135,7 @@ export function GmailAuthTest({ firebaseToken }: GmailAuthTestProps) {
         } catch (err: any) {
             console.error('Error fetching Gmail accounts:', err);
         } finally {
-            setFetchingAccounts(false);
+            // setFetchingAccounts(false);
         }
     };
 
