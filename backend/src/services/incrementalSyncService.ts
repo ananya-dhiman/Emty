@@ -24,6 +24,7 @@ import {
   normalizeAIClassification,
   recordSuggestedLabel,
 } from "./labelLifecycleService";
+import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
 
 const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT  ? parseInt(process.env.SYNC_LOCK_TIMEOUT): 3 * 60 * 1000;
 const TEST_MODE = true; // Set to false for production
@@ -446,6 +447,10 @@ export class IncrementalSyncService {
         name: label.name,
         description: label.description || "",
       }));
+      const priorityScoringContext = await getPriorityScoringContext({
+        userId: gmailAccount.userId,
+        accountId: objectIdAccountId.toString(),
+      });
 
       const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
@@ -494,7 +499,21 @@ export class IncrementalSyncService {
                 threadId: metadata.threadId,
               });
 
-              const insightData = {
+              const parsedImportanceScore = (deepResult.insights as any)?.importanceScore;
+              const boundedImportanceScore =
+                typeof parsedImportanceScore === "number"
+                  ? Math.max(0, Math.min(parsedImportanceScore, 1))
+                  : undefined;
+              const baseScoreResult = computeBaseScore({
+                importanceScore: boundedImportanceScore,
+                labels: normalizedLabels.assignedLabels.map((label: any) => ({
+                  labelId: label._id,
+                  name: label.name,
+                })),
+                context: priorityScoringContext,
+              });
+
+              const insightData: any = {
                 userId: gmailAccount.userId,
                 accountId: objectIdAccountId,
                 gmailThreadId: metadata.threadId,
@@ -546,13 +565,27 @@ export class IncrementalSyncService {
                   lastVerifiedAt: new Date(),
                 },
               };
+              if (typeof boundedImportanceScore === "number") {
+                insightData.importanceScore = boundedImportanceScore;
+              }
 
               const insight = await InsightModel.findOneAndUpdate(
                 {
                   userId: gmailAccount.userId,
                   gmailThreadId: metadata.threadId,
                 },
-                insightData,
+                {
+                  $set: insightData,
+                  $setOnInsert: {
+                    baseScore: baseScoreResult.baseScore,
+                    baseScoreBreakdown: {
+                      importanceNorm: baseScoreResult.importanceNorm,
+                      labelNorm: baseScoreResult.labelNorm,
+                      matchedLabelRank: baseScoreResult.matchedLabelRank,
+                    },
+                    baseScoreComputedAt: new Date(),
+                  },
+                },
                 { upsert: true, new: true }
               );
 
@@ -753,7 +786,21 @@ export class IncrementalSyncService {
               threadId: email.threadId,
             });
 
-            const insightData = {
+            const parsedImportanceScore = (deepResult.insights as any)?.importanceScore;
+            const boundedImportanceScore =
+              typeof parsedImportanceScore === "number"
+                ? Math.max(0, Math.min(parsedImportanceScore, 1))
+                : undefined;
+            const baseScoreResult = computeBaseScore({
+              importanceScore: boundedImportanceScore,
+              labels: normalizedLabels.assignedLabels.map((label: any) => ({
+                labelId: label._id,
+                name: label.name,
+              })),
+              context: priorityScoringContext,
+            });
+
+            const insightData: any = {
               userId: gmailAccount.userId,
               accountId: objectIdAccountId,
               gmailThreadId: email.threadId,
@@ -805,13 +852,27 @@ export class IncrementalSyncService {
                 lastVerifiedAt: new Date(),
               },
             };
+            if (typeof boundedImportanceScore === "number") {
+              insightData.importanceScore = boundedImportanceScore;
+            }
 
             insight = await InsightModel.findOneAndUpdate(
               {
                 userId: gmailAccount.userId,
                 gmailThreadId: email.threadId,
               },
-              insightData,
+              {
+                $set: insightData,
+                $setOnInsert: {
+                  baseScore: baseScoreResult.baseScore,
+                  baseScoreBreakdown: {
+                    importanceNorm: baseScoreResult.importanceNorm,
+                    labelNorm: baseScoreResult.labelNorm,
+                    matchedLabelRank: baseScoreResult.matchedLabelRank,
+                  },
+                  baseScoreComputedAt: new Date(),
+                },
+              },
               { upsert: true, new: true }
             );
           } else {

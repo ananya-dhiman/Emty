@@ -38,6 +38,13 @@ export interface IInsight extends Document {
     generatedAt: Date;
   }>;
   importanceScore?: number;
+  baseScore?: number;
+  baseScoreBreakdown?: {
+    importanceNorm: number;
+    labelNorm: number;
+    matchedLabelRank: number;
+  };
+  baseScoreComputedAt?: Date;
   summary: {
     shortSnippet: string;
     intent: ThreadIntent;
@@ -148,6 +155,34 @@ const InsightSchema = new Schema<IInsight>(
       max: 1,
       required: false,
       index: true,
+    },
+    baseScore: {
+      type: Number,
+      required: false,
+      index: true,
+    },
+    baseScoreBreakdown: {
+      importanceNorm: {
+        type: Number,
+        min: 0,
+        max: 1,
+        required: false,
+      },
+      labelNorm: {
+        type: Number,
+        min: 0,
+        max: 1,
+        required: false,
+      },
+      matchedLabelRank: {
+        type: Number,
+        min: 1,
+        required: false,
+      },
+    },
+    baseScoreComputedAt: {
+      type: Date,
+      required: false,
     },
 
     summary: {

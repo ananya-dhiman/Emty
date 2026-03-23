@@ -315,36 +315,6 @@ export const markLabelPrioritiesReviewed = async (
   return config;
 };
 
-interface FocusBoardScoreBreakdown {
-  totalScore: number;
-  importanceNorm: number;
-  labelNorm: number;
-  recencyNorm: number;
-  deadlineBoost: number;
-  matchedLabelRank: number;
-}
-
-export interface FocusBoardItem {
-  insightId: string;
-  gmailThreadId: string;
-  summary: {
-    shortSnippet: string;
-    intent: string;
-  };
-  from: {
-    email: string;
-    name?: string;
-    domain?: string;
-  };
-  matchedLabels: string[];
-  score: FocusBoardScoreBreakdown;
-  timestamps: {
-    createdAt?: Date;
-    updatedAt?: Date;
-    lastSignalAt?: Date;
-  };
-}
-
 const getNearestDeadlineHours = (dates: Array<{ type: string; date: Date }>, now: Date): number | null => {
   const futureDeadlines = dates
     .filter((d) => d && d.type === "deadline" && d.date && new Date(d.date).getTime() > now.getTime())
@@ -357,26 +327,157 @@ const getNearestDeadlineHours = (dates: Array<{ type: string; date: Date }>, now
   return Math.min(...futureDeadlines);
 };
 
-export const getFocusBoard = async (params: {
+interface PriorityScoringContext {
+  totalActivePriorities: number;
+  priorityById: Map<string, number>;
+  priorityByName: Map<string, number>;
+}
+
+interface BaseScoreResult {
+  baseScore: number;
+  importanceNorm: number;
+  labelNorm: number;
+  matchedLabelRank: number;
+  matchedLabels: string[];
+}
+
+export interface PriorityRankingScoreBreakdown {
+  baseScore: number;
+  dynamicScore: number;
+  totalScore: number;
+  importanceNorm: number;
+  labelNorm: number;
+  recencyNorm: number;
+  deadlineBoost: number;
+  matchedLabelRank: number;
+}
+
+export interface PriorityRankingItem {
+  insightId: string;
+  gmailThreadId: string;
+  summary: {
+    shortSnippet: string;
+    intent: string;
+  };
+  from: {
+    email: string;
+    name?: string;
+    domain?: string;
+  };
+  matchedLabels: string[];
+  isActionRequired: boolean;
+  score: PriorityRankingScoreBreakdown;
+  timestamps: {
+    createdAt?: Date;
+    updatedAt?: Date;
+    lastSignalAt?: Date;
+  };
+}
+
+const buildPriorityScoringContext = (
+  priorityList: Array<{ labelId: Types.ObjectId; labelNameSnapshot: string; rank: number }>
+): PriorityScoringContext => ({
+  totalActivePriorities: priorityList.length,
+  priorityById: new Map(priorityList.map((item) => [item.labelId.toString(), item.rank])),
+  priorityByName: new Map(
+    priorityList.map((item) => [normalizeLabelName(item.labelNameSnapshot), item.rank])
+  ),
+});
+
+const findBestRank = (
+  labels: Array<{ labelId?: Types.ObjectId; name?: string }>,
+  context: PriorityScoringContext
+): { bestRank: number; matchedLabels: string[] } => {
+  const matchedLabels: string[] = [];
+  let bestRank = Number.POSITIVE_INFINITY;
+
+  for (const label of labels) {
+    const byId = label?.labelId ? context.priorityById.get(label.labelId.toString()) : undefined;
+    const normalizedName = typeof label?.name === "string" ? normalizeLabelName(label.name) : "";
+    const byName = normalizedName ? context.priorityByName.get(normalizedName) : undefined;
+    const rank = byId ?? byName;
+    if (!rank) {
+      continue;
+    }
+    if (label.name) {
+      matchedLabels.push(label.name);
+    }
+    if (rank < bestRank) {
+      bestRank = rank;
+    }
+  }
+
+  if (!isFinite(bestRank)) {
+    bestRank = context.totalActivePriorities + 1;
+  }
+
+  return { bestRank, matchedLabels: Array.from(new Set(matchedLabels)) };
+};
+
+export const computeBaseScore = (params: {
+  importanceScore?: number;
+  labels: Array<{ labelId?: Types.ObjectId; name?: string }>;
+  context: PriorityScoringContext;
+}): BaseScoreResult => {
+  const importanceNorm = clamp(
+    typeof params.importanceScore === "number" ? params.importanceScore : 0.5,
+    0,
+    1
+  );
+  const { bestRank, matchedLabels } = findBestRank(params.labels, params.context);
+  const labelNormRaw =
+    params.context.totalActivePriorities > 0
+      ? 1 - (bestRank - 1) / Math.max(params.context.totalActivePriorities - 1, 1)
+      : 0;
+  const labelNorm = clamp(labelNormRaw, 0, 1);
+  const baseScore = 0.6 * importanceNorm + 0.2 * labelNorm;
+
+  return {
+    baseScore,
+    importanceNorm,
+    labelNorm,
+    matchedLabelRank: bestRank,
+    matchedLabels,
+  };
+};
+
+export const getPriorityScoringContext = async (params: {
   userId: string;
   accountId: string;
-  limit: number;
-}): Promise<{ items: FocusBoardItem[]; config: ILabelPriorityConfig }> => {
+}): Promise<PriorityScoringContext> => {
   const config = await ensureLabelPriorityConfig(params.userId, params.accountId);
   const activeLabels = await getActivePriorityLabels(params.userId, params.accountId);
   const activeIdSet = new Set(activeLabels.map((label) => (label._id as Types.ObjectId).toString()));
   const priorityList = (config.priorities || [])
     .filter((item) => activeIdSet.has(item.labelId.toString()))
     .sort((a, b) => a.rank - b.rank);
+  return buildPriorityScoringContext(priorityList);
+};
 
-  const priorityById = new Map(priorityList.map((item) => [item.labelId.toString(), item.rank]));
-  const priorityByName = new Map(
-    priorityList.map((item) => [normalizeLabelName(item.labelNameSnapshot), item.rank])
-  );
-
-  if (priorityList.length === 0) {
-    return { items: [], config };
+const resolveEnvInt = (value: string | undefined, fallback: number): number => {
+  const parsed = Number.parseInt(value || "", 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
   }
+  return parsed;
+};
+
+export const getPriorityRanking = async (params: {
+  userId: string;
+  accountId: string;
+}): Promise<{
+  actionRequired: PriorityRankingItem[];
+  topPriority: PriorityRankingItem[];
+  others: PriorityRankingItem[];
+  config: ILabelPriorityConfig;
+}> => {
+  const config = await ensureLabelPriorityConfig(params.userId, params.accountId);
+  const activeLabels = await getActivePriorityLabels(params.userId, params.accountId);
+  const activeIdSet = new Set(activeLabels.map((label) => (label._id as Types.ObjectId).toString()));
+  const priorityList = (config.priorities || [])
+    .filter((item) => activeIdSet.has(item.labelId.toString()))
+    .sort((a, b) => a.rank - b.rank);
+  const context = buildPriorityScoringContext(priorityList);
 
   const now = new Date();
   const accountObjectId = asObjectId(params.accountId);
@@ -392,41 +493,38 @@ export const getFocusBoard = async (params: {
     .lean()
     .exec();
 
-  const scoredItems: FocusBoardItem[] = [];
+  const scoredItems: PriorityRankingItem[] = [];
 
   for (const insight of insights) {
-    const labels = Array.isArray(insight.labels) ? insight.labels : [];
-    let bestRank = Number.POSITIVE_INFINITY;
-    const matchedLabels: string[] = [];
+    const labels = (Array.isArray(insight.labels) ? insight.labels : []) as Array<{
+      labelId?: Types.ObjectId;
+      name?: string;
+    }>;
+    const storedBaseScore = typeof (insight as any).baseScore === "number" ? (insight as any).baseScore : null;
+    const storedImportanceNorm =
+      typeof (insight as any)?.baseScoreBreakdown?.importanceNorm === "number"
+        ? (insight as any).baseScoreBreakdown.importanceNorm
+        : null;
+    const storedLabelNorm =
+      typeof (insight as any)?.baseScoreBreakdown?.labelNorm === "number"
+        ? (insight as any).baseScoreBreakdown.labelNorm
+        : null;
+    const storedMatchedRank =
+      typeof (insight as any)?.baseScoreBreakdown?.matchedLabelRank === "number"
+        ? (insight as any).baseScoreBreakdown.matchedLabelRank
+        : null;
 
-    for (const label of labels) {
-      const byId = label?.labelId ? priorityById.get(label.labelId.toString()) : undefined;
-      const normalizedName =
-        typeof label?.name === "string" ? normalizeLabelName(label.name) : "";
-      const byName = normalizedName ? priorityByName.get(normalizedName) : undefined;
-      const rank = byId ?? byName;
-
-      if (!rank) {
-        continue;
-      }
-      matchedLabels.push(label.name);
-      if (rank < bestRank) {
-        bestRank = rank;
-      }
-    }
-
-    if (!isFinite(bestRank)) {
-      continue;
-    }
-
-    const totalActivePriorities = priorityList.length;
-    const importanceNorm = clamp(
-      typeof insight.importanceScore === "number" ? insight.importanceScore : 0.5,
-      0,
-      1
-    );
-    const labelNorm =
-      1 - (bestRank - 1) / Math.max(totalActivePriorities - 1, 1);
+    const computedBase = computeBaseScore({
+      importanceScore:
+        typeof insight.importanceScore === "number" ? insight.importanceScore : undefined,
+      labels,
+      context,
+    });
+    const baseScore = storedBaseScore ?? computedBase.baseScore;
+    const importanceNorm = storedImportanceNorm ?? computedBase.importanceNorm;
+    const labelNorm = storedLabelNorm ?? computedBase.labelNorm;
+    const matchedLabelRank = storedMatchedRank ?? computedBase.matchedLabelRank;
+    const matchedLabels = computedBase.matchedLabels;
 
     const recencyDate = insight.state?.lastSignalAt || insight.updatedAt || insight.createdAt || now;
     const ageHours = Math.max(
@@ -443,12 +541,8 @@ export const getFocusBoard = async (params: {
       nearestDeadlineHours !== null && nearestDeadlineHours <= DEADLINE_WINDOW_HOURS
         ? DEADLINE_BOOST
         : 0;
-
-    const totalScore =
-      0.6 * importanceNorm +
-      0.2 * labelNorm +
-      0.2 * recencyNorm +
-      deadlineBoost;
+    const dynamicScore = 0.2 * recencyNorm + deadlineBoost;
+    const totalScore = baseScore + dynamicScore;
 
     scoredItems.push({
       insightId: insight._id.toString(),
@@ -462,14 +556,17 @@ export const getFocusBoard = async (params: {
         name: insight.from?.name,
         domain: insight.from?.domain,
       },
-      matchedLabels: Array.from(new Set(matchedLabels)),
+      matchedLabels,
+      isActionRequired: insight.summary?.intent === "action_required",
       score: {
+        baseScore,
+        dynamicScore,
         totalScore,
         importanceNorm,
         labelNorm,
         recencyNorm,
         deadlineBoost,
-        matchedLabelRank: bestRank,
+        matchedLabelRank,
       },
       timestamps: {
         createdAt: insight.createdAt,
@@ -497,8 +594,19 @@ export const getFocusBoard = async (params: {
     return b.insightId.localeCompare(a.insightId);
   });
 
+  const actionRequiredCount = resolveEnvInt(process.env.PRIORITY_ACTION_REQUIRED_COUNT, 5);
+  const topPriorityCount = resolveEnvInt(process.env.PRIORITY_TOP_COUNT, 5);
+  const actionRequired = scoredItems.filter((item) => item.isActionRequired).slice(0, actionRequiredCount);
+  const actionRequiredSet = new Set(actionRequired.map((item) => item.insightId));
+  const remaining = scoredItems.filter((item) => !actionRequiredSet.has(item.insightId));
+  const topPriority = remaining.slice(0, topPriorityCount);
+  const topPrioritySet = new Set(topPriority.map((item) => item.insightId));
+  const others = remaining.filter((item) => !topPrioritySet.has(item.insightId));
+
   return {
-    items: scoredItems.slice(0, Math.max(1, params.limit)),
+    actionRequired,
+    topPriority,
+    others,
     config,
   };
 };

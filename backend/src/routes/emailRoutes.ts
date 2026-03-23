@@ -11,7 +11,7 @@ import {
   getLabelPriorityOrder,
   updateLabelPriorityOrder,
   reviewLabelPriorityOrder,
-  getFocusBoardInsights,
+  getPriorityRankingInsights,
 } from '../controllers/emailController';
 
 const router = express.Router();
@@ -39,7 +39,7 @@ router.post('/labels/:labelId/reject', verifyToken, rejectSuggestedLabel);
 router.get('/label-priorities', verifyToken, getLabelPriorityOrder);
 router.put('/label-priorities', verifyToken, updateLabelPriorityOrder);
 router.post('/label-priorities/review', verifyToken, reviewLabelPriorityOrder);
-router.get('/focus-board', verifyToken, getFocusBoardInsights);
+router.get('/priority-ranking', verifyToken, getPriorityRankingInsights);
 
 // POST /api/emails/sync - Incremental email sync (manual trigger)
 // Protected route (needs verifyToken middleware)

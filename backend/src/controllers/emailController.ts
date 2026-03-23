@@ -19,9 +19,9 @@ import {
 } from '../services/labelLifecycleService';
 import {
     appendLabelToPriorityConfig,
-    getFocusBoard,
     getLabelPriorities,
     markLabelPrioritiesReviewed,
+    getPriorityRanking,
     reorderLabelPriorities,
 } from '../services/focusBoardService';
 
@@ -621,11 +621,9 @@ export const reviewLabelPriorityOrder = async (req: AuthRequest, res: Response):
     }
 };
 
-export const getFocusBoardInsights = async (req: AuthRequest, res: Response): Promise<void> => {
+export const getPriorityRankingInsights = async (req: AuthRequest, res: Response): Promise<void> => {
     const uid = req.user?.uid;
     const accountId = req.query.accountId as string;
-    const limitInput = parseInt((req.query.limit as string) || '5', 10);
-    const limit = Number.isFinite(limitInput) ? Math.min(Math.max(limitInput, 1), 50) : 5;
 
     if (!uid || !accountId) {
         res.status(400).json({ success: false, message: 'accountId is required in query' });
@@ -639,10 +637,9 @@ export const getFocusBoardInsights = async (req: AuthRequest, res: Response): Pr
             return;
         }
 
-        const result = await getFocusBoard({
+        const result = await getPriorityRanking({
             userId: uid,
             accountId,
-            limit,
         });
 
         res.status(200).json({
@@ -650,14 +647,16 @@ export const getFocusBoardInsights = async (req: AuthRequest, res: Response): Pr
             accountId,
             isReviewedByUser: result.config.isReviewedByUser,
             prioritiesCount: result.config.priorities.length,
-            items: result.items,
+            actionRequired: result.actionRequired,
+            topPriority: result.topPriority,
+            others: result.others,
         });
     } catch (error: any) {
         if (error?.message === 'Invalid accountId') {
             res.status(400).json({ success: false, message: 'Invalid accountId' });
             return;
         }
-        console.error('Error getting focus board insights:', error.message);
-        res.status(500).json({ success: false, message: 'Failed to get focus board insights: ' + error.message });
+        console.error('Error getting priority ranking insights:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to get priority ranking insights: ' + error.message });
     }
 };
