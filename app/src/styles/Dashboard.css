@@ -191,6 +191,8 @@
 .boards { border-bottom: 2px solid var(--border); }
 
 .board { border-bottom: 2px solid var(--border); }
+.board.focus { background: var(--focus-board-bg); }
+.board.action { background: var(--action-board-bg); }
 .board:last-child { border-bottom: none; }
 
 .board-hd {
@@ -221,7 +223,8 @@
 
 /* Horizontal scroll track */
 .track {
-  display: flex; gap: 0;
+  display: flex; gap: 12px;
+  padding: 12px 16px 16px;
   overflow-x: auto; scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
   border-top: 1px solid var(--border-lt);
@@ -232,7 +235,7 @@
 /* Card */
 .kard {
   flex-shrink: 0; width: 230px;
-  border-right: 1px solid var(--border-lt);
+  border: 1px solid var(--border-lt);
   scroll-snap-align: start;
   display: flex; flex-direction: column;
   cursor: pointer;

@@ -36,11 +36,11 @@ export function Dashboard({ user, theme, setTheme }: DashboardProps) {
     <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column' }}>
 
       {/* SHELL */}
-      <div className="shell-dash" style={{ gridTemplateColumns: `${sidebarCol ? '44px' : '176px'} 1fr ${rightCol ? '296px' : '0px'}` }}>
+      <div className="shell-dash" style={{ gridTemplateColumns: `${sidebarCol ? '44px' : '176px'} 1fr ${rightCol ? 'minmax(300px, 45vw)' : '0px'}` }}>
         
         {/* BAR */}
         <div className="bar">
-          <div className="bar-logo">
+          <div className="bar-logo" style={{margin: '0 16px'}}>
             <div className="logo-block">
               <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
                 <rect x="1" y="1" width="9" height="1.8" fill="var(--accent-inv)"/>
@@ -132,7 +132,10 @@ export function Dashboard({ user, theme, setTheme }: DashboardProps) {
             <div className="board focus">
               <div className="board-hd">
                 <div className="board-bar"></div>
-                <span className="board-name">Focus Board</span>
+                <span className="board-name">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6, verticalAlign: 'text-bottom'}}><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+                  Focus Board
+                </span>
                 <span className="board-desc">&nbsp;— pinned · most relevant today</span>
                 <span className="board-badge">5 items</span>
               </div>
@@ -185,7 +188,10 @@ export function Dashboard({ user, theme, setTheme }: DashboardProps) {
             <div className="board action">
               <div className="board-hd">
                 <div className="board-bar"></div>
-                <span className="board-name">Action Board</span>
+                <span className="board-name">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6, verticalAlign: 'text-bottom'}}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                  Action Board
+                </span>
                 <span className="board-desc">&nbsp;— requires your response</span>
                 <span className="board-badge">3 urgent</span>
               </div>
