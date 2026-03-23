@@ -20,6 +20,59 @@ function App() {
   // NEW: track if user has connected gmail in frontend flow
   const [isGmailConnected, setIsGmailConnected] = useState(false);
 
+  // Check session and URL params on mount
+  useEffect(() => {
+    // 1. Check URL parameters for OAuth redirect status
+    const params = new URLSearchParams(window.location.search);
+    const gmailSuccess = params.get('gmail_success');
+    const gmailError = params.get('gmail_error');
+
+    if (gmailSuccess === 'true') {
+      setIsGmailConnected(true);
+      setRoute('onboarding');
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (gmailError) {
+      if (gmailError === 'true') {
+         setError('Failed to securely connect Gmail account. Please try again.');
+      } else {
+         setError(`Gmail connection error: ${gmailError.replace('_', ' ')}`);
+      }
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    // 2. Check for existing session token
+    const checkSession = async () => {
+      const token = localStorage.getItem('firebaseToken');
+      if (token && !user) {
+        setLoading(true);
+        try {
+          const response = await axios.get(`${API_URL}/api/auth/verify`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (response.data.success) {
+            setUser(response.data.user);
+            if (response.data.user.isGmailConnected) {
+              setIsGmailConnected(true);
+            }
+          } else {
+             localStorage.removeItem('firebaseToken');
+          }
+        } catch (err) {
+           console.error('Session check failed', err);
+           localStorage.removeItem('firebaseToken');
+        } finally {
+          setLoading(false);
+        }
+      }
+    };
+    
+    // Only verify token if we aren't just returning from an oauth redirect that already set the user
+    // Actually, checkSession should run anyway to load `user` into state after refresh
+    checkSession();
+  }, []); // Run once on mount
+
   // Apply theme class to document
   useEffect(() => {
     document.documentElement.setAttribute('data-mode', theme);
@@ -57,6 +110,9 @@ function App() {
         localStorage.setItem('firebaseToken', result.token);
       }
       setUser(data.user);
+      if (data.user.isGmailConnected) {
+        setIsGmailConnected(true);
+      }
 
     } catch (err: any) {
       console.error('Login error:', err);
@@ -66,19 +122,37 @@ function App() {
     }
   };
 
-
-
   /**
-   * Connect Gmail (Mock flow)
+   * Connect Gmail OAuth Flow
    */
-  const handleConnectGmail = () => {
+  const handleConnectGmail = async () => {
     setLoading(true);
-    // Mock the connection delay
-    setTimeout(() => {
-      setLoading(false);
-      setIsGmailConnected(true);
-      setRoute('onboarding'); // Redirect to onboarding automatically after connect
-    }, 1200);
+    setError('');
+
+    try {
+      const token = localStorage.getItem('firebaseToken');
+      if (!token) {
+        throw new Error('No authentication token found. Please log in again.');
+      }
+
+      const response = await axios.post(`${API_URL}/api/auth/google/initiate`, {}, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      const data = response.data;
+      if (data.success && data.authorizationUrl) {
+        // Redirect to Google Consent screen
+        window.location.href = data.authorizationUrl;
+      } else {
+        throw new Error(data.message || 'Failed to initiate Gmail connection');
+      }
+    } catch (err: any) {
+        console.error('Connect Gmail error:', err);
+        setError(err?.response?.data?.message || err?.message || 'An error occurred initiating Gmail connection');
+        setLoading(false);
+    }
   };
 
   if (user && isGmailConnected) {

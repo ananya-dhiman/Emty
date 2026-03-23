@@ -82,10 +82,7 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         // If state is invalid/missing, this is a suspicious request (CSRF attack)
         
         if (!state) {
-            res.status(400).json({
-                success: false,
-                message: 'Missing state parameter. Invalid OAuth flow.'
-            });
+            res.redirect('http://localhost:5173/?gmail_error=missing_state');
             return;
         }
 
@@ -93,10 +90,7 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         const uid = await client.get(`oauth:state:${state}`);
 
         if (!uid) {
-            res.status(400).json({
-                success: false,
-                message: 'Invalid or expired state. Please initiate Gmail connection again.'
-            });
+            res.redirect('http://localhost:5173/?gmail_error=invalid_state');
             return;
         }
 
@@ -112,10 +106,7 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         const email = profile.data.emailAddress;
 
         if (!email) {
-            res.status(400).json({
-                success: false,
-                message: 'Could not fetch Gmail email address.'
-            });
+            res.redirect('http://localhost:5173/?gmail_error=no_email');
             return;
         }
 
@@ -155,18 +146,11 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         // State is one-time use. Delete it to prevent reuse.
         await client.del(`oauth:state:${state}`);
 
-        res.status(200).json({
-            success: true,
-            message: 'Gmail account connected successfully.',
-            email: email
-        });
+        res.redirect('http://localhost:5173/?gmail_success=true');
 
     } catch (error: any) {
         console.error('Gmail callback error:', error.message);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to connect Gmail account: ' + error.message
-        });
+        res.redirect('http://localhost:5173/?gmail_error=true');
     }
 };
 

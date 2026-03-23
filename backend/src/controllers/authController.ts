@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { UserModel } from '../model/User';
+import { GmailAccountModel } from '../model/GmailAccount';
 import admin from '../config/firebase';
 import mongoose from 'mongoose';
 
@@ -42,6 +43,10 @@ export const loginOrRegister = async (req: AuthRequest, res: Response): Promise<
         // Check if user exists
         let user = await UserModel.findOne({ firebaseId: uid });
 
+        // Check if Gmail is connected
+        const gmailAccount = await GmailAccountModel.findOne({ userId: uid });
+        const isGmailConnected = !!gmailAccount;
+
         if (!user) {
             // Create new user
             user = new UserModel({
@@ -61,7 +66,8 @@ export const loginOrRegister = async (req: AuthRequest, res: Response): Promise<
                     email: user.email,
                     name: user.name,
                     avatar: user.avatar,
-                    firebaseId: user.firebaseId
+                    firebaseId: user.firebaseId,
+                    isGmailConnected
                 }
             });
         } else {
@@ -74,7 +80,8 @@ export const loginOrRegister = async (req: AuthRequest, res: Response): Promise<
                     email: user.email,
                     name: user.name,
                     avatar: user.avatar,
-                    firebaseId: user.firebaseId
+                    firebaseId: user.firebaseId,
+                    isGmailConnected
                 }
             });
         }
@@ -134,6 +141,9 @@ export const verifyTokenEndpoint = async (req: AuthRequest, res: Response): Prom
             return;
         }
 
+        const gmailAccount = await GmailAccountModel.findOne({ userId: req.user.uid });
+        const isGmailConnected = !!gmailAccount;
+
         res.status(200).json({
             success: true,
             message: 'Token is valid',
@@ -142,7 +152,8 @@ export const verifyTokenEndpoint = async (req: AuthRequest, res: Response): Prom
                 email: user.email,
                 name: user.name,
                 avatar: user.avatar,
-                firebaseId: user.firebaseId
+                firebaseId: user.firebaseId,
+                isGmailConnected
             }
         });
     } catch (error: any) {
