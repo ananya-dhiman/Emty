@@ -1,5 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import '../styles/Dashboard.css';
+
+interface PriorityRankingScoreBreakdown {
+  baseScore: number;
+  dynamicScore: number;
+  totalScore: number;
+  importanceNorm: number;
+  labelNorm: number;
+  recencyNorm: number;
+  deadlineBoost: number;
+  matchedLabelRank: number;
+}
+
+export interface PriorityRankingItem {
+  insightId: string;
+  gmailThreadId: string;
+  summary: {
+    shortSnippet: string;
+    intent: string;
+  };
+  from: {
+    email: string;
+    name?: string;
+    domain?: string;
+  };
+  matchedLabels: string[];
+  isActionRequired: boolean;
+  score: PriorityRankingScoreBreakdown;
+  timestamps: {
+    createdAt?: Date;
+    updatedAt?: Date;
+    lastSignalAt?: Date;
+  };
+}
 
 interface DashboardProps {
   user: any;
@@ -11,10 +45,63 @@ interface DashboardProps {
 export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps) {
   const [sidebarCol, setSidebarCol] = useState(false);
   const [rightCol, setRightCol] = useState(false);
-  const [selectedRow, setSelectedRow] = useState(1);
+  const [selectedRow, setSelectedRow] = useState<string | number>(1);
   const [checkedCards, setCheckedCards] = useState<Record<string, boolean>>({});
   const [checkedRows, setCheckedRows] = useState<Record<string, boolean>>({});
   const [checkedCL, setCheckedCL] = useState<Record<string, boolean>>({});
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [focusItems, setFocusItems] = useState<PriorityRankingItem[]>([]);
+  const [actionItems, setActionItems] = useState<PriorityRankingItem[]>([]);
+  const [agendaItems, setAgendaItems] = useState<PriorityRankingItem[]>([]);
+
+  useEffect(() => {
+    const fetchInsights = async () => {
+      const API_URL = 'http://localhost:5000';
+      const token = localStorage.getItem('firebaseToken');
+      
+      console.log("Dashboard mount check:", { hasGmailAccountId: !!user?.gmailAccountId, hasToken: !!token, user });
+
+      if (!user?.gmailAccountId || !token) {
+        console.log("Bailing out of fetchInsights due to missing gmailAccountId or token.");
+        setLoading(false);
+        return;
+      }
+      
+      try {
+        setLoading(true);
+        console.log(`Fetching from: ${API_URL}/api/emails/priority-ranking?accountId=${user.gmailAccountId}`);
+        const response = await axios.get(`${API_URL}/api/emails/priority-ranking?accountId=${user.gmailAccountId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        console.log("Priority Ranking Response Data:", response.data);
+
+        if (response.data.success) {
+          console.log("Setting Focus Items:", response.data.topPriority);
+          console.log("Setting Action Items:", response.data.actionRequired);
+          console.log("Setting Agenda Items:", response.data.others);
+          setFocusItems(response.data.topPriority || []);
+          setActionItems(response.data.actionRequired || []);
+          setAgendaItems(response.data.others || []);
+        } else {
+          console.error("API returned success: false", response.data);
+          setError(response.data.message);
+        }
+      } catch (err: any) {
+        console.error("Error fetching priority ranking:", err);
+        if (err.response) {
+            console.error("Error Response Data:", err.response.data);
+        }
+        setError("Failed to load dashboard insights");
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchInsights();
+  }, [user]);
 
   const toggleSidebar = () => setSidebarCol(!sidebarCol);
 
@@ -127,6 +214,11 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
         {/* MAIN */}
         <div className="main">
+          {error && (
+            <div style={{ padding: '12px 20px', background: 'var(--red)', color: '#fff', fontSize: '13px', borderRadius: '6px', marginBottom: '20px' }}>
+              {error}
+            </div>
+          )}
           {/* BOARDS */}
           <div className="boards">
             {/* FOCUS BOARD */}
@@ -138,50 +230,30 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                   Focus Board
                 </span>
                 <span className="board-desc">&nbsp;— pinned · most relevant today</span>
-                <span className="board-badge">5 items</span>
+                <span className="board-badge">{loading ? '...' : `${focusItems.length} items`}</span>
               </div>
               <div className="track">
-                
-                <div className={`kard ${checkedCards['fc1'] ? 'done' : ''}`} onClick={(e) => handleCardCheck(e, 'fc1')}>
-                  <div className="kard-top">
-                    <div className="kf">Sarah @ Sequoia</div>
-                    <div className={`chkbox ${checkedCards['fc1'] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
+                {loading && <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>Loading insights...</div>}
+                {!loading && focusItems.length === 0 && (
+                   <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>Inbox zero. Great job!</div>
+                )}
+                {!loading && focusItems.map((item) => (
+                  <div className={`kard ${checkedCards[item.insightId] ? 'done' : ''}`} key={item.insightId} onClick={(e) => handleCardCheck(e, item.insightId)}>
+                    <div className="kard-top">
+                      <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
+                      <div className={`chkbox ${checkedCards[item.insightId] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
+                    </div>
+                    <div className="ks">{item.summary.shortSnippet || "No summary available"}</div>
+                    <div className="kard-tags">
+                      {item.matchedLabels.slice(0, 2).map(lbl => (
+                        <span className="tag" key={lbl}>{lbl}</span>
+                      ))}
+                      <span className="kt">
+                        {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="ks">Investor update — excited to see Q3 numbers before Nov 2 sync</div>
-                  <div className="kard-tags">
-                    <span className="tag tp">Investors</span>
-                    <span className="tag tb">Nov 2</span>
-                    <span className="kt">9:01am</span>
-                  </div>
-                </div>
-
-                <div className={`kard ${checkedCards['fc2'] ? 'done' : ''}`} onClick={(e) => handleCardCheck(e, 'fc2')}>
-                  <div className="kard-top">
-                    <div className="kf">AWS Marketplace</div>
-                    <div className={`chkbox ${checkedCards['fc2'] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
-                  </div>
-                  <div className="ks">Product listing approval pending — review before it goes live</div>
-                  <div className="kard-tags">
-                    <span className="tag tb">Engineering</span>
-                    <span className="tag tn">1 doc</span>
-                    <span className="kt">Mon</span>
-                  </div>
-                </div>
-
-                {/* More focus cards can be added here mirroring original HTML structure */}
-                <div className={`kard ${checkedCards['fc3'] ? 'done' : ''}`} onClick={(e) => handleCardCheck(e, 'fc3')}>
-                  <div className="kard-top">
-                    <div className="kf">Accel Partners</div>
-                    <div className={`chkbox ${checkedCards['fc3'] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
-                  </div>
-                  <div className="ks">Prep for Nov 5 partner call — agenda + deck attached</div>
-                  <div className="kard-tags">
-                    <span className="tag tp">Investors</span>
-                    <span className="tag tg">Nov 5</span>
-                    <span className="kt">Fri</span>
-                  </div>
-                </div>
-
+                ))}
               </div>
             </div>
 
@@ -194,24 +266,31 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                   Action Board
                 </span>
                 <span className="board-desc">&nbsp;— requires your response</span>
-                <span className="board-badge">3 urgent</span>
+                <span className="board-badge">{loading ? '...' : `${actionItems.length} urgent`}</span>
               </div>
               <div className="track">
-
-                <div className={`kard ${checkedCards['ac1'] ? 'done' : ''}`} onClick={(e) => handleCardCheck(e, 'ac1')}>
-                  <div className="kard-top">
-                    <div className="kf">Notion Legal</div>
-                    <div className={`chkbox ${checkedCards['ac1'] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
+                {loading && <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>Loading tasks...</div>}
+                {!loading && actionItems.length === 0 && (
+                   <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>No urgent actions required.</div>
+                )}
+                {!loading && actionItems.map((item) => (
+                  <div className={`kard ${checkedCards[item.insightId] ? 'done' : ''}`} key={item.insightId} onClick={(e) => handleCardCheck(e, item.insightId)}>
+                    <div className="kard-top">
+                      <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
+                      <div className={`chkbox ${checkedCards[item.insightId] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
+                    </div>
+                    <div className="ks">{item.summary.shortSnippet || "Action required"}</div>
+                    <div className="kard-tags">
+                      <span className="tag tr">Action Required</span>
+                      {item.matchedLabels.slice(0, 1).map(lbl => (
+                        <span className="tag tn" key={lbl}>{lbl}</span>
+                      ))}
+                      <span className="kt">
+                        {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="ks">Sign MSA renewal — access suspended if not completed</div>
-                  <div className="kard-tags">
-                    <span className="tag tr">Deadline Oct 31</span>
-                    <span className="tag tn">PDF</span>
-                    <span className="kt">9:41am</span>
-                  </div>
-                </div>
-
-                {/* Additional task cards omitted for brevity but represent original DOM */}
+                ))}
               </div>
             </div>
           </div>
@@ -220,49 +299,46 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
           <div className="agenda-head">
             <span className="agenda-ttl">All items</span>
             <span className="agenda-meta">sorted by priority</span>
-            <span className="agenda-meta-num">7</span>
+            <span className="agenda-meta-num">{loading ? '...' : agendaItems.length}</span>
           </div>
 
           <div className="agenda-rows">
-            <div className="pri-hd crit">
-              <div className="pri-bar pr-crit"></div>
-              <span className="pri-lbl" style={{ color: 'var(--red)' }}>Critical</span>
-            </div>
-
-            <div className={`arow ${selectedRow === 1 ? 'sel' : ''} ${checkedRows['r1'] ? 'done-r' : ''}`} onClick={() => { setSelectedRow(1); setRightCol(true); }}>
-              <div className="ar-check-col" onClick={(e) => handleRowCheck(e, 'r1')}>
-                <div className={`chkbox ${checkedRows['r1'] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
-              </div>
-              <div className="ar-body">
-                <div className="ar-from">Notion Legal Team</div>
-                <div className="ar-snip">Sign MSA renewal before access suspended</div>
-                <div className="ar-tags">
-                  <span className="tag tr">Deadline Oct 31</span>
-                  <span className="tag tn">Legal</span>
-                </div>
-              </div>
-              <div className="ar-time">9:41am</div>
-            </div>
+            {loading && <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '13px' }}>Loading agenda...</div>}
             
-            <div className="pri-hd high">
-              <div className="pri-bar pr-high"></div>
-              <span className="pri-lbl" style={{ color: 'var(--amber)' }}>High priority</span>
-            </div>
+            {/* We are sorting the Agenda items arbitrarily into Critical / High Priority tags for UI styling sake simply based on their index */}
+            {!loading && agendaItems.map((item, index) => {
+              const severity = index < 2 ? 'crit' : 'high';
+              const color = index < 2 ? 'var(--red)' : 'var(--amber)';
+              const prefix = index < 2 ? 'Critical' : 'Priority';
 
-            <div className={`arow ${selectedRow === 2 ? 'sel' : ''} ${checkedRows['r2'] ? 'done-r' : ''}`} onClick={() => { setSelectedRow(2); setRightCol(true); }}>
-              <div className="ar-check-col" onClick={(e) => handleRowCheck(e, 'r2')}>
-                <div className={`chkbox ${checkedRows['r2'] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
-              </div>
-              <div className="ar-body">
-                <div className="ar-from">HDFC Bank</div>
-                <div className="ar-snip">EMI auto-debit scheduled — update payment method</div>
-                <div className="ar-tags">
-                  <span className="tag ta">Oct 22</span>
-                  <span className="tag tn">Payments</span>
-                </div>
-              </div>
-              <div className="ar-time">Yesterday</div>
-            </div>
+              return (
+                <React.Fragment key={item.insightId}>
+                  <div className={`pri-hd ${severity}`}>
+                    <div className={`pri-bar pr-${severity}`}></div>
+                    <span className="pri-lbl" style={{ color }}>{prefix}</span>
+                  </div>
+
+                  <div className={`arow ${selectedRow === item.insightId ? 'sel' : ''} ${checkedRows[item.insightId] ? 'done-r' : ''}`} 
+                       onClick={() => { setSelectedRow(item.insightId); setRightCol(true); }}>
+                    <div className="ar-check-col" onClick={(e) => handleRowCheck(e, item.insightId)}>
+                      <div className={`chkbox ${checkedRows[item.insightId] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
+                    </div>
+                    <div className="ar-body">
+                      <div className="ar-from">{item.from.name || item.from.email}</div>
+                      <div className="ar-snip">{item.summary.shortSnippet}</div>
+                      <div className="ar-tags">
+                        {item.matchedLabels.slice(0, 2).map(lbl => (
+                          <span className="tag" key={lbl}>{lbl}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="ar-time">
+                       {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
+                    </div>
+                  </div>
+                </React.Fragment>
+              );
+            })}
           </div>
         </div>
 

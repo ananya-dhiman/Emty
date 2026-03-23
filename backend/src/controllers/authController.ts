@@ -67,7 +67,8 @@ export const loginOrRegister = async (req: AuthRequest, res: Response): Promise<
                     name: user.name,
                     avatar: user.avatar,
                     firebaseId: user.firebaseId,
-                    isGmailConnected
+                    isGmailConnected,
+                    gmailAccountId: gmailAccount ? gmailAccount._id : null
                 }
             });
         } else {
@@ -81,7 +82,8 @@ export const loginOrRegister = async (req: AuthRequest, res: Response): Promise<
                     name: user.name,
                     avatar: user.avatar,
                     firebaseId: user.firebaseId,
-                    isGmailConnected
+                    isGmailConnected,
+                    gmailAccountId: gmailAccount ? gmailAccount._id : null
                 }
             });
         }
@@ -153,7 +155,8 @@ export const verifyTokenEndpoint = async (req: AuthRequest, res: Response): Prom
                 name: user.name,
                 avatar: user.avatar,
                 firebaseId: user.firebaseId,
-                isGmailConnected
+                isGmailConnected,
+                gmailAccountId: gmailAccount ? gmailAccount._id : null
             }
         });
     } catch (error: any) {
