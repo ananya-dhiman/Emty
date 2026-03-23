@@ -4,6 +4,8 @@ import { signInWithGoogle } from './utils/firebase'
 import axios from 'axios'
 import { ConnectGmail } from './components/ConnectGmail'
 import { Dashboard } from './components/Dashboard'
+import { Profile } from './components/Profile'
+import { Onboarding } from './components/Onboarding'
 
 // Backend API URL - update this to your backend URL
 const API_URL = 'http://localhost:5000';
@@ -11,8 +13,9 @@ const API_URL = 'http://localhost:5000';
 function App() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [route, setRoute] = useState<'dashboard' | 'profile' | 'onboarding'>('dashboard');
   
   // NEW: track if user has connected gmail in frontend flow
   const [isGmailConnected, setIsGmailConnected] = useState(false);
@@ -74,11 +77,18 @@ function App() {
     setTimeout(() => {
       setLoading(false);
       setIsGmailConnected(true);
+      setRoute('onboarding'); // Redirect to onboarding automatically after connect
     }, 1200);
   };
 
   if (user && isGmailConnected) {
-    return <Dashboard user={user} theme={theme} setTheme={setTheme} />;
+    if (route === 'profile') {
+      return <Profile user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
+    }
+    if (route === 'onboarding') {
+      return <Onboarding theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
+    }
+    return <Dashboard user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
   }
 
   if (user && !isGmailConnected) {

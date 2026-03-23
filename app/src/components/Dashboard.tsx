@@ -5,9 +5,10 @@ interface DashboardProps {
   user: any;
   theme: 'light' | 'dark';
   setTheme: (t: 'light' | 'dark') => void;
+  onNavigate: (route: 'profile') => void;
 }
 
-export function Dashboard({ user, theme, setTheme }: DashboardProps) {
+export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps) {
   const [sidebarCol, setSidebarCol] = useState(false);
   const [rightCol, setRightCol] = useState(false);
   const [selectedRow, setSelectedRow] = useState(1);
@@ -58,7 +59,7 @@ export function Dashboard({ user, theme, setTheme }: DashboardProps) {
               <button className={`tgl-btn ${theme === 'dark' ? 'on' : ''}`} onClick={() => setTheme('dark')}>Dark</button>
             </div>
             <div className="sync-pill"><div className="sdot"></div>synced now</div>
-            <div className="bar-av">{user?.name ? user.name.charAt(0).toUpperCase() : 'U'}</div>
+            <div className="bar-av" onClick={() => onNavigate('profile')}>{user?.name ? user.name.charAt(0).toUpperCase() : 'U'}</div>
           </div>
         </div>
 
@@ -116,9 +117,9 @@ export function Dashboard({ user, theme, setTheme }: DashboardProps) {
               </div>
             </div>
 
-            <div className="sb-foot">
+            <div className="sb-foot" onClick={() => onNavigate('profile')}>
               <div className="foot-av">{user?.name ? user.name.charAt(0).toUpperCase() : 'U'}</div>
-              <div><div className="foot-name">{user?.name || 'User Name'}</div><div className="foot-email">{user?.email || 'user@example.com'}</div></div>
+              <div style={{ minWidth: 0 }}><div className="foot-name">{user?.name || 'User Name'}</div><div className="foot-email">{user?.email || 'user@example.com'}</div></div>
               <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginLeft: 'auto', flexShrink: 0 }}><circle cx="5" cy="2" r="1" fill="var(--text-3)"/><circle cx="5" cy="5" r="1" fill="var(--text-3)"/><circle cx="5" cy="8" r="1" fill="var(--text-3)"/></svg>
             </div>
           </div>
