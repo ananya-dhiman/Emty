@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import './App.css'
-import { signInWithGoogle, signOutUser } from './utils/firebase'
+import { signInWithGoogle } from './utils/firebase'
 import axios from 'axios'
+import { ConnectGmail } from './components/ConnectGmail'
+import { Dashboard } from './components/Dashboard'
 
 // Backend API URL - update this to your backend URL
 const API_URL = 'http://localhost:5000';
@@ -11,6 +13,9 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  
+  // NEW: track if user has connected gmail in frontend flow
+  const [isGmailConnected, setIsGmailConnected] = useState(false);
 
   // Apply theme class to document
   useEffect(() => {
@@ -25,7 +30,6 @@ function App() {
     setError('');
 
     try {
-      // Step 1: Sign in with Google via Firebase
       const result = await signInWithGoogle();
 
       if (!result.success) {
@@ -34,7 +38,6 @@ function App() {
         return;
       }
       
-      // Step 2: Send token to backend for verification and user creation
       const response = await axios.post(`${API_URL}/api/auth/login`, {
         token: result.token
       });
@@ -47,7 +50,6 @@ function App() {
         return;
       }
 
-      // Step 3: Store token and user data
       if (result.token) {
         localStorage.setItem('firebaseToken', result.token);
       }
@@ -61,23 +63,45 @@ function App() {
     }
   };
 
-  /**
-   * Handle Logout
-   */
-  const handleLogout = async () => {
-    setLoading(true);
 
-    try {
-      await signOutUser();
-      setUser(null);
-      localStorage.removeItem('firebaseToken');
-    } catch (err: any) {
-      console.error('Logout error:', err);
-      setError(err?.message || 'Logout failed');
-    } finally {
+
+  /**
+   * Connect Gmail (Mock flow)
+   */
+  const handleConnectGmail = () => {
+    setLoading(true);
+    // Mock the connection delay
+    setTimeout(() => {
       setLoading(false);
-    }
+      setIsGmailConnected(true);
+    }, 1200);
   };
+
+  if (user && isGmailConnected) {
+    return <Dashboard user={user} theme={theme} setTheme={setTheme} />;
+  }
+
+  if (user && !isGmailConnected) {
+    return (
+      <>
+         {/* Theme Controls for Connect screen */}
+         <div className="controls" style={{ position: 'absolute', top: 20, right: 20 }}>
+          <span className="ctrl-label">Theme</span>
+          <div className="btn-group">
+            <button 
+              className={`tgl-btn ${theme === 'light' ? 'on' : ''}`} 
+              onClick={() => setTheme('light')}
+            >Light</button>
+            <button 
+              className={`tgl-btn ${theme === 'dark' ? 'on' : ''}`} 
+              onClick={() => setTheme('dark')}
+            >Dark</button>
+          </div>
+        </div>
+        <ConnectGmail onConnect={handleConnectGmail} loading={loading} />
+      </>
+    );
+  }
 
   return (
     <div className="auth-container">
@@ -115,7 +139,6 @@ function App() {
         </div>
 
         <div className="auth-content">
-          {!user ? (
             <div className="auth-form">
               <h1 className="auth-title">Welcome to Emty</h1>
               <p className="auth-subtitle">Sign in to continue to your workspace.</p>
@@ -140,25 +163,6 @@ function App() {
                 {loading ? 'Authenticating...' : 'Sign in with Google'}
               </button>
             </div>
-          ) : (
-            <div className="auth-form">
-              <h2 className="auth-title">Welcome back, {user.name || 'User'}!</h2>
-              <div className="user-profile">
-                {user.avatar && <img src={user.avatar} alt="Avatar" className="user-avatar" />}
-                <div className="user-info">
-                  <div className="user-email">{user.email}</div>
-                  <div className="user-role">Member</div>
-                </div>
-              </div>
-              <button
-                onClick={handleLogout}
-                disabled={loading}
-                className="btn-secondary auth-btn"
-              >
-                {loading ? 'Logging out...' : 'Sign Out'}
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -166,4 +170,5 @@ function App() {
 }
 
 export default App
+
 
