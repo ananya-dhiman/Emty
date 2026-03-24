@@ -45,10 +45,7 @@ interface DashboardProps {
 export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps) {
   const [sidebarCol, setSidebarCol] = useState(false);
   const [rightCol, setRightCol] = useState(false);
-  const [selectedRow, setSelectedRow] = useState<string | number>(1);
-  const [checkedCards, setCheckedCards] = useState<Record<string, boolean>>({});
-  const [checkedRows, setCheckedRows] = useState<Record<string, boolean>>({});
-  const [checkedCL, setCheckedCL] = useState<Record<string, boolean>>({});
+  const [selectedInsightId, setSelectedInsightId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +141,26 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     fetchInsights(false);
   }, [user]);
 
+  const allItems = [...focusItems, ...actionItems, ...agendaItems];
+  const selectedEmail = allItems.find((item) => item.insightId === selectedInsightId) || null;
+  const selectedDomain = selectedEmail
+    ? (selectedEmail.from.domain || selectedEmail.from.email.split('@')[1] || '')
+    : '';
+  const selectedDateLabel = selectedEmail?.timestamps.lastSignalAt
+    ? new Date(selectedEmail.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : 'Recently';
+  const summaryText = selectedEmail?.summary.shortSnippet || selectedEmail?.summary.intent || 'No summary available.';
+
+  const selectEmail = (item: PriorityRankingItem) => {
+    setSelectedInsightId(item.insightId);
+    setRightCol(true);
+  };
+
+  const openSelectedInGmail = () => {
+    if (!selectedEmail?.gmailThreadId) return;
+    window.open(`https://mail.google.com/mail/u/0/#all/${selectedEmail.gmailThreadId}`, '_blank', 'noopener,noreferrer');
+  };
+
   const handleSync = async () => {
     if (!user?.gmailAccountId) return;
     
@@ -195,21 +212,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   };
 
   const toggleSidebar = () => setSidebarCol(!sidebarCol);
-
-  const handleCardCheck = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    setCheckedCards(prev => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  const handleRowCheck = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    setCheckedRows(prev => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  const handleCLCheck = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    setCheckedCL(prev => ({ ...prev, [id]: !prev[id] }));
-  };
 
   return (
     <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -372,10 +374,13 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                    <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>Inbox zero. Great job!</div>
                 )}
                 {!loading && focusItems.map((item) => (
-                  <div className={`kard ${checkedCards[item.insightId] ? 'done' : ''}`} key={item.insightId} onClick={(e) => handleCardCheck(e, item.insightId)}>
+                  <div
+                    className={`kard ${selectedInsightId === item.insightId ? 'sel' : ''}`}
+                    key={item.insightId}
+                    onClick={() => selectEmail(item)}
+                  >
                     <div className="kard-top">
                       <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
-                      <div className={`chkbox ${checkedCards[item.insightId] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
                     </div>
                     <div className="ks">{item.summary.shortSnippet || "No summary available"}</div>
                     <div className="kard-tags">
@@ -408,10 +413,13 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                    <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>No urgent actions required.</div>
                 )}
                 {!loading && actionItems.map((item) => (
-                  <div className={`kard ${checkedCards[item.insightId] ? 'done' : ''}`} key={item.insightId} onClick={(e) => handleCardCheck(e, item.insightId)}>
+                  <div
+                    className={`kard ${selectedInsightId === item.insightId ? 'sel' : ''}`}
+                    key={item.insightId}
+                    onClick={() => selectEmail(item)}
+                  >
                     <div className="kard-top">
                       <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
-                      <div className={`chkbox ${checkedCards[item.insightId] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
                     </div>
                     <div className="ks">{item.summary.shortSnippet || "Action required"}</div>
                     <div className="kard-tags">
@@ -452,11 +460,10 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                     <span className="pri-lbl" style={{ color }}>{prefix}</span>
                   </div>
 
-                  <div className={`arow ${selectedRow === item.insightId ? 'sel' : ''} ${checkedRows[item.insightId] ? 'done-r' : ''}`} 
-                       onClick={() => { setSelectedRow(item.insightId); setRightCol(true); }}>
-                    <div className="ar-check-col" onClick={(e) => handleRowCheck(e, item.insightId)}>
-                      <div className={`chkbox ${checkedRows[item.insightId] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
-                    </div>
+                  <div
+                    className={`arow ${selectedInsightId === item.insightId ? 'sel' : ''}`}
+                    onClick={() => selectEmail(item)}
+                  >
                     <div className="ar-body">
                       <div className="ar-from">{item.from.name || item.from.email}</div>
                       <div className="ar-snip">{item.summary.shortSnippet}</div>
@@ -487,59 +494,73 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                 <path d="M2 2L10 10M10 2L2 10" />
               </svg>
             </button>
-            <div className="det-from">Notion Legal Team</div>
-            <div className="det-domain">notion.so</div>
-            <div className="det-badge"><div className="badge-sq"></div>ACTION REQUIRED</div>
+            <div className="det-from">
+              {selectedEmail ? (selectedEmail.from.name || selectedEmail.from.email) : 'Select an email'}
+            </div>
+            <div className="det-domain">{selectedEmail ? selectedDomain : 'No email selected'}</div>
+            {selectedEmail && (
+              <div className="det-badge"><div className="badge-sq"></div>{selectedEmail.isActionRequired ? 'ACTION REQUIRED' : 'INFORMATION'}</div>
+            )}
           </div>
 
           <div className="det-body">
             <div className="det-blk">
               <span className="blk-lbl">Summary</span>
-              <div className="blk-txt">Contract renewal requires your signature on the updated MSA before Oct 31, or account access will be suspended immediately.</div>
+              <div className="blk-txt">{summaryText}</div>
+            </div>
+
+            <div className="det-blk">
+              <span className="blk-lbl">Labels</span>
+              <div className="ar-tags">
+                {selectedEmail?.matchedLabels.length ? (
+                  selectedEmail.matchedLabels.map((lbl) => (
+                    <span className="tag tn" key={lbl}>{lbl}</span>
+                  ))
+                ) : (
+                  <div className="blk-txt">No labels available.</div>
+                )}
+              </div>
+            </div>
+
+            <div className="det-blk">
+              <span className="blk-lbl">Last Signal</span>
+              <div className="blk-txt">{selectedDateLabel}</div>
             </div>
 
             <div className="det-blk">
               <span className="blk-lbl">Deadline</span>
               <div className="dl-blk">
                 <div className="dlb-left">
-                  <div className="dlb-type">Sign deadline</div>
-                  <div className="dlb-date">Oct 31, 2025</div>
-                  <div className="dlb-remain">4 days remaining</div>
+                  <div className="dlb-type">Not available</div>
+                  <div className="dlb-date">No deadline data</div>
+                  <div className="dlb-remain">This email does not include parsed deadline info yet</div>
                 </div>
-                <div className="dlb-badge">4d</div>
+                <div className="dlb-badge">N/A</div>
               </div>
             </div>
 
             <div className="det-blk">
               <span className="blk-lbl">Attachment</span>
               <div className="att">
-                <div className="att-ext">PDF</div>
-                <div className="att-name">MSA_v3_renewal.pdf</div>
-                <div className="att-sz">248 KB</div>
+                <div className="att-ext">N/A</div>
+                <div className="att-name">Attachment details not available</div>
+                <div className="att-sz">-</div>
               </div>
             </div>
 
             <div className="det-blk">
               <span className="blk-lbl">Checklist</span>
-              <div>
-                <div className="cl-item" onClick={(e) => handleCLCheck(e, 'cl1')}>
-                  <div className={`cl-box ${checkedCL['cl1'] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
-                  <span className={`cl-txt ${checkedCL['cl1'] ? 'done' : ''}`}>Read the MSA document</span>
-                </div>
-                <div className="cl-item" onClick={(e) => handleCLCheck(e, 'cl2')}>
-                  <div className={`cl-box ${checkedCL['cl2'] ? 'on' : ''}`}><svg className="chk-svg" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2 2 4-4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
-                  <span className={`cl-txt ${checkedCL['cl2'] ? 'done' : ''}`}>Sign and return before Oct 31</span>
-                </div>
-              </div>
+              <div className="blk-txt">Checklist items are not available for this email yet.</div>
             </div>
           </div>
 
           <div className="det-actions">
-            <button className="det-btn">Dismiss</button>
-            <button className="det-btn pri">Open in Gmail ↗</button>
+            <button className="det-btn" onClick={() => setRightCol(false)}>Dismiss</button>
+            <button className="det-btn pri" onClick={openSelectedInGmail} disabled={!selectedEmail}>Open in Gmail</button>
           </div>
         </div>
       </div>
     </div>
   );
 }
+

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import './App.css'
-import { signInWithGoogle, auth } from './utils/firebase'
+import { signInWithGoogle, signOutUser, auth } from './utils/firebase'
 import { onIdTokenChanged } from 'firebase/auth'
 import axios from 'axios'
 import { ConnectGmail } from './components/ConnectGmail'
@@ -186,9 +186,25 @@ function App() {
     }
   };
 
+  const handleLogout = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await signOutUser();
+    } catch (err: any) {
+      console.error('Logout error:', err);
+    } finally {
+      localStorage.removeItem('firebaseToken');
+      setUser(null);
+      setIsGmailConnected(false);
+      setRoute('dashboard');
+      setLoading(false);
+    }
+  };
+
   if (user && isGmailConnected) {
     if (route === 'profile') {
-      return <Profile user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
+      return <Profile user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} onLogout={handleLogout} />;
     }
     if (route === 'onboarding') {
       return <Onboarding user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
