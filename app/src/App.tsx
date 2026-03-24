@@ -7,6 +7,7 @@ import { ConnectGmail } from './components/ConnectGmail'
 import { Dashboard } from './components/Dashboard'
 import { Profile } from './components/Profile'
 import { Onboarding } from './components/Onboarding'
+import { SyncLoading } from './components/SyncLoading'
 
 // Backend API URL - update this to your backend URL
 const API_URL = 'http://localhost:5000';
@@ -36,7 +37,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
-  const [route, setRoute] = useState<'dashboard' | 'profile' | 'onboarding'>('dashboard');
+  const [route, setRoute] = useState<'dashboard' | 'profile' | 'onboarding' | 'syncing'>('dashboard');
   
   // NEW: track if user has connected gmail in frontend flow
   const [isGmailConnected, setIsGmailConnected] = useState(false);
@@ -206,6 +207,9 @@ function App() {
     if (route === 'profile') {
       return <Profile user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} onLogout={handleLogout} />;
     }
+    if (route === 'syncing') {
+      return <SyncLoading user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
+    }
     if (route === 'onboarding') {
       return <Onboarding user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
     }
@@ -301,5 +305,3 @@ function App() {
 }
 
 export default App
-
-

@@ -133,7 +133,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      onNavigate('dashboard');
+      onNavigate('syncing' as any);
     } catch (err) {
       console.error('Failed to save priorities', err);
       alert('Failed to save priority order.');
