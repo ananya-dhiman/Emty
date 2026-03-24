@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import axios from 'axios';
 
 interface LabelItem {
   id: string;
@@ -8,23 +9,55 @@ interface LabelItem {
 }
 
 interface OnboardingProps {
+  user: any;
   theme: 'light' | 'dark';
   setTheme: (t: 'light' | 'dark') => void;
   onNavigate: (route: 'dashboard') => void;
 }
 
-export function Onboarding({ theme, setTheme, onNavigate }: OnboardingProps) {
-  const [labels, setLabels] = useState<LabelItem[]>([
-    { id: '1', name: 'Focus', desc: 'High priority threads and internal team messages', isSystem: true },
-    { id: '2', name: 'Action Required', desc: 'Emails directly demanding your response or attention', isSystem: true },
-    { id: '3', name: 'Newsletters', desc: 'Subscriptions, updates, and general reading', isSystem: true },
-  ]);
+export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProps) {
+  const [labels, setLabels] = useState<LabelItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   const [newLabelName, setNewLabelName] = useState('');
   const [newLabelDesc, setNewLabelDesc] = useState('');
 
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
+
+  const API_URL = 'http://localhost:5000';
+  const token = localStorage.getItem('firebaseToken');
+
+  useEffect(() => {
+    const fetchInitialPriorities = async () => {
+      if (!user?.gmailAccountId || !token) return;
+      
+      try {
+        setLoading(true);
+        const { data } = await axios.get(`${API_URL}/api/emails/labels/priority?accountId=${user.gmailAccountId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (data.success && data.priorities) {
+          // Map backend priorities to UI LabelItem
+          const mappedLabels: LabelItem[] = data.priorities.map((p: any) => ({
+             id: p.labelId,
+             name: p.labelNameSnapshot,
+             desc: '', // Priorities payload doesn't include desc, but that's fine for UI
+             isSystem: ['Focus', 'Action Required', 'Newsletters'].includes(p.labelNameSnapshot)
+          }));
+          setLabels(mappedLabels);
+        }
+      } catch (err) {
+        console.error('Failed to fetch initial priorities', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchInitialPriorities();
+  }, [user]);
 
   const handleSort = () => {
     if (dragItem.current !== null && dragOverItem.current !== null && dragItem.current !== dragOverItem.current) {
@@ -37,21 +70,75 @@ export function Onboarding({ theme, setTheme, onNavigate }: OnboardingProps) {
     dragOverItem.current = null;
   };
 
-  const handleAddLabel = (e: React.FormEvent) => {
+  const handleAddLabel = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newLabelName.trim()) return;
+    if (!newLabelName.trim() || !user?.gmailAccountId || !token) return;
     
-    const newLabel: LabelItem = {
-      id: Date.now().toString(),
-      name: newLabelName.trim(),
-      desc: newLabelDesc.trim(),
-      isSystem: false
-    };
-    
-    // Add to top of stack by default or bottom? The requirements say "gets added in a stack like structure"
-    setLabels([...labels, newLabel]);
-    setNewLabelName('');
-    setNewLabelDesc('');
+    try {
+      setSaving(true);
+      const { data } = await axios.post(`${API_URL}/api/emails/labels`, {
+        accountId: user.gmailAccountId,
+        name: newLabelName.trim(),
+        description: newLabelDesc.trim()
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (data.success && data.label) {
+        const newLabel: LabelItem = {
+          id: data.label._id,
+          name: data.label.name,
+          desc: data.label.description || '',
+          isSystem: false
+        };
+        
+        // Add to bottom of stack
+        setLabels([...labels, newLabel]);
+        setNewLabelName('');
+        setNewLabelDesc('');
+      }
+    } catch (err: any) {
+      console.error('Failed to create label', err);
+      if (err.response?.status === 409) {
+          alert('Label already exists. It may be hidden or already active.');
+      } else {
+          alert('Failed to create label.');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!user?.gmailAccountId || !token) {
+      onNavigate('dashboard');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      // 1. Save priority order
+      const orderedLabelIds = labels.map(l => l.id);
+      await axios.put(`${API_URL}/api/emails/labels/priority`, {
+        accountId: user.gmailAccountId,
+        orderedLabelIds
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      // 2. Mark as reviewed
+      await axios.post(`${API_URL}/api/emails/labels/priority/review`, {
+        accountId: user.gmailAccountId
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      onNavigate('dashboard');
+    } catch (err) {
+      console.error('Failed to save priorities', err);
+      alert('Failed to save priority order.');
+      setSaving(false);
+    }
   };
 
   return (
@@ -142,8 +229,8 @@ export function Onboarding({ theme, setTheme, onNavigate }: OnboardingProps) {
                 />
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
-                <button type="submit" disabled={!newLabelName.trim()} style={{ background: 'var(--accent)', color: 'var(--accent-inv)', border: '1px solid var(--accent)', padding: '8px 16px', fontSize: '12px', fontWeight: 600, fontFamily: 'var(--font-ui)', cursor: newLabelName.trim() ? 'pointer' : 'not-allowed', opacity: newLabelName.trim() ? 1 : 0.5 }}>
-                  Add Label
+                <button type="submit" disabled={!newLabelName.trim() || saving} style={{ background: 'var(--accent)', color: 'var(--accent-inv)', border: '1px solid var(--accent)', padding: '8px 16px', fontSize: '12px', fontWeight: 600, fontFamily: 'var(--font-ui)', cursor: newLabelName.trim() && !saving ? 'pointer' : 'not-allowed', opacity: newLabelName.trim() && !saving ? 1 : 0.5 }}>
+                  {saving ? 'Adding...' : 'Add Label'}
                 </button>
               </div>
             </form>
@@ -152,15 +239,17 @@ export function Onboarding({ theme, setTheme, onNavigate }: OnboardingProps) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <button 
               onClick={() => onNavigate('dashboard')}
+              disabled={saving}
               style={{ background: 'transparent', border: 'none', color: 'var(--text-3)', fontFamily: 'var(--font-ui)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', padding: '8px 0' }}
             >
               Skip
             </button>
             <button 
-              onClick={() => onNavigate('dashboard')}
-              style={{ background: 'var(--text-1)', color: 'var(--bg)', border: '1px solid var(--text-1)', padding: '10px 24px', fontSize: '13px', fontWeight: 600, fontFamily: 'var(--font-ui)', cursor: 'pointer' }}
+              onClick={handleConfirm}
+              disabled={saving || loading}
+              style={{ background: 'var(--text-1)', color: 'var(--bg)', border: '1px solid var(--text-1)', padding: '10px 24px', fontSize: '13px', fontWeight: 600, fontFamily: 'var(--font-ui)', cursor: saving || loading ? 'not-allowed' : 'pointer', opacity: saving || loading ? 0.7 : 1 }}
             >
-              Confirm Priorities
+              {saving ? 'Saving...' : 'Confirm Priorities'}
             </button>
           </div>
         </div>

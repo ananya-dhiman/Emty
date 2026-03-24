@@ -39,7 +39,7 @@ interface DashboardProps {
   user: any;
   theme: 'light' | 'dark';
   setTheme: (t: 'light' | 'dark') => void;
-  onNavigate: (route: 'profile') => void;
+  onNavigate: (route: 'profile' | 'onboarding') => void;
 }
 
 export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps) {
@@ -55,6 +55,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [focusItems, setFocusItems] = useState<PriorityRankingItem[]>([]);
   const [actionItems, setActionItems] = useState<PriorityRankingItem[]>([]);
   const [agendaItems, setAgendaItems] = useState<PriorityRankingItem[]>([]);
+  const [sidebarLabels, setSidebarLabels] = useState<{id: string, name: string, color: string, rank: number, count: number}[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [notification, setNotification] = useState<{show: boolean, message: string, detail?: string, type: 'success' | 'error' | 'info'} | null>(null);
 
@@ -73,24 +74,62 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     try {
       if (!isBackground) setLoading(true);
       console.log(`Fetching from: ${API_URL}/api/emails/priority-ranking?accountId=${user.gmailAccountId}`);
-        const response = await axios.get(`${API_URL}/api/emails/priority-ranking?accountId=${user.gmailAccountId}`, {
+      
+      const [rankingRes, priorityRes, labelsRes] = await Promise.all([
+        axios.get(`${API_URL}/api/emails/priority-ranking?accountId=${user.gmailAccountId}`, {
           headers: { Authorization: `Bearer ${token}` }
-        });
-        
-        console.log("Priority Ranking Response Data:", response.data);
+        }).catch(e => ({ data: { success: false, message: e.message } })),
+        axios.get(`${API_URL}/api/emails/labels/priority?accountId=${user.gmailAccountId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).catch(() => ({ data: { success: false } })),
+        axios.get(`${API_URL}/api/emails/labels?accountId=${user.gmailAccountId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).catch(() => ({ data: { success: false } }))
+      ]);
 
-        if (response.data.success) {
-          console.log("Setting Focus Items:", response.data.topPriority);
-          console.log("Setting Action Items:", response.data.actionRequired);
-          console.log("Setting Agenda Items:", response.data.others);
-          setFocusItems(response.data.topPriority || []);
-          setActionItems(response.data.actionRequired || []);
-          setAgendaItems(response.data.others || []);
-        } else {
-          console.error("API returned success: false", response.data);
-          setError(response.data.message);
-        }
-      } catch (err: any) {
+      const response = rankingRes;
+      
+      console.log("Priority Ranking Response Data:", response.data);
+
+      if (response.data.success) {
+        console.log("Setting Focus Items:", response.data.topPriority);
+        console.log("Setting Action Items:", response.data.actionRequired);
+        console.log("Setting Agenda Items:", response.data.others);
+        setFocusItems(response.data.topPriority || []);
+        setActionItems(response.data.actionRequired || []);
+        setAgendaItems(response.data.others || []);
+      } else {
+        console.error("API returned success: false", response.data);
+        setError(response.data.message);
+      }
+
+        // Sidebar Labels integration
+      if (priorityRes.data.success && labelsRes.data.success) {
+        const activeLabels = labelsRes.data.labels || [];
+        const priorities = priorityRes.data.priorities || [];
+        
+        const labelMap = new Map<string, any>(activeLabels.map((l: any) => [l._id, l]));
+        
+        const mappedLabels = priorities
+            .filter((p: any) => !['Focus', 'Action Required', 'Newsletters'].includes(p.labelNameSnapshot))
+            .map((p: any) => {
+                const lbl = labelMap.get(p.labelId);
+                // Try to derive a deterministic color if none provided
+                const defaultColors = ['#C0351A', '#1854A0', '#186845', '#9A5405', 'var(--text-2)'];
+                const fallbackColor = defaultColors[p.rank % defaultColors.length];
+                
+                return {
+                    id: p.labelId,
+                    name: p.labelNameSnapshot,
+                    color: lbl?.color || fallbackColor,
+                    rank: p.rank,
+                    count: 0 // Placeholder
+                };
+            });
+        
+        setSidebarLabels(mappedLabels);
+      }
+    } catch (err: any) {
         console.error("Error fetching priority ranking:", err);
         if (err.response) {
             console.error("Error Response Data:", err.response.data);
@@ -274,12 +313,19 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
             <div className="sb-grp">
               <span className="sb-grp-lbl">Labels</span>
-              <div className="lrow"><div className="ldot" style={{ background: '#C0351A' }}></div><span className="lname">Legal</span><span className="lct">2</span></div>
-              <div className="lrow"><div className="ldot" style={{ background: 'var(--text-2)' }}></div><span className="lname">Finance</span><span className="lct">4</span></div>
-              <div className="lrow"><div className="ldot" style={{ background: '#1854A0' }}></div><span className="lname">Investors</span><span className="lct">1</span></div>
-              <div className="lrow"><div className="ldot" style={{ background: '#186845' }}></div><span className="lname">Engineering</span><span className="lct">7</span></div>
-              <div className="lrow"><div className="ldot" style={{ background: '#9A5405' }}></div><span className="lname">Payments</span><span className="lct">3</span></div>
-              <div className="lrow" style={{ paddingTop: '8px' }}><span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)', cursor: 'pointer' }}>+ add label</span></div>
+              {sidebarLabels.length === 0 && !loading && (
+                 <div className="lrow" style={{ color: 'var(--text-3)', fontSize: '11px', paddingLeft: '24px' }}>No custom labels</div>
+              )}
+              {sidebarLabels.map((lbl) => (
+                <div className="lrow" key={lbl.id}>
+                  <div className="ldot" style={{ background: lbl.color }}></div>
+                  <span className="lname">{lbl.name}</span>
+                  {lbl.count > 0 && <span className="lct">{lbl.count}</span>}
+                </div>
+              ))}
+              <div className="lrow" style={{ paddingTop: '8px' }} onClick={() => onNavigate('onboarding')}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)', cursor: 'pointer' }}>+ edit labels</span>
+              </div>
             </div>
 
             <hr className="sb-div" />

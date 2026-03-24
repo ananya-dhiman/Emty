@@ -160,7 +160,7 @@ function App() {
       return <Profile user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
     }
     if (route === 'onboarding') {
-      return <Onboarding theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
+      return <Onboarding user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
     }
     return <Dashboard user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
   }
