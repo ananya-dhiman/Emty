@@ -1,0 +1,155 @@
+/* ══════════════════════════════════════════════
+   COLOUR SYSTEM — Single theme, Light + Dark
+   Primary:   Orange #E8520A
+   Secondary: Warm off-white panels (light) / dark charcoal (dark)
+══════════════════════════════════════════════ */
+
+:root {
+  --red:          #C0351A;
+  --red-bg:       #FCEEE9;
+  --red-border:   #F0BFB0;
+  --amber:        #9A5405;
+  --amber-bg:     #FBF0E0;
+  --amber-border: #E8C88A;
+  --blue:         #1854A0;
+  --blue-bg:      #E8F0FA;
+  --blue-border:  #B0CAEC;
+  --green:        #186845;
+  --green-bg:     #E4F3EC;
+  --green-border: #9ACFB8;
+
+  --font-ui:   'IBM Plex Sans', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  
+  --purple:       #8B40E2;
+  --purple-bg:    #F4EEFB;
+  --purple-border:#DBC5F4;
+}
+
+[data-mode="light"] {
+  --bg:          #F0EDE6;   /* warm off-white page */
+  --panel:       #E8E4DC;   /* sidebar */
+  --surface:     #FAF8F4;   /* cards, rows, main area */
+  --surface-2:   #EDE9E0;   /* hover states */
+  --border:      #C0BBB0;   /* structural 2px borders */
+  --border-lt:   #D8D3C8;   /* internal 1px dividers */
+  --text-1:      #18160E;   /* primary — near black */
+  --text-2:      #4A4740;   /* secondary */
+  --text-3:      #908880;   /* muted / meta */
+  --accent:      #306af0;   /* orange — CTAs, active states, left-bar */
+  --accent-inv:  #FFFFFF;   /* text on orange */
+  --accent-lt:   #FDF0EA;   /* very light orange tint */
+  --accent-border:#F5C4A8;  /* orange border */
+
+  /* Sidebar tokens */
+  --sb-text:     #18160E;
+  --sb-text-2:   #908880;
+  --sb-active:   #FAF8F4;
+  --sb-hover:    #E0DCD4;
+  --sb-div:      #C8C4BC;
+
+  --focus-board-bg:    #F0FDF4;
+  --focus-board-hd:    #DCFCE7;
+  --focus-board-border:#86EFAC;
+  --focus-card-bg:     #FFFFFF;
+  --focus-card-hover:  #F4FAF6;
+  --focus-bar:         #16A34A;
+  --focus-label:       #15803D;
+  --focus-badge-bg:    #BBF7D0;
+  --focus-badge-border:#86EFAC;
+  --focus-badge-text:  #15803D;
+
+  --action-board-bg:    #FEF2F2;
+  --action-board-hd:    #FEE2E2;
+  --action-board-border:#FCA5A5;
+  --action-card-bg:     #FFFFFF;
+  --action-card-hover:  #FEF5F2;
+  --action-bar:         #DC2626;
+  --action-label:       #B91C1C;
+  --action-badge-bg:    #FECACA;
+  --action-badge-border:#FCA5A5;
+  --action-badge-text:  #B91C1C;
+}
+
+[data-mode="dark"] {
+  --bg:          #141210;   /* deep warm charcoal */
+  --panel:       #1C1A16;   /* sidebar */
+  --surface:     #201E1A;   /* cards, rows */
+  --surface-2:   #2C2922;   /* hover states - BRIGHTENED */
+  --border:      #4E4940;   /* structural borders - BRIGHTENED */
+  --border-lt:   #3A362E;   /* internal dividers - BRIGHTENED */
+  --text-1:      #FFFFFF;   /* primary - BRIGHTENED */
+  --text-2:      #C8C2B8;   /* secondary - BRIGHTENED */
+  --text-3:      #A59E92;   /* muted - BRIGHTENED */
+  --accent:      #30a6f0;   
+  --accent-inv:  #FFFFFF;
+  --accent-lt:   #1A2A3A;   
+  --accent-border:#20508A;
+  
+  /* Sidebar */
+  --sb-text:     #FFFFFF;
+  --sb-text-2:   #C8C2B8;
+  --sb-active:   #2C2922;
+  --sb-hover:    #3A362E;
+  --sb-div:      #4E4940;
+
+  --red:         #FF7864;
+  --red-bg:      #3A1810;
+  --red-border:  #6A2820;
+  --amber:       #FFBA60;
+  --amber-bg:    #302010;
+  --amber-border:#704820;
+  --blue:        #6CB0FF;
+  --blue-bg:     #102840;
+  --blue-border: #285888;
+  --green:       #5DD092;
+  --green-bg:    #102C1C;
+  --green-border:#285A3C;
+  --purple:      #D4A0FF;
+  --purple-bg:   #2A1840;
+  --purple-border:#603090;
+
+  --focus-board-bg:    #0F2516; 
+  --focus-board-hd:    #163520;
+  --focus-board-border:#2B5E39;
+  --focus-card-bg:     #142F1C;
+  --focus-card-hover:  #1A3D24;
+  --focus-bar:         #4ADE80;
+  --focus-label:       #86EFAC;
+  --focus-badge-bg:    #166534;
+  --focus-badge-border:#15803D;
+  --focus-badge-text:  #86EFAC;
+
+  --action-board-bg:    #2B1310; 
+  --action-board-hd:    #3D1B15;
+  --action-board-border:#6A2C21;
+  --action-card-bg:     #321612;
+  --action-card-hover:  #421E18;
+  --action-bar:         #F87171;
+  --action-label:       #FCA5A5;
+  --action-badge-bg:    #991B1B;
+  --action-badge-border:#7F1D1D;
+  --action-badge-text:  #FCA5A5;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg);
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  transition: background .2s, color .2s;
+}
+
+.auth-container {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 100vh;
+  padding: 24px 20px 60px;
+}
+
+#root {
+  width: 100%;
+  display: flex;
+}
