@@ -35,7 +35,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
       
       try {
         setLoading(true);
-        const { data } = await axios.get(`${API_URL}/api/emails/labels/priority?accountId=${user.gmailAccountId}`, {
+        const { data } = await axios.get(`${API_URL}/api/emails/label-priorities?accountId=${user.gmailAccountId}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         
@@ -119,7 +119,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
       setSaving(true);
       // 1. Save priority order
       const orderedLabelIds = labels.map(l => l.id);
-      await axios.put(`${API_URL}/api/emails/labels/priority`, {
+      await axios.put(`${API_URL}/api/emails/label-priorities`, {
         accountId: user.gmailAccountId,
         orderedLabelIds
       }, {
@@ -127,7 +127,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
       });
 
       // 2. Mark as reviewed
-      await axios.post(`${API_URL}/api/emails/labels/priority/review`, {
+      await axios.post(`${API_URL}/api/emails/label-priorities/review`, {
         accountId: user.gmailAccountId
       }, {
         headers: { Authorization: `Bearer ${token}` }

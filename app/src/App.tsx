@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import './App.css'
-import { signInWithGoogle } from './utils/firebase'
+import { signInWithGoogle, auth } from './utils/firebase'
+import { onIdTokenChanged } from 'firebase/auth'
 import axios from 'axios'
 import { ConnectGmail } from './components/ConnectGmail'
 import { Dashboard } from './components/Dashboard'
@@ -9,6 +10,26 @@ import { Onboarding } from './components/Onboarding'
 
 // Backend API URL - update this to your backend URL
 const API_URL = 'http://localhost:5000';
+
+// Global Axios Interceptor to automatically append the freshest Firebase token
+axios.interceptors.request.use(async (config) => {
+  if (auth.currentUser) {
+    try {
+      const freshToken = await auth.currentUser.getIdToken(false);
+      config.headers.Authorization = `Bearer ${freshToken}`;
+      localStorage.setItem('firebaseToken', freshToken);
+    } catch (e) {
+      console.error('Failed to get fresh Firebase token:', e);
+    }
+  } else {
+    // Fallback if SDK hasn't loaded but a token exists
+    const local = localStorage.getItem('firebaseToken');
+    if (local && !config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${local}`;
+    }
+  }
+  return config;
+}, (err) => Promise.reject(err));
 
 function App() {
   const [user, setUser] = useState<any>(null);
@@ -42,36 +63,46 @@ function App() {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    // 2. Check for existing session token
-    const checkSession = async () => {
-      const token = localStorage.getItem('firebaseToken');
-      if (token && !user) {
-        setLoading(true);
+    // 2. Check for existing session token and auto-refresh using Firebase listener
+    let hasLoadedInitialSession = false;
+    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
         try {
-          const response = await axios.get(`${API_URL}/api/auth/verify`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          if (response.data.success) {
-            setUser(response.data.user);
-            if (response.data.user.isGmailConnected) {
-              setIsGmailConnected(true);
+          if (!hasLoadedInitialSession) setLoading(true);
+          const token = await firebaseUser.getIdToken();
+          localStorage.setItem('firebaseToken', token);
+          
+          if (!user) {
+            const response = await axios.get(`${API_URL}/api/auth/verify`);
+            if (response.data.success) {
+              setUser(response.data.user);
+              if (response.data.user.isGmailConnected) {
+                setIsGmailConnected(true);
+              }
+            } else {
+               localStorage.removeItem('firebaseToken');
+               setUser(null);
             }
-          } else {
-             localStorage.removeItem('firebaseToken');
           }
         } catch (err) {
            console.error('Session check failed', err);
+           // Fallback cleanup if backend verify totally fails
            localStorage.removeItem('firebaseToken');
+           setUser(null);
         } finally {
+          hasLoadedInitialSession = true;
           setLoading(false);
         }
+      } else {
+         localStorage.removeItem('firebaseToken');
+         setUser(null);
+         if (!hasLoadedInitialSession) setLoading(false);
+         hasLoadedInitialSession = true;
       }
-    };
+    });
     
-    // Only verify token if we aren't just returning from an oauth redirect that already set the user
-    // Actually, checkSession should run anyway to load `user` into state after refresh
-    checkSession();
-  }, []); // Run once on mount
+    return () => unsubscribe();
+  }, [user]); // Run on mount and react if `user` is modified
 
   // Apply theme class to document
   useEffect(() => {

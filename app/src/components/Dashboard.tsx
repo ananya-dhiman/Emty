@@ -79,7 +79,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         axios.get(`${API_URL}/api/emails/priority-ranking?accountId=${user.gmailAccountId}`, {
           headers: { Authorization: `Bearer ${token}` }
         }).catch(e => ({ data: { success: false, message: e.message } })),
-        axios.get(`${API_URL}/api/emails/labels/priority?accountId=${user.gmailAccountId}`, {
+        axios.get(`${API_URL}/api/emails/label-priorities?accountId=${user.gmailAccountId}`, {
           headers: { Authorization: `Bearer ${token}` }
         }).catch(() => ({ data: { success: false } })),
         axios.get(`${API_URL}/api/emails/labels?accountId=${user.gmailAccountId}`, {
