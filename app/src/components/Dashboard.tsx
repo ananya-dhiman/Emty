@@ -55,23 +55,24 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [focusItems, setFocusItems] = useState<PriorityRankingItem[]>([]);
   const [actionItems, setActionItems] = useState<PriorityRankingItem[]>([]);
   const [agendaItems, setAgendaItems] = useState<PriorityRankingItem[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [notification, setNotification] = useState<{show: boolean, message: string, detail?: string, type: 'success' | 'error' | 'info'} | null>(null);
 
-  useEffect(() => {
-    const fetchInsights = async () => {
-      const API_URL = 'http://localhost:5000';
-      const token = localStorage.getItem('firebaseToken');
+  const fetchInsights = async (isBackground = false) => {
+    const API_URL = 'http://localhost:5000';
+    const token = localStorage.getItem('firebaseToken');
       
       console.log("Dashboard mount check:", { hasGmailAccountId: !!user?.gmailAccountId, hasToken: !!token, user });
 
       if (!user?.gmailAccountId || !token) {
-        console.log("Bailing out of fetchInsights due to missing gmailAccountId or token.");
-        setLoading(false);
-        return;
-      }
-      
-      try {
-        setLoading(true);
-        console.log(`Fetching from: ${API_URL}/api/emails/priority-ranking?accountId=${user.gmailAccountId}`);
+      console.log("Bailing out of fetchInsights due to missing gmailAccountId or token.");
+      if (!isBackground) setLoading(false);
+      return;
+    }
+    
+    try {
+      if (!isBackground) setLoading(true);
+      console.log(`Fetching from: ${API_URL}/api/emails/priority-ranking?accountId=${user.gmailAccountId}`);
         const response = await axios.get(`${API_URL}/api/emails/priority-ranking?accountId=${user.gmailAccountId}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -96,12 +97,63 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         }
         setError("Failed to load dashboard insights");
       } finally {
-        setLoading(false);
+        if (!isBackground) setLoading(false);
       }
     };
-    
-    fetchInsights();
+
+  useEffect(() => {
+    fetchInsights(false);
   }, [user]);
+
+  const handleSync = async () => {
+    if (!user?.gmailAccountId) return;
+    
+    const API_URL = 'http://localhost:5000';
+    const token = localStorage.getItem('firebaseToken');
+    
+    try {
+      setIsSyncing(true);
+      setNotification(null);
+      // We do not clear existing items so UI remains stable during sync.
+      
+      const response = await axios.post(`${API_URL}/api/emails/sync`, {
+        accountId: user.gmailAccountId
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (response.data.success) {
+        const { processed, succeeded, failed } = response.data;
+        setNotification({
+            show: true,
+            type: 'success',
+            message: 'Sync completed successfully',
+            detail: `Processed: ${processed} | Success: ${succeeded} | Failed: ${failed}`
+        });
+        // Fetch new results without full page reload, in background mode to keep UI stable
+        await fetchInsights(true);
+      } else {
+        setNotification({
+            show: true,
+            type: 'error',
+            message: 'Sync failed',
+            detail: response.data.message
+        });
+      }
+    } catch (err: any) {
+        console.error("Error syncing emails:", err);
+        setNotification({
+            show: true,
+            type: 'error',
+            message: 'Sync error',
+            detail: err.response?.data?.message || 'An error occurred during sync'
+        });
+    } finally {
+        setIsSyncing(false);
+        // Hide notification after 5 seconds
+        setTimeout(() => setNotification(null), 5000);
+    }
+  };
 
   const toggleSidebar = () => setSidebarCol(!sidebarCol);
 
@@ -122,6 +174,34 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
   return (
     <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+
+      {/* NOTIFICATION */}
+      {notification && notification.show && (
+        <div className="sync-notification" style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            background: notification.type === 'error' ? 'var(--red)' : 'var(--accent)',
+            color: notification.type === 'error' ? '#fff' : 'var(--accent-inv)',
+            padding: '16px 20px',
+            borderRadius: '8px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            minWidth: '280px',
+            fontFamily: 'var(--font-sans)'
+        }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+               <strong style={{ fontSize: '14px', fontWeight: 600 }}>{notification.message}</strong>
+               <button onClick={() => setNotification(null)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, opacity: 0.7 }}>
+                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 3L11 11M11 3L3 11"/></svg>
+               </button>
+            </div>
+            {notification.detail && <span style={{ fontSize: '13px', opacity: 0.9 }}>{notification.detail}</span>}
+        </div>
+      )}
 
       {/* SHELL */}
       <div className="shell-dash" style={{ gridTemplateColumns: `${sidebarCol ? '44px' : '176px'} 1fr ${rightCol ? 'minmax(300px, 45vw)' : '0px'}` }}>
@@ -145,7 +225,15 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               <button className={`tgl-btn ${theme === 'light' ? 'on' : ''}`} onClick={() => setTheme('light')}>Light</button>
               <button className={`tgl-btn ${theme === 'dark' ? 'on' : ''}`} onClick={() => setTheme('dark')}>Dark</button>
             </div>
-            <div className="sync-pill"><div className="sdot"></div>synced now</div>
+            <button 
+              className="sync-pill" 
+              onClick={handleSync} 
+              disabled={isSyncing}
+              style={{ cursor: isSyncing ? 'default' : 'pointer', background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--text-1)' }}
+            >
+              <div className={`sdot ${isSyncing ? 'pulse' : ''}`} style={isSyncing ? { background: 'var(--amber)' } : {}}></div>
+              {isSyncing ? 'Syncing...' : 'Sync'}
+            </button>
             <div className="bar-av" onClick={() => onNavigate('profile')}>{user?.name ? user.name.charAt(0).toUpperCase() : 'U'}</div>
           </div>
         </div>

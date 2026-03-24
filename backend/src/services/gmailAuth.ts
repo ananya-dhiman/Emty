@@ -28,6 +28,7 @@ export async function generateOAuthUrl(oauth2Client:any,state:string):Promise<st
    
     const authorizationUrl= oauth2Client.generateAuthUrl({
         access_type: 'offline',
+        prompt: 'consent',
         scope: scopes,
         include_granted_scopes: true,
         state: state
@@ -63,6 +64,12 @@ export async function refreshAccessToken(emailAddress:String,oauth2Client:any):P
         }
         
         if(isTokenExpired(dets.tokenExpiry.getTime())){
+              if (!dets.refreshToken) {
+                  throw new Error('No refresh token available in database to refresh access token');
+              }
+              // Set the refresh token on client before attempting to refresh
+              oauth2Client.setCredentials({ refresh_token: dets.refreshToken });
+              
               const { credentials } = await oauth2Client.refreshAccessToken();
 
                 // 4. Persist new token
