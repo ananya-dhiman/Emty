@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import '../styles/Dashboard.css';
+import { CalendarSidebar } from './CalendarSidebar';
 
 interface PriorityRankingScoreBreakdown {
   baseScore: number;
@@ -92,6 +93,7 @@ interface DashboardProps {
 
 export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps) {
   const [sidebarCol, setSidebarCol] = useState(false);
+  const [calendarCol, setCalendarCol] = useState(false);
   const [rightCol, setRightCol] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState<string | null>(null);
 
@@ -296,7 +298,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       )}
 
       {/* SHELL */}
-      <div className="shell-dash" style={{ gridTemplateColumns: `${sidebarCol ? '44px' : '176px'} 1fr ${rightCol ? 'minmax(300px, 45vw)' : '0px'}` }}>
+      <div className="shell-dash" style={{ gridTemplateColumns: `${sidebarCol ? '44px' : '176px'} ${calendarCol ? '280px' : '0px'} 1fr ${rightCol ? 'minmax(300px, 45vw)' : '0px'}` }}>
         
         {/* BAR */}
         <div className="bar">
@@ -344,6 +346,10 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
           <div className="sb-inner">
             <div className="sb-grp" style={{ paddingTop: '12px' }}>
               <span className="sb-grp-lbl">Views</span>
+              <div className={`sb-row ${calendarCol ? 'on' : ''}`} onClick={() => setCalendarCol(!calendarCol)}>
+                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="16" y1="2" x2="16" y2="6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="8" y1="2" x2="8" y2="6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="3" y1="10" x2="21" y2="10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
+                <span className="sb-txt">Calendar</span>
+              </div>
               <div className="sb-row on">
                 <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 4h14v4H5zM5 10h14v4H5zM5 16h14v4H5z" fill="currentColor"/></svg></div>
                 <span className="sb-txt">Do</span><span className="sb-ct a">7</span>
@@ -398,6 +404,14 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             </div>
           </div>
         </div>
+
+        {/* CALENDAR SIDEBAR */}
+        <CalendarSidebar 
+          isOpen={calendarCol} 
+          items={allItems} 
+          onSelectEmail={selectEmail} 
+          onClose={() => setCalendarCol(false)} 
+        />
 
         {/* MAIN */}
         <div className="main">

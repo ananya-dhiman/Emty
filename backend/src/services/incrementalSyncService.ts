@@ -8,7 +8,11 @@
 
 import { google } from "googleapis";
 import crypto from "crypto";
-import { SyncCheckpointModel, ISyncCheckpoint } from "../model/SyncCheckpoint";
+import {
+  SyncCheckpointModel,
+  ISyncCheckpoint,
+  SyncProgressStage,
+} from "../model/SyncCheckpoint";
 import { ProcessedEmailLogModel } from "../model/ProcessedEmailLog";
 import { GmailAccountModel } from "../model/GmailAccount";
 import { InsightModel } from "../model/Insight";
@@ -71,7 +75,40 @@ export interface SyncResult {
 
 export type EmailSource = "historyId" | "timestamp" | "fullScan";
 
+interface SyncProgressPatch {
+  progressPercent?: number;
+  progressStage?: SyncProgressStage;
+  progressMessage?: string | null;
+  totalCandidates?: number;
+  processedCandidates?: number;
+}
+
 export class IncrementalSyncService {
+  private clampPercent(val: number): number {
+    return Math.max(0, Math.min(100, Math.floor(val)));
+  }
+
+  private async updateProgress(
+    accountId: string | any,
+    patch: SyncProgressPatch
+  ): Promise<void> {
+    const progressUpdate: Record<string, any> = {
+      ...patch,
+      lastProgressAt: new Date(),
+    };
+    if (typeof progressUpdate.progressPercent === "number") {
+      progressUpdate.progressPercent = this.clampPercent(
+        progressUpdate.progressPercent
+      );
+    }
+    await SyncCheckpointModel.updateOne(
+      { accountId },
+      {
+        $set: progressUpdate,
+      }
+    );
+  }
+
   /**
    * Compute state hash from email metadata
    * Used to detect changes in labels, attachments, from field
@@ -318,6 +355,12 @@ export class IncrementalSyncService {
           syncState: "syncing",
           syncStartedAt: new Date(),
           lastSyncError: null,
+          progressPercent: 2,
+          progressStage: "initializing",
+          progressMessage: "Initializing sync...",
+          totalCandidates: 0,
+          processedCandidates: 0,
+          lastProgressAt: new Date(),
         },
       }
     );
@@ -335,19 +378,33 @@ export class IncrementalSyncService {
     stats: { processed: number; succeeded: number; failed: number },
     error?: string
   ): Promise<void> {
+    const setPayload: Record<string, any> = {
+      syncState: error ? "error" : "idle",
+      lastHistoryId: newHistoryId,
+      lastSyncTimestamp: timestamp,
+      processedCount: stats.processed,
+      succeededCount: stats.succeeded,
+      failedCount: stats.failed,
+      lastSyncError: error || null,
+      syncStartedAt: null,
+      lastProgressAt: new Date(),
+    };
+
+    if (error) {
+      setPayload.progressStage = "error";
+      setPayload.progressMessage = error;
+    } else {
+      setPayload.progressPercent = 100;
+      setPayload.progressStage = "completed";
+      setPayload.progressMessage = "Sync complete";
+      setPayload.totalCandidates = stats.processed;
+      setPayload.processedCandidates = stats.processed;
+    }
+
     await SyncCheckpointModel.updateOne(
       { accountId },
       {
-        $set: {
-          syncState: error ? "error" : "idle",
-          lastHistoryId: newHistoryId,
-          lastSyncTimestamp: timestamp,
-          processedCount: stats.processed,
-          succeededCount: stats.succeeded,
-          failedCount: stats.failed,
-          lastSyncError: error || null,
-          syncStartedAt: null,
-        },
+        $set: setPayload,
       }
     );
   }
@@ -395,6 +452,12 @@ export class IncrementalSyncService {
           message: "Sync already in progress",
         };
       }
+
+      await this.updateProgress(objectIdAccountId, {
+        progressPercent: 10,
+        progressStage: "auth_setup",
+        progressMessage: "Authenticating Gmail access...",
+      });
 
       // ===== STEP 3: Setup OAuth & Gmail API =====
       const gmailAccount = await GmailAccountModel.findById(accountId);
@@ -641,6 +704,12 @@ export class IncrementalSyncService {
       let candidates: any[] = [];
       let newHistoryId: string | null = null;
 
+      await this.updateProgress(objectIdAccountId, {
+        progressPercent: 25,
+        progressStage: "fetch_candidates",
+        progressMessage: "Fetching candidate emails...",
+      });
+
       console.log(`[SYNC] Using strategy: ${emailSource}`);
 
       try {
@@ -733,6 +802,14 @@ export class IncrementalSyncService {
         ? filteredWithoutRetried.slice(0, MAX_EMAILS_TEST_MODE)
         : filteredWithoutRetried;
 
+      await this.updateProgress(objectIdAccountId, {
+        progressPercent: 40,
+        progressStage: "metadata_filtering",
+        progressMessage: "Applying metadata filters...",
+        totalCandidates: emailsToProcess.length,
+        processedCandidates: 0,
+      });
+
       if (TEST_MODE && filteredWithoutRetried.length > MAX_EMAILS_TEST_MODE) {
         console.log(
           `[SYNC] TEST_MODE active: limiting to ${MAX_EMAILS_TEST_MODE} emails (${filteredWithoutRetried.length} total available)`
@@ -743,9 +820,20 @@ export class IncrementalSyncService {
       let processed = 0;
       let succeeded = 0;
       let failed = 0;
+      const totalToProcess = emailsToProcess.length;
 
       for (const email of emailsToProcess) {
         processed++;
+        if (totalToProcess > 0 && (processed % 5 === 0 || processed === totalToProcess)) {
+          const ratio = processed / totalToProcess;
+          await this.updateProgress(objectIdAccountId, {
+            progressPercent: 40 + Math.floor(ratio * 55),
+            progressStage: "processing_emails",
+            progressMessage: "Processing inbox content...",
+            totalCandidates: totalToProcess,
+            processedCandidates: processed,
+          });
+        }
         try {
           // Compute current state hash
           const stateHash = this.computeStateHash(email);
@@ -941,6 +1029,14 @@ export class IncrementalSyncService {
       }
 
       // ===== STEP 7: Release Lock & Update Checkpoint =====
+      await this.updateProgress(objectIdAccountId, {
+        progressPercent: 99,
+        progressStage: "finalizing",
+        progressMessage: "Finalizing sync...",
+        totalCandidates: totalToProcess,
+        processedCandidates: processed,
+      });
+
       await this.releaseSyncLock(
         objectIdAccountId,
         newHistoryId,
