@@ -161,8 +161,12 @@
 .lrow {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 6px 6px 14px; cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background .1s, border-color .1s, padding .1s;
 }
 .lrow:hover { background: var(--surface-2); }
+.lrow.on { background: var(--surface); border-left-color: var(--accent); padding-left: 12px; }
+.lrow.on .lname { color: var(--text-1); font-weight: 600; }
 .ldot { width: 8px; height: 8px; flex-shrink: 0; }
 .lname { font-size: 11.5px; color: var(--text-2); }
 .lct { margin-left: auto; font-family: var(--font-mono); font-size: 9px; color: var(--text-3); }
@@ -298,6 +302,12 @@
   font-family: var(--font-mono); font-size: 10px; font-weight: 600;
   padding: 1px 6px; background: var(--border-lt); color: var(--text-2);
   margin-left: auto;
+}
+
+.empty-fallback {
+  padding: 30px 20px; text-align: center;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-3); border-bottom: 1px solid var(--border-lt);
 }
 
 .agenda-rows { display: flex; flex-direction: column; }

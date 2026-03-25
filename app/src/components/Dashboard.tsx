@@ -96,6 +96,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [calendarCol, setCalendarCol] = useState(false);
   const [rightCol, setRightCol] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState<string | null>(null);
+  const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -192,6 +193,10 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   }, [user]);
 
   const allItems = [...focusItems, ...actionItems, ...agendaItems];
+  const filteredItems = selectedLabel 
+    ? allItems.filter(item => item.matchedLabels.includes(selectedLabel))
+    : agendaItems;
+
   const selectedEmail = allItems.find((item) => item.insightId === selectedInsightId) || null;
   const selectedDomain = selectedEmail
     ? (selectedEmail.from.domain || selectedEmail.from.email.split('@')[1] || '')
@@ -376,7 +381,11 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                  <div className="lrow" style={{ color: 'var(--text-3)', fontSize: '11px', paddingLeft: '24px' }}>No custom labels</div>
               )}
               {sidebarLabels.map((lbl) => (
-                <div className="lrow" key={lbl.id}>
+                <div 
+                  className={`lrow ${selectedLabel === lbl.name ? 'on' : ''}`} 
+                  key={lbl.id}
+                  onClick={() => setSelectedLabel(selectedLabel === lbl.name ? null : lbl.name)}
+                >
                   <div className="ldot" style={{ background: lbl.color }}></div>
                   <span className="lname">{lbl.name}</span>
                   {lbl.count > 0 && <span className="lct">{lbl.count}</span>}
@@ -504,16 +513,20 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
           {/* AGENDA */}
           <div className="agenda-head">
-            <span className="agenda-ttl">All items</span>
-            <span className="agenda-meta">sorted by priority</span>
-            <span className="agenda-meta-num">{loading ? '...' : agendaItems.length}</span>
+            <span className="agenda-ttl">{selectedLabel ? `Label: ${selectedLabel}` : 'All items'}</span>
+            <span className="agenda-meta">{selectedLabel ? 'matching emails' : 'sorted by priority'}</span>
+            <span className="agenda-meta-num">{loading ? '...' : filteredItems.length}</span>
           </div>
 
           <div className="agenda-rows">
             {loading && <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '13px' }}>Loading agenda...</div>}
             
+            {!loading && selectedLabel && filteredItems.length === 0 && (
+              <div className="empty-fallback">No emails found for this label.</div>
+            )}
+            
             {/* We are sorting the Agenda items arbitrarily into Critical / High Priority tags for UI styling sake simply based on their index */}
-            {!loading && agendaItems.map((item, index) => {
+            {!loading && filteredItems.map((item, index) => {
               const severity = index < 2 ? 'crit' : 'high';
               const color = index < 2 ? 'var(--red)' : 'var(--amber)';
               const prefix = index < 2 ? 'Critical' : 'Priority';
