@@ -13,6 +13,7 @@ import {
   reviewLabelPriorityOrder,
   getPriorityRankingInsights,
 } from '../controllers/emailController';
+import { getSyncProgress } from '../controllers/syncProgressController';
 
 const router = express.Router();
 
@@ -46,5 +47,6 @@ router.get('/priority-ranking', verifyToken, getPriorityRankingInsights);
 // Body: { accountId: string }
 // Returns: sync results with processed/succeeded/failed counts
 router.post('/sync', verifyToken, syncEmails);
+router.get('/sync-progress', verifyToken, getSyncProgress);
 
 export default router;

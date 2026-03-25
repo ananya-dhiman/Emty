@@ -9,6 +9,15 @@ import mongoose, { Schema, Document, Types } from "mongoose";
  */
 
 export type SyncState = "idle" | "syncing" | "error";
+export type SyncProgressStage =
+  | "initializing"
+  | "auth_setup"
+  | "fetch_candidates"
+  | "metadata_filtering"
+  | "processing_emails"
+  | "finalizing"
+  | "completed"
+  | "error";
 
 export interface ISyncCheckpoint extends Document {
   accountId: Types.ObjectId; // Reference to GmailAccount
@@ -20,6 +29,12 @@ export interface ISyncCheckpoint extends Document {
   processedCount: number; // Total emails processed in last sync
   succeededCount: number; // Emails successfully processed
   failedCount: number; // Emails that failed processing
+  progressPercent: number;
+  progressStage: SyncProgressStage;
+  progressMessage?: string;
+  totalCandidates: number;
+  processedCandidates: number;
+  lastProgressAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -44,6 +59,25 @@ const SyncCheckpointSchema = new Schema<ISyncCheckpoint>(
     processedCount: { type: Number, default: 0 },
     succeededCount: { type: Number, default: 0 },
     failedCount: { type: Number, default: 0 },
+    progressPercent: { type: Number, default: 0, min: 0, max: 100 },
+    progressStage: {
+      type: String,
+      enum: [
+        "initializing",
+        "auth_setup",
+        "fetch_candidates",
+        "metadata_filtering",
+        "processing_emails",
+        "finalizing",
+        "completed",
+        "error",
+      ],
+      default: "initializing",
+    },
+    progressMessage: { type: String, default: null },
+    totalCandidates: { type: Number, default: 0 },
+    processedCandidates: { type: Number, default: 0 },
+    lastProgressAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
