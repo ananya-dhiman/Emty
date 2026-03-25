@@ -389,7 +389,8 @@
 }
 .blk-txt { font-size: 12px; color: var(--text-1); line-height: 1.65; }
 
-/* Deadline block */
+/* Dates block */
+.dates-list { display: flex; flex-direction: column; gap: 8px; }
 .dl-blk {
   background: var(--red-bg); border: 1.5px solid var(--red-border);
   padding: 12px 14px; display: flex; align-items: center; gap: 12px;

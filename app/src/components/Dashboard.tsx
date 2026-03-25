@@ -33,7 +33,55 @@ export interface PriorityRankingItem {
     updatedAt?: Date;
     lastSignalAt?: Date;
   };
+  dates?: Array<{
+    type: 'deadline' | 'event' | 'followup';
+    date: Date;
+    sourceEmailId?: string;
+  }>;
+  attachments?: Array<{
+    filename: string;
+    mimeType?: string;
+    size?: number;
+    sourceEmailId?: string;
+  }>;
+  checklist?: string[];
 }
+
+const normalizeDateValue = (raw: any): Date | null => {
+  if (!raw) return null;
+  if (raw instanceof Date) return Number.isNaN(raw.getTime()) ? null : raw;
+  if (typeof raw === 'string' || typeof raw === 'number') {
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  if (typeof raw === 'object' && raw.$date) {
+    const nested = typeof raw.$date === 'string' || typeof raw.$date === 'number'
+      ? raw.$date
+      : raw.$date?.$numberLong;
+    if (!nested) return null;
+    const parsed = new Date(nested);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+};
+
+const normalizeDates = (dates: any): Array<{ type: 'deadline' | 'event' | 'followup'; date: Date; sourceEmailId?: string }> => {
+  if (!Array.isArray(dates)) return [];
+  return dates
+    .map((item: any) => {
+      const type = item?.type;
+      const parsedDate = normalizeDateValue(item?.date);
+      if (!parsedDate || !['deadline', 'event', 'followup'].includes(type)) {
+        return null;
+      }
+      return {
+        type,
+        date: parsedDate,
+        sourceEmailId: item?.sourceEmailId,
+      };
+    })
+    .filter(Boolean) as Array<{ type: 'deadline' | 'event' | 'followup'; date: Date; sourceEmailId?: string }>;
+};
 
 interface DashboardProps {
   user: any;
@@ -150,6 +198,9 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     ? new Date(selectedEmail.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
     : 'Recently';
   const summaryText = selectedEmail?.summary.shortSnippet || selectedEmail?.summary.intent || 'No summary available.';
+  const selectedDates = normalizeDates((selectedEmail as any)?.dates);
+  const selectedAttachments = Array.isArray(selectedEmail?.attachments) ? selectedEmail!.attachments : [];
+  const selectedChecklist = Array.isArray(selectedEmail?.checklist) ? selectedEmail!.checklist : [];
 
   const selectEmail = (item: PriorityRankingItem) => {
     setSelectedInsightId(item.insightId);
@@ -294,20 +345,20 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             <div className="sb-grp" style={{ paddingTop: '12px' }}>
               <span className="sb-grp-lbl">Views</span>
               <div className="sb-row on">
-                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1.5" y="1.5" width="4.5" height="4.5" fill="currentColor" opacity=".9"/><rect x="7" y="1.5" width="4.5" height="4.5" fill="currentColor" opacity=".3"/><rect x="1.5" y="7" width="4.5" height="4.5" fill="currentColor" opacity=".3"/><rect x="7" y="7" width="4.5" height="4.5" fill="currentColor" opacity=".3"/></svg></div>
-                <span className="sb-txt">Today's agenda</span><span className="sb-ct a">7</span>
+                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 4h14v4H5zM5 10h14v4H5zM5 16h14v4H5z" fill="currentColor"/></svg></div>
+                <span className="sb-txt">Do</span><span className="sb-ct a">7</span>
               </div>
               <div className="sb-row">
-                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="2" y="2.5" width="9" height="8" stroke="currentColor" strokeWidth="1.2" fill="none"/><path d="M2 5h9" stroke="currentColor" strokeWidth="1.1"/><path d="M4.5 1.5v2M8.5 1.5v2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg></div>
-                <span className="sb-txt">Upcoming</span><span className="sb-ct g">3</span>
+                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M4 5l8 7-8 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M12 5l8 7-8 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
+                <span className="sb-txt">Defer</span><span className="sb-ct g">3</span>
               </div>
               <div className="sb-row">
-                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="4" stroke="currentColor" strokeWidth="1.2" fill="none"/><path d="M4.5 6.5l1.5 1.5 2.5-2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
-                <span className="sb-txt">Waiting on</span><span className="sb-ct g">2</span>
+                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="5" stroke="currentColor" strokeWidth="1.6"/><path d="M8 12h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg></div>
+                <span className="sb-txt">Track</span><span className="sb-ct g">2</span>
               </div>
               <div className="sb-row">
-                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 4h9M2 6.5h7M2 9h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg></div>
-                <span className="sb-txt">All mail</span><span className="sb-ct g">124</span>
+                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 5l14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M19 5L5 19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></div>
+                <span className="sb-txt">Ignore</span><span className="sb-ct g">124</span>
               </div>
             </div>
 
@@ -527,31 +578,49 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               <div className="blk-txt">{selectedDateLabel}</div>
             </div>
 
-            <div className="det-blk">
-              <span className="blk-lbl">Deadline</span>
-              <div className="dl-blk">
-                <div className="dlb-left">
-                  <div className="dlb-type">Not available</div>
-                  <div className="dlb-date">No deadline data</div>
-                  <div className="dlb-remain">This email does not include parsed deadline info yet</div>
+            {selectedDates.length > 0 && (
+              <div className="det-blk">
+                <span className="blk-lbl">Dates</span>
+                <div className="dates-list">
+                  {selectedDates.map((item, idx) => (
+                    <div className="dl-blk" key={`${item.type}-${item.date}-${idx}`}>
+                      <div className="dlb-left">
+                        <div className="dlb-type">{item.type}</div>
+                        <div className="dlb-date">{new Date(item.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div className="dlb-badge">N/A</div>
               </div>
-            </div>
+            )}
 
-            <div className="det-blk">
-              <span className="blk-lbl">Attachment</span>
-              <div className="att">
-                <div className="att-ext">N/A</div>
-                <div className="att-name">Attachment details not available</div>
-                <div className="att-sz">-</div>
+            {selectedAttachments.length > 0 && (
+              <div className="det-blk">
+                <span className="blk-lbl">Attachment</span>
+                <div className="dates-list">
+                  {selectedAttachments.map((attachment, idx) => (
+                    <div className="att" key={`${attachment.filename}-${idx}`}>
+                      <div className="att-ext">{attachment.filename.split('.').pop()?.toUpperCase() || 'FILE'}</div>
+                      <div className="att-name">{attachment.filename}</div>
+                      <div className="att-sz">
+                        {typeof attachment.size === 'number' ? `${Math.max(1, Math.round(attachment.size / 1024))} KB` : '-'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
-            <div className="det-blk">
-              <span className="blk-lbl">Checklist</span>
-              <div className="blk-txt">Checklist items are not available for this email yet.</div>
-            </div>
+            {selectedChecklist.length > 0 && (
+              <div className="det-blk">
+                <span className="blk-lbl">Checklist</span>
+                <div className="dates-list">
+                  {selectedChecklist.map((item, idx) => (
+                    <div className="blk-txt" key={`${item}-${idx}`}>{item}</div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="det-actions">

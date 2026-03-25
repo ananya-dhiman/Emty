@@ -372,6 +372,18 @@ export interface PriorityRankingItem {
     updatedAt?: Date;
     lastSignalAt?: Date;
   };
+  dates?: Array<{
+    type: "deadline" | "event" | "followup";
+    date: Date;
+    sourceEmailId?: string;
+  }>;
+  attachments?: Array<{
+    filename: string;
+    mimeType: string;
+    size: number;
+    sourceEmailId?: string;
+  }>;
+  checklist?: string[];
 }
 
 const buildPriorityScoringContext = (
@@ -490,6 +502,9 @@ export const getPriorityRanking = async (params: {
       { "state.relevance": { $exists: false } },
     ],
   })
+    .select(
+      "gmailThreadId summary from labels importanceScore baseScore baseScoreBreakdown state createdAt updatedAt dates attachments checklist"
+    )
     .lean()
     .exec();
 
@@ -573,6 +588,24 @@ export const getPriorityRanking = async (params: {
         updatedAt: insight.updatedAt,
         lastSignalAt: insight.state?.lastSignalAt,
       },
+      dates: Array.isArray(insight.dates)
+        ? insight.dates.map((d: any) => ({
+            type: d.type,
+            date: d.date,
+            sourceEmailId: d.sourceEmailId,
+          }))
+        : [],
+      attachments: Array.isArray(insight.attachments)
+        ? insight.attachments.map((a: any) => ({
+            filename: a.filename,
+            mimeType: a.mimeType,
+            size: a.size,
+            sourceEmailId: a.sourceEmailId,
+          }))
+        : [],
+      checklist: Array.isArray((insight as any).checklist)
+        ? ((insight as any).checklist as string[])
+        : [],
     });
   }
 
