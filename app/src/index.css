@@ -58,13 +58,13 @@
 
 /* ───────────────── DARK MODE ───────────────── */
 [data-mode="dark"] {
-  --bg:          #0E0E0E;
-  --panel:       #161616;
-  --surface:     #1F1F1F;
-  --surface-2:   #2A2A2A;
+  --bg:          #080808;
+  --panel:       #060606;
+  --surface:     #1C1C1C;
+  --surface-2:   #0a0909;
 
   --border:      #FFFFFF;
-  --border-lt:   #3A3A3A;
+  --border-lt:   #131313;
 
   --text-1:      #FFFFFF;
   --text-2:      #BBBBBB;
@@ -100,9 +100,18 @@
 
  
   --focus-badge-text:  #FFFFFF;
-
+  --focus-board-bg:    #080808; 
+  --focus-board-hd:    #060C07;
+  --focus-board-border:#1E4026;
+  --focus-card-bg:     #111D14;
+  --focus-card-hover:  #172519;
   
   --action-badge-text:  #FFFFFF;
+  --action-board-bg:    #0a0909; 
+  --action-board-hd:    #0A0503;
+  --action-board-border:#4A1E18;
+  --action-card-bg:     #261210;
+  --action-card-hover:  #321815;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 

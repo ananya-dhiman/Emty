@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
+import '../styles/Dashboard.css';
 
 interface LabelItem {
   id: string;
@@ -158,7 +159,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
         </div>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', justifyContent: 'center', padding: '60px 20px', overflowY: 'auto' }}>
+      <div className="onb-inner" style={{ flex: 1, display: 'flex', justifyContent: 'center', padding: '60px 20px', overflowY: 'auto' }}>
         <div style={{ width: '100%', maxWidth: '640px' }}>
           <h1 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>Inbox Priorities</h1>
           <p style={{ color: 'var(--text-3)', fontSize: '13px', marginBottom: '32px', lineHeight: 1.5 }}>

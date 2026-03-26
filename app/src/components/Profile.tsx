@@ -1,3 +1,5 @@
+import '../styles/Dashboard.css';
+
 interface Account {
   id: string;
   email: string;
@@ -40,7 +42,7 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
       </div>
 
       {/* Main Content */}
-      <div style={{ flex: 1, display: 'flex', justifyContent: 'center', padding: '60px 20px' }}>
+      <div className="onb-inner" style={{ flex: 1, display: 'flex', justifyContent: 'center', padding: '60px 20px' }}>
         <div style={{ width: '100%', maxWidth: '600px' }}>
           <h1 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>Profile Settings</h1>
           <p style={{ color: 'var(--text-3)', fontSize: '13px', marginBottom: '32px' }}>Manage your connected account.</p>
@@ -51,7 +53,7 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border-lt)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px', padding: '16px 20px', borderBottom: '1px solid var(--border-lt)' }}>
                 <div style={{ width: '36px', height: '36px', background: 'var(--accent)', color: 'var(--accent-inv)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: '14px', marginRight: '16px' }}>
                   {account.email.charAt(0).toUpperCase()}
                 </div>
