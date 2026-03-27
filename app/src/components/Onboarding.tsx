@@ -333,6 +333,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
   };
 
   const handleConfirm = async () => {
+    console.log('[Onboarding] handleConfirm called. gmailAccountId:', user?.gmailAccountId, 'hasToken:', !!token);
     if (!user?.gmailAccountId || !token) { onNavigate('dashboard'); return; }
     try {
       setSaving(true);
@@ -346,7 +347,8 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
         { accountId: user.gmailAccountId },
         { headers }
       );
-      onNavigate('syncing' as any);
+      // Sync already ran before onboarding; go directly to dashboard.
+      onNavigate('dashboard');
     } catch (err) {
       console.error('[Onboarding] Failed to save priorities:', err);
       alert('Failed to save priority order.');
@@ -649,7 +651,9 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <button onClick={() => onNavigate('dashboard')} disabled={saving}
+            <button
+              onClick={() => { console.log('[Onboarding] Step 2 Skip -> dashboard'); onNavigate('dashboard'); }}
+              disabled={saving}
               style={{ background: 'transparent', border: 'none', color: 'var(--text-3)', fontFamily: 'var(--font-ui)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', padding: '8px 0' }}>
               Skip
             </button>

@@ -7,7 +7,7 @@ interface SyncLoadingProps {
   user: any;
   theme: 'light' | 'dark';
   setTheme: (t: 'light' | 'dark') => void;
-  onNavigate: (route: 'dashboard') => void;
+  onNavigate: (route: 'dashboard' | 'onboarding') => void;
 }
 
 export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingProps) {
@@ -17,6 +17,10 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
   const [statusDetail, setStatusDetail] = useState('We are securely fetching and organizing your emails into your new priority stack.');
   const [typedDetail, setTypedDetail] = useState('');
   const API_URL = 'http://localhost:5000';
+
+  // Keep a ref to always read the latest user prop inside the effect closure
+  const userRef = useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
 
   const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const fallbackInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -72,7 +76,9 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
       setStageLabel('Completed');
       setStatusDetail('Bringing you to your dashboard now.');
       completionTimer.current = setTimeout(() => {
-        onNavigate('dashboard');
+        // Navigate to onboarding so the preference form shows
+        // with inferred keywords/domains/labels populated by cold-start.
+        onNavigate('onboarding');
       }, 1000);
     };
 
@@ -80,7 +86,8 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
     // from processed emails and saves them to UserIntentProfile.
     // Non-blocking: failure does not prevent navigation to dashboard.
     const runColdStart = async () => {
-      if (coldStartDone.current || !user?.gmailAccountId) return;
+      const currentUser = userRef.current;
+      if (coldStartDone.current || !currentUser?.gmailAccountId) return;
       coldStartDone.current = true;
 
       setStageLabel('Learning patterns');
@@ -90,7 +97,7 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
         const headers = await getAuthHeaders();
         await axios.post(
           `${API_URL}/api/intent/cold-start`,
-          { accountId: user.gmailAccountId },
+          { accountId: currentUser.gmailAccountId },
           headers ? { headers } : undefined
         );
         setStatusDetail('Patterns saved. Preparing your dashboard...');
@@ -139,11 +146,12 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
     };
 
     const fetchProgress = async () => {
-      if (!user?.gmailAccountId) return;
+      const currentUser = userRef.current;
+      if (!currentUser?.gmailAccountId) return;
       try {
         const headers = await getAuthHeaders();
         const { data } = await axios.get(
-          `${API_URL}/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
+          `${API_URL}/api/emails/sync-progress?accountId=${currentUser.gmailAccountId}`,
           headers ? { headers } : undefined
         );
         if (data?.success) applyProgressFromBackend(data);
@@ -168,21 +176,28 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
       setProgress((prev) => Math.min(prev + 1, 95));
     }, 30000);
 
-    // Start actual API Sync Call
+    // Start actual API Sync Call — reads user from ref to avoid stale closure
     const initiateSync = async () => {
+      // Wait up to 3s for user.gmailAccountId to be populated (in case of async user load)
+      let attempts = 0;
+      while (!userRef.current?.gmailAccountId && attempts < 6) {
+        await new Promise((r) => setTimeout(r, 500));
+        attempts++;
+      }
+      const currentUser = userRef.current;
       try {
-        if (!user || !user.gmailAccountId) {
-            console.warn("No user or gmailAccountId found. Skipping sync call.");
+        if (!currentUser || !currentUser.gmailAccountId) {
+            console.warn('[SyncLoading] No user or gmailAccountId after waiting. Skipping sync call.');
             syncRequestDone.current = true;
             finalizeSuccess();
             return;
         } else {
-            console.log("Initiating sync call to backend...");
+            console.log('[SyncLoading] Initiating sync call to backend for account:', currentUser.gmailAccountId);
             const headers = await getAuthHeaders();
             const response = await axios.post(`${API_URL}/api/emails/sync`, {
-              accountId: user.gmailAccountId
+              accountId: currentUser.gmailAccountId
             }, headers ? { headers } : undefined);
-            console.log("Sync call completed successfully.", response.data);
+            console.log('[SyncLoading] Sync call completed successfully.', response.data);
 
             if (!response?.data?.success) {
               throw new Error(response?.data?.message || 'Sync failed');
@@ -196,7 +211,7 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
         void runColdStart();
 
       } catch (err: any) {
-        console.error("Initial Sync Failed or Timed Out:", err);
+        console.error('[SyncLoading] Initial Sync Failed or Timed Out:', err);
         setProgress((prev) => Math.max(prev, 1));
         setSyncStatus('error');
         setStageLabel('Sync issue');
