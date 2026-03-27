@@ -668,3 +668,34 @@
   .onb-inner { padding: 32px 16px !important; }
 }
 
+/* ══════════════════════════════════════════════
+   FEEDBACK BUTTONS (relevance signals)
+══════════════════════════════════════════════ */
+
+/* Hidden by default in list rows — revealed on row hover */
+.feedback-row {
+  opacity: 0;
+  pointer-events: none;
+  max-height: 0;
+  overflow: hidden;
+  transition: opacity 0.15s ease, max-height 0.15s ease;
+  margin-top: 0 !important;
+}
+
+/* Show when parent agenda row is hovered */
+.arow:hover .feedback-row {
+  opacity: 1;
+  pointer-events: auto;
+  max-height: 40px;
+  margin-top: 6px !important;
+}
+
+/* Always visible in detail panel */
+.feedback-row.visible {
+  opacity: 1;
+  pointer-events: auto;
+  max-height: 40px;
+  margin-top: 12px !important;
+}
+
+

@@ -16,8 +16,8 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
   const [stageLabel, setStageLabel] = useState('Initializing sync');
   const [statusDetail, setStatusDetail] = useState('We are securely fetching and organizing your emails into your new priority stack.');
   const [typedDetail, setTypedDetail] = useState('');
-  const API_URL = 'http://localhost:5000'; 
-  
+  const API_URL = 'http://localhost:5000';
+
   const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const fallbackInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const completionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -27,6 +27,7 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
   const syncStatusRef = useRef<'syncing' | 'completed' | 'error'>('syncing');
   const syncRequestDone = useRef(false);
   const completionHandled = useRef(false);
+  const coldStartDone = useRef(false);
 
   const stageText: Record<string, string> = {
     initializing: 'Initializing sync',
@@ -73,6 +74,34 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
       completionTimer.current = setTimeout(() => {
         onNavigate('dashboard');
       }, 1000);
+    };
+
+    // Triggered once after sync completes — extracts keywords, domains, labels
+    // from processed emails and saves them to UserIntentProfile.
+    // Non-blocking: failure does not prevent navigation to dashboard.
+    const runColdStart = async () => {
+      if (coldStartDone.current || !user?.gmailAccountId) return;
+      coldStartDone.current = true;
+
+      setStageLabel('Learning patterns');
+      setStatusDetail('Learning your inbox patterns...');
+
+      try {
+        const headers = await getAuthHeaders();
+        await axios.post(
+          `${API_URL}/api/intent/cold-start`,
+          { accountId: user.gmailAccountId },
+          headers ? { headers } : undefined
+        );
+        setStatusDetail('Patterns saved. Preparing your dashboard...');
+      } catch (err) {
+        // Silent failure — cold start is non-blocking
+        console.warn('[SyncLoading] Cold start failed (non-blocking):', err);
+      }
+
+      // Short pause so the user can read the acknowledgment, then finalize
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      finalizeSuccess();
     };
 
     const applyProgressFromBackend = (data: any) => {
@@ -162,12 +191,9 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
 
         syncRequestDone.current = true;
         await fetchProgress();
-        if (lastBackendPercent.current >= 100) {
-          finalizeSuccess();
-        } else {
-          setStageLabel('Finalizing');
-          setStatusDetail('Finalizing sync...');
-        }
+        // Run cold-start before navigating, even if backend is not at 100% yet.
+        // finalizeSuccess is called inside runColdStart after a short pause.
+        void runColdStart();
 
       } catch (err: any) {
         console.error("Initial Sync Failed or Timed Out:", err);

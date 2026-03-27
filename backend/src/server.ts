@@ -4,6 +4,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import authRoutes from "./routes/authRoutes";
 import emailRoutes from "./routes/emailRoutes";
+import intentRoutes from "./routes/intentRoutes";
 
 // Load environment variables
 dotenv.config();
@@ -17,6 +18,7 @@ app.use(express.json()); // Parse JSON bodies
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/emails", emailRoutes);
+app.use("/api/intent", intentRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => {

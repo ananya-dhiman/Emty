@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import '../styles/Dashboard.css';
 import { CalendarSidebar } from './CalendarSidebar';
@@ -106,6 +106,28 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [sidebarLabels, setSidebarLabels] = useState<{id: string, name: string, color: string, rank: number, count: number}[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [notification, setNotification] = useState<{show: boolean, message: string, detail?: string, type: 'success' | 'error' | 'info'} | null>(null);
+
+  // feedbackMap: insightId -> 'boost' | 'suppress' | null
+  const [feedbackMap, setFeedbackMap] = useState<Record<string, 'boost' | 'suppress' | null>>({});
+
+  const sendFeedback = useCallback(async (insightId: string, signal: 'boost' | 'suppress') => {
+    const API_URL = 'http://localhost:5000';
+    const token = localStorage.getItem('firebaseToken');
+    // Toggle off if same signal clicked again
+    const current = feedbackMap[insightId];
+    const next = current === signal ? null : signal;
+    setFeedbackMap((prev) => ({ ...prev, [insightId]: next }));
+    if (!token) return;
+    try {
+      await axios.put(
+        `${API_URL}/api/intent/feedback`,
+        { insightId, signal: next ?? 'none' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (err) {
+      console.warn('[Feedback] Failed to record feedback (non-blocking):', err);
+    }
+  }, [feedbackMap]);
 
   const fetchInsights = async (isBackground = false) => {
     const API_URL = 'http://localhost:5000';
@@ -217,6 +239,67 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const openSelectedInGmail = () => {
     if (!selectedEmail?.gmailThreadId) return;
     window.open(`https://mail.google.com/mail/u/0/#all/${selectedEmail.gmailThreadId}`, '_blank', 'noopener,noreferrer');
+  };
+
+  // Inline component rendered per-email to show thumbs feedback.
+  // Visible on hover in list rows, always visible in detail panel.
+  const FeedbackButtons = ({ insightId, alwaysVisible = false }: { insightId: string; alwaysVisible?: boolean }) => {
+    const fb = feedbackMap[insightId] ?? null;
+    return (
+      <div
+        className={alwaysVisible ? 'feedback-row visible' : 'feedback-row'}
+        style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: alwaysVisible ? '12px' : '0' }}
+      >
+        <button
+          title="Mark as relevant"
+          onClick={(e) => { e.stopPropagation(); void sendFeedback(insightId, 'boost'); }}
+          style={{
+            background: 'none',
+            border: `1px solid ${fb === 'boost' ? 'var(--accent)' : 'var(--border)'}`,
+            borderRadius: '4px',
+            padding: '4px 7px',
+            cursor: 'pointer',
+            color: fb === 'boost' ? 'var(--accent)' : 'var(--text-3)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            fontSize: '11px',
+            fontFamily: 'var(--font-mono)',
+            transition: 'border-color 0.15s, color 0.15s',
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill={fb === 'boost' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
+            <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+          </svg>
+          Relevant
+        </button>
+        <button
+          title="Mark as not relevant"
+          onClick={(e) => { e.stopPropagation(); void sendFeedback(insightId, 'suppress'); }}
+          style={{
+            background: 'none',
+            border: `1px solid ${fb === 'suppress' ? 'var(--red, #c0351a)' : 'var(--border)'}`,
+            borderRadius: '4px',
+            padding: '4px 7px',
+            cursor: 'pointer',
+            color: fb === 'suppress' ? 'var(--red, #c0351a)' : 'var(--text-3)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            fontSize: '11px',
+            fontFamily: 'var(--font-mono)',
+            transition: 'border-color 0.15s, color 0.15s',
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill={fb === 'suppress' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+            <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+          </svg>
+          Not relevant
+        </button>
+      </div>
+    );
   };
 
   const handleSync = async () => {
@@ -550,6 +633,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                           <span className="tag" key={lbl}>{lbl}</span>
                         ))}
                       </div>
+                      <FeedbackButtons insightId={item.insightId} />
                     </div>
                     <div className="ar-time">
                        {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
@@ -646,6 +730,16 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                     <div className="blk-txt" key={`${item}-${idx}`}>{item}</div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {selectedEmail && (
+              <div className="det-blk">
+                <span className="blk-lbl">Feedback</span>
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)', margin: '0 0 8px' }}>
+                  Tell us if this email is relevant to you.
+                </p>
+                <FeedbackButtons insightId={selectedEmail.insightId} alwaysVisible />
               </div>
             )}
           </div>
