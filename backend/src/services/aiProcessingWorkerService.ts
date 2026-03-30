@@ -298,6 +298,13 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         // Await the batch strictly
         await Promise.all(promises);
         processedCount += batch.length;
+
+        // RATE LIMIT BUFFER: OpenRouter free models limit to 20 requests/min.
+        // If there are more batches left to process, wait 15 seconds to avoid 429s.
+        if (i + BATCH_SIZE < totalCount) {
+          console.log(`[AI WORKER] Batch complete. Sleeping 15s to respect rate limits...`);
+          await new Promise(resolve => setTimeout(resolve, 15000));
+        }
     }
 
     // Complete Progress Updates
