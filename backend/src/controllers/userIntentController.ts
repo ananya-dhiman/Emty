@@ -3,6 +3,8 @@ import { AuthRequest } from "../middleware/authMiddleware";
 import { UserIntentProfileModel } from "../model/UserIntentProfile";
 import { GmailAccountModel } from "../model/GmailAccount";
 import { runAndPersistColdStart } from "../services/coldStartService";
+import { runScoringWorker } from "../services/scoringWorkerService";
+import { runAiProcessingWorker } from "../services/aiProcessingWorkerService";
 
 // ─── GET /api/intent/profile ─────────────────────────────────────────────────
 // Returns the current UserIntentProfile for the authenticated user.
@@ -79,6 +81,22 @@ export const upsertIntentProfile = async (
       { $set: update },
       { upsert: true, new: true }
     );
+
+    // If onboarding just finished, trigger the background async processing sequence
+    if (onboardingCompleted === true) {
+      console.log(`[ONBOARDING] Completed, starting background async sequence for user ${userId}`);
+      (async () => {
+        try {
+          const account = await GmailAccountModel.findOne({ userId });
+          if (account) {
+            await runScoringWorker(userId, account._id.toString());
+            await runAiProcessingWorker(userId, account._id.toString());
+          }
+        } catch (err: any) {
+          console.error('[BACKGROUND SEQUENCE FAIL]', err.message);
+        }
+      })();
+    }
 
     res.status(200).json({ success: true, profile });
   } catch (err: any) {

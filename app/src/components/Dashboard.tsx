@@ -214,6 +214,47 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     fetchInsights(false);
   }, [user]);
 
+  // Background polling for live-stream dashboard (Option B)
+  // Auto-refreshes the inbox while the background workers are active
+  useEffect(() => {
+    if (!user?.gmailAccountId) return;
+    const token = localStorage.getItem('firebaseToken');
+    if (!token) return;
+
+    let pollInterval: ReturnType<typeof setInterval>;
+    let isCurrentlyPolling = false;
+
+    const checkBackgroundProgress = async () => {
+      if (isCurrentlyPolling) return;
+      isCurrentlyPolling = true;
+      try {
+        const { data } = await axios.get(
+          `http://localhost:5000/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        
+        if (data?.success && data.progressStage && data.progressStage !== 'completed') {
+          // If a background sync is happening, fetch latest inbox items silently
+          setIsSyncing(true);
+          await fetchInsights(true);
+        } else if (data?.success && data.progressStage === 'completed') {
+           setIsSyncing(false);
+           clearInterval(pollInterval);
+        }
+      } catch (err) {
+        console.warn('[Dashboard] Background progress poll failed', err);
+      } finally {
+        isCurrentlyPolling = false;
+      }
+    };
+
+    checkBackgroundProgress(); // Check immediately on mount
+    pollInterval = setInterval(checkBackgroundProgress, 4000);
+
+    return () => clearInterval(pollInterval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   const allItems = [...focusItems, ...actionItems, ...agendaItems];
   const filteredItems = selectedLabel 
     ? allItems.filter(item => item.matchedLabels.includes(selectedLabel))
@@ -414,7 +455,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               style={{ cursor: isSyncing ? 'default' : 'pointer', background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--text-1)' }}
             >
               <div className={`sdot ${isSyncing ? 'pulse' : ''}`} style={isSyncing ? { background: 'var(--amber)' } : {}}></div>
-              {isSyncing ? 'Syncing...' : 'Sync'}
+              {isSyncing ? 'Syncing Inbox...' : 'Sync'}
             </button>
             <div className="bar-av" onClick={() => onNavigate('profile')}>{user?.name ? user.name.charAt(0).toUpperCase() : 'U'}</div>
           </div>
@@ -528,7 +569,9 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               <div className="track">
                 {loading && <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>Loading insights...</div>}
                 {!loading && focusItems.length === 0 && (
-                   <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>Inbox zero. Great job!</div>
+                   <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '13px', lineHeight: 1.5 }}>
+                     {isSyncing ? 'Evaluating emails in the background. Your most important emails will pop up here shortly...' : 'Inbox zero. Great job!'}
+                   </div>
                 )}
                 {!loading && focusItems.map((item) => (
                   <div

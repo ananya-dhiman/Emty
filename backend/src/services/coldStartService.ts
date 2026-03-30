@@ -1,5 +1,6 @@
 import { InsightModel } from "../model/Insight";
 import { UserIntentProfileModel } from "../model/UserIntentProfile";
+import { EmailMessageModel } from "../model/EmailMessage";
 
 // Configurable limits — change here without a redeploy
 export const COLD_START_LIMIT_TEST = 10;
@@ -68,7 +69,7 @@ export interface ColdStartResult {
 }
 
 /**
- * Reads existing Insight records (already processed emails) and extracts
+ * Reads existing EmailMessage records (staged candidate emails) and extracts
  * recurring keywords, sender domains, and label names to bootstrap the
  * UserIntentProfile.
  *
@@ -83,8 +84,10 @@ export async function extractColdStartFeatures(
   accountId: string,
   limit: number = COLD_START_LIMIT_TEST
 ): Promise<ColdStartResult> {
-  const insights = await InsightModel.find({ userId, accountId })
-    .sort({ createdAt: -1 })
+  // Use EmailMessageModel instead of InsightModel since AI Insights aren't generated
+  // until AFTER onboarding in the new decoupled async pipeline.
+  const emails = await EmailMessageModel.find({ accountId })
+    .sort({ internalDate: -1 })
     .limit(limit)
     .lean();
 
@@ -92,22 +95,22 @@ export async function extractColdStartFeatures(
   const domainFreq = new Map<string, number>();
   const labelFreq = new Map<string, number>();
 
-  for (const insight of insights) {
-    // Keywords from snippet + intent summary
-    const text = [insight.summary?.shortSnippet ?? ""].join(" ");
+  for (const email of emails) {
+    // Keywords from snippet + subject
+    const text = [email.subject ?? "", email.snippet ?? ""].join(" ");
     const tokens = tokenise(text);
     allTokens.push(...tokens);
 
     // Sender domains
-    const domain = extractDomain(insight.from?.email ?? "");
+    const domain = extractDomain(email.from ?? "");
     if (domain) {
       domainFreq.set(domain, (domainFreq.get(domain) ?? 0) + 1);
     }
 
-    // Labels
-    for (const lbl of insight.labels ?? []) {
-      if (lbl.name) {
-        labelFreq.set(lbl.name, (labelFreq.get(lbl.name) ?? 0) + 1);
+    // Generic extracted labels from RulesEngine phase 1
+    for (const lblName of email.extractedFeatures ?? []) {
+      if (lblName) {
+        labelFreq.set(lblName, (labelFreq.get(lblName) ?? 0) + 1);
       }
     }
   }
@@ -118,7 +121,7 @@ export async function extractColdStartFeatures(
     inferredKeywords: topN(kwFreq, 15),
     inferredDomains: topN(domainFreq, 10),
     inferredLabels: topN(labelFreq, 10),
-    emailsScanned: insights.length,
+    emailsScanned: emails.length,
   };
 }
 

@@ -347,7 +347,9 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
         { accountId: user.gmailAccountId },
         { headers }
       );
-      // Sync already ran before onboarding; go directly to dashboard.
+      
+      // User opted for live-stream dashboard! Route immediately to dashboard
+      // where emails will pop in as the background worker runs.
       onNavigate('dashboard');
     } catch (err) {
       console.error('[Onboarding] Failed to save priorities:', err);
@@ -667,3 +669,5 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     </div>
   );
 }
+
+

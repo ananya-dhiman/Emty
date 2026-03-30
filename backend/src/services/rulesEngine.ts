@@ -5,6 +5,8 @@
  * Prevents code duplication and ensures consistency
  */
 
+import { IUserIntentProfile } from "../model/UserIntentProfile";
+
 export interface EmailMetadata {
   messageId: string;
   threadId: string;
@@ -16,10 +18,10 @@ export interface EmailMetadata {
   labels?: string[];
 }
 
-export interface UserPreferences {
-  // Future: expand to support user-customizable rules
-  // For now, use system defaults
-}
+export type UserPreferences = Partial<Pick<
+  IUserIntentProfile,
+  'includeKeywords' | 'preferredDomains' | 'excludeKeywords' | 'blockedDomains'
+>>;
 
 export interface RelevantLabelCandidate {
   name: string;
@@ -32,18 +34,20 @@ export class RulesEngine {
   /**
    * Check if email matches inclusion rules
    */
-  private isIncluded(metadata: EmailMetadata): boolean {
+  private isIncluded(metadata: EmailMetadata, preferences?: UserPreferences): boolean {
     const { from, subject, snippet, hasAttachments } = metadata;
 
     // Extract domain from 'from' (e.g., user@domain.com -> domain.com)
-    const domainMatch = from.match(/@(.+)/);
-    const domain = domainMatch ? domainMatch[1].toLowerCase() : "";
+    const domainMatch = from.match(/@([^>]+)/);
+    let domain = domainMatch ? domainMatch[1].toLowerCase() : "";
+    domain = domain.replace(/^["']|["']$/g, '').trim();
 
     // Include rules based on domain
-    if (
-      domain.includes(".edu") ||
-      ["linkedin.com", "indeed.com", "glassdoor.com"].includes(domain)
-    ) {
+    const preferred = preferences?.preferredDomains?.length 
+      ? preferences.preferredDomains 
+      : [".edu", "linkedin.com", "indeed.com", "glassdoor.com"];
+    
+    if (preferred.some(d => domain.includes(d.toLowerCase()))) {
       return true;
     }
 
@@ -54,7 +58,11 @@ export class RulesEngine {
 
     // Include based on keywords in subject/snippet
     const text = `${subject} ${snippet}`.toLowerCase();
-    if (/\b(job|interview|application|deadline|event|opportunity)\b/.test(text)) {
+    const keywords = preferences?.includeKeywords?.length 
+      ? preferences.includeKeywords 
+      : ["job", "interview", "application", "deadline", "event", "opportunity"];
+
+    if (keywords.some(kw => text.includes(kw.toLowerCase()))) {
       return true;
     }
 
@@ -64,8 +72,19 @@ export class RulesEngine {
   /**
    * Check if email matches exclusion rules
    */
-  private isExcluded(metadata: EmailMetadata): boolean {
+  private isExcluded(metadata: EmailMetadata, preferences?: UserPreferences): boolean {
     const { from, subject, snippet } = metadata;
+
+    const domainMatch = from.match(/@([^>]+)/);
+    let domain = domainMatch ? domainMatch[1].toLowerCase() : "";
+    domain = domain.replace(/^["']|["']$/g, '').trim();
+
+    // Blocked Domains
+    if (preferences?.blockedDomains?.length) {
+      if (preferences.blockedDomains.some(d => domain.includes(d.toLowerCase()))) {
+        return true;
+      }
+    }
 
     // Exclude no-reply emails
     if (
@@ -77,9 +96,11 @@ export class RulesEngine {
 
     // Exclude newsletters and promotions
     const text = `${subject} ${snippet}`.toLowerCase();
-    if (
-      /\b(weekly digest|newsletter|promotion|unsubscribe)\b/i.test(text)
-    ) {
+    const exclusions = preferences?.excludeKeywords?.length 
+      ? preferences.excludeKeywords 
+      : ["weekly digest", "newsletter", "promotion", "unsubscribe"];
+
+    if (exclusions.some(ex => text.includes(ex.toLowerCase()))) {
       return true;
     }
 
@@ -96,12 +117,12 @@ export class RulesEngine {
   ): EmailMetadata[] {
     return emails.filter((email) => {
       // If excluded, reject immediately
-      if (this.isExcluded(email)) {
+      if (this.isExcluded(email, preferences)) {
         return false;
       }
 
       // Otherwise, must match inclusion rules
-      return this.isIncluded(email);
+      return this.isIncluded(email, preferences);
     });
   }
 
