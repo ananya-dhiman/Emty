@@ -9,6 +9,8 @@ import { refreshAccessToken } from '../services/gmailAuth';
 import { processEmailDeep } from '../services/emailProcessingService';
 import rulesEngine from '../services/rulesEngine';
 import incrementalSyncService from '../services/incrementalSyncService';
+import { runScoringWorker } from '../services/scoringWorkerService';
+import { runAiProcessingWorker } from '../services/aiProcessingWorkerService';
 import {
     AI_LABEL_SUGGESTION_MIN_MATCHES,
     getAssignableLabels,
@@ -501,8 +503,24 @@ export const syncEmails = async (req: AuthRequest, res: Response): Promise<void>
             return;
         }
 
-        // Trigger incremental sync
+        // Trigger incremental sync (fetches new candidates into EmailMessage staging DB)
         const result = await incrementalSyncService.sync(accountId);
+
+        // Phase 2: Start background workers to dynamically score and AI-process the new arrivals
+        // We run this asynchronously so the web request returns 200 immediately and the
+        // Dashboard can use its Option B auto-polling stream.
+        if (result.success && result.processed >= 0) {
+            console.log(`[SYNC] Completed fetch stage. Starting background workers for user ${uid}`);
+            (async () => {
+                try {
+                    await runScoringWorker(uid, accountId);
+                    await runAiProcessingWorker(uid, accountId);
+                } catch (err: any) {
+                    console.error('[BACKGROUND SEQUENCE FAIL from Sync]', err.message);
+                }
+            })();
+        }
+
 
         res.status(result.success ? 200 : 400).json({
             success: result.success,

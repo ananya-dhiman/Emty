@@ -25,7 +25,7 @@ import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService
  * Strict concurrency management via batching.
  */
 
-const BATCH_SIZE = 5; // Process 5 emails at a time to stay under API limits
+const BATCH_SIZE = 1; // Process 1 email at a time to stay under API limits
 const MAX_RETRIES = process.env.MAX_RETRIES ? parseInt(process.env.MAX_RETRIES) : 5;
 
 const safeParseDate = (val: any): Date | null => {
@@ -296,14 +296,16 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         });
 
         // Await the batch strictly
-        await Promise.all(promises);
+        for (const p of promises) {
+            await p;
+        }
         processedCount += batch.length;
 
         // RATE LIMIT BUFFER: OpenRouter free models limit to 20 requests/min.
-        // If there are more batches left to process, wait 15 seconds to avoid 429s.
+        // If there are more batches left to process, wait 4 seconds to avoid 429s.
         if (i + BATCH_SIZE < totalCount) {
-          console.log(`[AI WORKER] Batch complete. Sleeping 15s to respect rate limits...`);
-          await new Promise(resolve => setTimeout(resolve, 15000));
+          console.log(`[AI WORKER] Email complete. Sleeping 4s to respect rate limits...`);
+          await new Promise(resolve => setTimeout(resolve, 4000));
         }
     }
 
