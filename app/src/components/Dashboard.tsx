@@ -45,6 +45,15 @@ export interface PriorityRankingItem {
     size?: number;
     sourceEmailId?: string;
   }>;
+  emailContextById?: Record<string, {
+    subject?: string;
+    from?: {
+      email?: string;
+      name?: string;
+      domain?: string;
+    };
+    internalDate?: Date | string;
+  }>;
   checklist?: string[];
 }
 
@@ -96,6 +105,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [calendarCol, setCalendarCol] = useState(false);
   const [rightCol, setRightCol] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState<string | null>(null);
+  const [selectedSourceMessageId, setSelectedSourceMessageId] = useState<string | null>(null);
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -274,6 +284,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
   const selectEmail = (item: PriorityRankingItem) => {
     setSelectedInsightId(item.insightId);
+    setSelectedSourceMessageId(null);
     setRightCol(true);
   };
 
@@ -394,6 +405,9 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   };
 
   const toggleSidebar = () => setSidebarCol(!sidebarCol);
+  const selectedSourceContext = selectedEmail && selectedSourceMessageId
+    ? selectedEmail.emailContextById?.[selectedSourceMessageId]
+    : null;
 
   return (
     <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -737,10 +751,20 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                 <span className="blk-lbl">Dates</span>
                 <div className="dates-list">
                   {selectedDates.map((item, idx) => (
-                    <div className="dl-blk" key={`${item.type}-${item.date}-${idx}`}>
+                    <div
+                      className="dl-blk"
+                      key={`${item.type}-${item.date}-${idx}`}
+                      onClick={() => setSelectedSourceMessageId(item.sourceEmailId || null)}
+                      style={{ cursor: item.sourceEmailId ? 'pointer' : 'default' }}
+                    >
                       <div className="dlb-left">
                         <div className="dlb-type">{item.type}</div>
                         <div className="dlb-date">{new Date(item.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+                        {item.sourceEmailId && (
+                          <div className="dlb-date" style={{ opacity: 0.75, marginTop: '2px' }}>
+                            source: {(selectedEmail?.emailContextById?.[item.sourceEmailId]?.subject || item.sourceEmailId).slice(0, 50)}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -753,14 +777,41 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                 <span className="blk-lbl">Attachment</span>
                 <div className="dates-list">
                   {selectedAttachments.map((attachment, idx) => (
-                    <div className="att" key={`${attachment.filename}-${idx}`}>
+                    <div
+                      className="att"
+                      key={`${attachment.filename}-${idx}`}
+                      onClick={() => setSelectedSourceMessageId(attachment.sourceEmailId || null)}
+                      style={{ cursor: attachment.sourceEmailId ? 'pointer' : 'default' }}
+                    >
                       <div className="att-ext">{attachment.filename.split('.').pop()?.toUpperCase() || 'FILE'}</div>
-                      <div className="att-name">{attachment.filename}</div>
+                      <div className="att-name">
+                        {attachment.filename}
+                        {attachment.sourceEmailId && (
+                          <div style={{ fontSize: '10px', opacity: 0.75 }}>
+                            source: {(selectedEmail?.emailContextById?.[attachment.sourceEmailId]?.subject || attachment.sourceEmailId).slice(0, 50)}
+                          </div>
+                        )}
+                      </div>
                       <div className="att-sz">
                         {typeof attachment.size === 'number' ? `${Math.max(1, Math.round(attachment.size / 1024))} KB` : '-'}
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {selectedSourceContext && (
+              <div className="det-blk">
+                <span className="blk-lbl">Source Email</span>
+                <div className="blk-txt" style={{ marginBottom: '6px' }}>
+                  {selectedSourceContext.subject || 'No subject'}
+                </div>
+                <div className="blk-txt" style={{ fontSize: '11px', opacity: 0.8 }}>
+                  {selectedSourceContext.from?.name || selectedSourceContext.from?.email || 'Unknown sender'}
+                  {selectedSourceContext.internalDate
+                    ? ` • ${new Date(selectedSourceContext.internalDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
+                    : ''}
                 </div>
               </div>
             )}

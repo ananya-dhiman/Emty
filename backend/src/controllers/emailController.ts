@@ -404,46 +404,138 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
                     threadId: metadata.threadId,
                 });
 
-                // Persist to Intelligence Index
-                const insight = new InsightModel({
+                const parsedDates = processed.insights.dates.map((d) => ({
+                    type: d.type,
+                    date: new Date(d.date),
+                }));
+                const emailEntry: any = {
+                    messageId: metadata.messageId,
+                    internalDate: Number.isFinite(parseInt(metadata.internalDate, 10))
+                        ? new Date(parseInt(metadata.internalDate, 10))
+                        : new Date(),
+                    from: processed.from,
+                    subject: processed.subject || metadata.subject,
+                    snippet: metadata.snippet,
+                    labels: normalizedLabels.assignedLabels.map((label) => ({
+                        labelId: label._id,
+                        name: label.name,
+                    })),
+                    dates: parsedDates,
+                    attachments: processed.attachmentMetadata.map((a) => ({
+                        filename: a.filename,
+                        mimeType: a.mimeType,
+                        size: a.size,
+                    })),
+                    extractedFacts: processed.insights.extractedFacts,
+                    ai: {
+                        intent: processed.insights.intent,
+                        shortSnippet: processed.insights.shortSnippet,
+                        processedAt: new Date(),
+                    },
+                };
+
+                let insight = await InsightModel.findOne({
                     userId: uid,
                     accountId: gmailAccount._id,
                     gmailThreadId: metadata.threadId,
-                    emailIds: [metadata.messageId],
-                    threadId: null, // Will be updated when Thread model is available
-                    from: processed.from,
-                    labels: normalizedLabels.assignedLabels.map((label) => ({
+                });
+
+                if (!insight) {
+                    const newInsight = new InsightModel({
+                        userId: uid,
+                        accountId: gmailAccount._id,
+                        docType: 'thread_insight',
+                        gmailThreadId: metadata.threadId,
+                        emailIds: [metadata.messageId],
+                        threadId: null,
+                        emails: [emailEntry],
+                        from: processed.from,
+                        labels: normalizedLabels.assignedLabels.map((label) => ({
+                            labelId: label._id,
+                            name: label.name,
+                            source: label.source,
+                            statusSnapshot: label.status,
+                        })),
+                        labelSuggestions: suggestedLabel
+                            ? [{
+                                labelId: suggestedLabel._id,
+                                name: suggestedLabel.name,
+                                source: 'ai',
+                                status: 'suggested',
+                                confidence: Math.min((suggestedLabel.suggestionCount || 0) / AI_LABEL_SUGGESTION_MIN_MATCHES, 1),
+                                generatedAt: new Date(),
+                            }]
+                            : [],
+                        importanceScore: null,
+                        summary: {
+                            shortSnippet: processed.insights.shortSnippet,
+                            intent: processed.insights.intent,
+                        },
+                        dates: parsedDates.map((d) => ({
+                            ...d,
+                            sourceEmailId: metadata.messageId,
+                        })),
+                        attachments: emailEntry.attachments.map((a: any) => ({
+                            ...a,
+                            sourceEmailId: metadata.messageId,
+                        })),
+                        state: null,
+                        extractedFacts: processed.insights.extractedFacts,
+                    });
+                    await newInsight.save();
+                    insight = newInsight;
+                } else {
+                    const existingEmails = Array.isArray((insight as any).emails) ? [...(insight as any).emails] : [];
+                    const idx = existingEmails.findIndex((e: any) => e?.messageId === metadata.messageId);
+                    if (idx >= 0) existingEmails[idx] = { ...existingEmails[idx], ...emailEntry };
+                    else existingEmails.push(emailEntry);
+                    const boundedEmails = existingEmails
+                        .sort((a: any, b: any) => new Date(a.internalDate).getTime() - new Date(b.internalDate).getTime())
+                        .slice(-50);
+                    const latest = boundedEmails[boundedEmails.length - 1] || emailEntry;
+
+                    insight.docType = 'thread_insight';
+                    insight.emailIds = boundedEmails.map((e: any) => e.messageId);
+                    (insight as any).emails = boundedEmails;
+                    insight.from = latest.from || insight.from;
+                    insight.labels = normalizedLabels.assignedLabels.map((label) => ({
                         labelId: label._id,
                         name: label.name,
                         source: label.source,
                         statusSnapshot: label.status,
-                    })),
-                    labelSuggestions: suggestedLabel && suggestedLabel.status !== 'rejected'
+                    }));
+                    insight.labelSuggestions = suggestedLabel
                         ? [{
                             labelId: suggestedLabel._id,
                             name: suggestedLabel.name,
                             source: 'ai',
-                            status: suggestedLabel.status,
+                            status: 'suggested',
                             confidence: Math.min((suggestedLabel.suggestionCount || 0) / AI_LABEL_SUGGESTION_MIN_MATCHES, 1),
                             generatedAt: new Date(),
                         }]
-                        : [],
-                    importanceScore: null, // Will be calculated later
-                    summary: {
-                        shortSnippet: processed.insights.shortSnippet,
-                        intent: processed.insights.intent,
-                    },
-                    dates: processed.insights.dates.map((d) => ({
-                        type: d.type,
-                        date: new Date(d.date),
-                        sourceEmailId: metadata.messageId,
-                    })),
-                    attachments: processed.attachmentMetadata,
-                    state: null, // Will be set later
-                    extractedFacts: processed.insights.extractedFacts,
-                });
-
-                await insight.save();
+                        : [];
+                    insight.summary = {
+                        shortSnippet: latest?.ai?.shortSnippet || processed.insights.shortSnippet,
+                        intent: latest?.ai?.intent || processed.insights.intent,
+                    };
+                    insight.dates = boundedEmails.flatMap((entry: any) =>
+                        (Array.isArray(entry?.dates) ? entry.dates : []).map((d: any) => ({
+                            type: d.type,
+                            date: d.date,
+                            sourceEmailId: entry.messageId,
+                        }))
+                    ) as any;
+                    insight.attachments = boundedEmails.flatMap((entry: any) =>
+                        (Array.isArray(entry?.attachments) ? entry.attachments : []).map((a: any) => ({
+                            filename: a.filename,
+                            mimeType: a.mimeType,
+                            size: a.size,
+                            sourceEmailId: entry.messageId,
+                        }))
+                    ) as any;
+                    insight.extractedFacts = latest?.extractedFacts || insight.extractedFacts;
+                    await insight.save();
+                }
                 processedInsights.push({
                     messageId: metadata.messageId,
                     success: true,

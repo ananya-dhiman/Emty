@@ -27,6 +27,7 @@ import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService
 
 const BATCH_SIZE = 1; // Process 1 email at a time to stay under API limits
 const MAX_RETRIES = process.env.MAX_RETRIES ? parseInt(process.env.MAX_RETRIES) : 5;
+const MAX_EMAILS_PER_THREAD = 50;
 
 const safeParseDate = (val: any): Date | null => {
   if (!val && val !== 0) return null;
@@ -166,34 +167,184 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                     typeof parsedImportanceScore === "number"
                         ? Math.max(0, Math.min(parsedImportanceScore, 1))
                         : undefined;
-                const baseScoreResult = computeBaseScore({
-                    importanceScore: boundedImportanceScore,
+                const parsedDates = deepResult.insights.dates
+                    .map((d: any) => {
+                        const parsed = safeParseDate(d.date);
+                        if (!parsed) return null;
+                        return {
+                            type: d.type,
+                            date: parsed,
+                        };
+                    })
+                    .filter(Boolean);
+
+                const emailEntry: any = {
+                    messageId,
+                    internalDate: email.internalDate || new Date(),
+                    from: deepResult.from,
+                    subject: deepResult.subject || email.subject,
+                    snippet: email.snippet,
                     labels: normalizedLabels.assignedLabels.map((label: any) => ({
                         labelId: label._id,
                         name: label.name,
                     })),
-                    context: priorityScoringContext,
-                });
+                    dates: parsedDates,
+                    attachments: deepResult.attachmentMetadata.map((a: any) => ({
+                        filename: a.filename,
+                        mimeType: a.mimeType,
+                        size: a.size,
+                    })),
+                    extractedFacts: deepResult.insights.extractedFacts,
+                    ai: {
+                        intent: deepResult.insights.intent,
+                        shortSnippet: deepResult.insights.shortSnippet,
+                        importanceScore: boundedImportanceScore,
+                        processedAt: new Date(),
+                    },
+                };
 
-                const insightData: any = {
+                let insight = await InsightModel.findOne({
                     userId,
                     accountId: objectIdAccountId,
                     gmailThreadId: email.threadId,
-                    emailIds: [messageId],
-                    from: deepResult.from,
-                    labels: normalizedLabels.assignedLabels.map((label) => ({
+                });
+
+                if (!insight) {
+                    const baseScoreResult = computeBaseScore({
+                        importanceScore: boundedImportanceScore,
+                        labels: normalizedLabels.assignedLabels.map((label: any) => ({
+                            labelId: label._id,
+                            name: label.name,
+                        })),
+                        context: priorityScoringContext,
+                    });
+
+                    const newInsight = new InsightModel({
+                        userId,
+                        accountId: objectIdAccountId,
+                        docType: "thread_insight",
+                        gmailThreadId: email.threadId,
+                        emailIds: [messageId],
+                        emails: [emailEntry],
+                        from: deepResult.from,
+                        labels: normalizedLabels.assignedLabels.map((label) => ({
+                            labelId: label._id,
+                            name: label.name,
+                            source: label.source,
+                            statusSnapshot: label.status,
+                        })),
+                        labelSuggestions: suggestedLabel
+                            ? [
+                                {
+                                    labelId: suggestedLabel._id,
+                                    name: suggestedLabel.name,
+                                    source: "ai",
+                                    status: "suggested",
+                                    confidence: Math.min(
+                                        (suggestedLabel.suggestionCount || 0) / AI_LABEL_SUGGESTION_MIN_MATCHES,
+                                        1
+                                    ),
+                                    generatedAt: new Date(),
+                                },
+                            ]
+                            : [],
+                        summary: {
+                            shortSnippet: deepResult.insights.shortSnippet,
+                            intent: deepResult.insights.intent,
+                        },
+                        importanceScore: boundedImportanceScore,
+                        dates: parsedDates.map((d: any) => ({
+                            type: d.type,
+                            date: d.date,
+                            sourceEmailId: messageId,
+                        })),
+                        attachments: emailEntry.attachments.map((a: any) => ({
+                            ...a,
+                            sourceEmailId: messageId,
+                        })),
+                        extractedFacts: deepResult.insights.extractedFacts,
+                        baseScore: baseScoreResult.baseScore,
+                        baseScoreBreakdown: {
+                            importanceNorm: baseScoreResult.importanceNorm,
+                            labelNorm: baseScoreResult.labelNorm,
+                            matchedLabelRank: baseScoreResult.matchedLabelRank,
+                        },
+                        baseScoreComputedAt: new Date(),
+                        state: {
+                            relevance: "active",
+                            firstSeenAt: new Date(),
+                            lastSignalAt: new Date(),
+                            lastVerifiedAt: new Date(),
+                        },
+                    });
+                    await newInsight.save();
+                    insight = newInsight;
+                } else {
+                    const existingEmails = Array.isArray((insight as any).emails) ? [...(insight as any).emails] : [];
+                    const existingIndex = existingEmails.findIndex((e: any) => e?.messageId === messageId);
+                    if (existingIndex >= 0) {
+                        existingEmails[existingIndex] = {
+                            ...existingEmails[existingIndex],
+                            ...emailEntry,
+                        };
+                    } else {
+                        existingEmails.push(emailEntry);
+                    }
+
+                    existingEmails.sort((a: any, b: any) => {
+                        const aTime = new Date(a?.internalDate || 0).getTime();
+                        const bTime = new Date(b?.internalDate || 0).getTime();
+                        return aTime - bTime;
+                    });
+                    const boundedEmails = existingEmails.slice(-MAX_EMAILS_PER_THREAD);
+                    const latestEmail = boundedEmails[boundedEmails.length - 1] || emailEntry;
+
+                    const threadLabels = normalizedLabels.assignedLabels.map((label) => ({
                         labelId: label._id,
                         name: label.name,
                         source: label.source,
                         statusSnapshot: label.status,
-                    })),
-                    labelSuggestions: suggestedLabel && suggestedLabel.status !== "rejected"
+                    }));
+                    const baseScoreResult = computeBaseScore({
+                        importanceScore:
+                            typeof latestEmail?.ai?.importanceScore === "number"
+                                ? latestEmail.ai.importanceScore
+                                : boundedImportanceScore,
+                        labels: threadLabels.map((label: any) => ({
+                            labelId: label.labelId,
+                            name: label.name,
+                        })),
+                        context: priorityScoringContext,
+                    });
+
+                    const flattenedDates = boundedEmails.flatMap((entry: any) =>
+                        (Array.isArray(entry?.dates) ? entry.dates : []).map((d: any) => ({
+                            type: d.type,
+                            date: d.date,
+                            sourceEmailId: entry.messageId,
+                        }))
+                    );
+                    const flattenedAttachments = boundedEmails.flatMap((entry: any) =>
+                        (Array.isArray(entry?.attachments) ? entry.attachments : []).map((a: any) => ({
+                            filename: a.filename,
+                            mimeType: a.mimeType,
+                            size: a.size,
+                            sourceEmailId: entry.messageId,
+                        }))
+                    );
+
+                    insight.docType = "thread_insight";
+                    insight.emailIds = boundedEmails.map((entry: any) => entry.messageId);
+                    (insight as any).emails = boundedEmails;
+                    insight.from = latestEmail.from || insight.from;
+                    insight.labels = threadLabels;
+                    insight.labelSuggestions = suggestedLabel
                         ? [
                             {
                                 labelId: suggestedLabel._id,
                                 name: suggestedLabel.name,
                                 source: "ai",
-                                status: suggestedLabel.status,
+                                status: "suggested",
                                 confidence: Math.min(
                                     (suggestedLabel.suggestionCount || 0) / AI_LABEL_SUGGESTION_MIN_MATCHES,
                                     1
@@ -201,54 +352,33 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                                 generatedAt: new Date(),
                             },
                         ]
-                        : [],
-                    summary: {
-                        shortSnippet: deepResult.insights.shortSnippet,
-                        intent: deepResult.insights.intent,
-                    },
-                    dates: deepResult.insights.dates
-                        .map((d: any) => {
-                            const parsed = safeParseDate(d.date);
-                            if (!parsed) return null;
-                            return {
-                                type: d.type,
-                                date: parsed,
-                                sourceEmailId: messageId,
-                            };
-                        })
-                        .filter(Boolean),
-                    attachments: deepResult.attachmentMetadata,
-                    extractedFacts: deepResult.insights.extractedFacts,
-                    state: {
+                        : [];
+                    insight.summary = {
+                        shortSnippet: latestEmail?.ai?.shortSnippet || insight.summary?.shortSnippet || "",
+                        intent: latestEmail?.ai?.intent || insight.summary?.intent || "information",
+                    };
+                    insight.importanceScore =
+                        typeof latestEmail?.ai?.importanceScore === "number"
+                            ? latestEmail.ai.importanceScore
+                            : insight.importanceScore;
+                    insight.dates = flattenedDates as any;
+                    insight.attachments = flattenedAttachments as any;
+                    insight.extractedFacts = latestEmail?.extractedFacts || insight.extractedFacts;
+                    insight.baseScore = baseScoreResult.baseScore;
+                    insight.baseScoreBreakdown = {
+                        importanceNorm: baseScoreResult.importanceNorm,
+                        labelNorm: baseScoreResult.labelNorm,
+                        matchedLabelRank: baseScoreResult.matchedLabelRank,
+                    } as any;
+                    insight.baseScoreComputedAt = new Date();
+                    insight.state = {
                         relevance: "active",
-                        firstSeenAt: new Date(),
+                        firstSeenAt: insight.state?.firstSeenAt || new Date(),
                         lastSignalAt: new Date(),
                         lastVerifiedAt: new Date(),
-                    },
-                };
-                if (typeof boundedImportanceScore === "number") {
-                    insightData.importanceScore = boundedImportanceScore;
+                    };
+                    await insight.save();
                 }
-
-                const insight = await InsightModel.findOneAndUpdate(
-                    {
-                        userId,
-                        gmailThreadId: email.threadId,
-                    },
-                    {
-                        $set: insightData,
-                        $setOnInsert: {
-                            baseScore: baseScoreResult.baseScore,
-                            baseScoreBreakdown: {
-                                importanceNorm: baseScoreResult.importanceNorm,
-                                labelNorm: baseScoreResult.labelNorm,
-                                matchedLabelRank: baseScoreResult.matchedLabelRank,
-                            },
-                            baseScoreComputedAt: new Date(),
-                        },
-                    },
-                    { upsert: true, new: true }
-                );
 
                 if (insight) {
                     // Update EmailMessage flag
