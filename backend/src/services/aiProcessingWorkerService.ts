@@ -177,6 +177,26 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                         };
                     })
                     .filter(Boolean);
+                const parsedChecklist = (Array.isArray(deepResult.insights.checklist) ? deepResult.insights.checklist : [])
+                    .map((item: any) => ({
+                        task: item?.task,
+                        status: "pending" as const,
+                        dueDate: safeParseDate(item?.dueDate) || undefined,
+                        reason: typeof item?.reason === "string" ? item.reason : undefined,
+                        inferred: item?.inferred === true,
+                    }))
+                    .filter((item: any) => typeof item.task === "string" && item.task.trim().length > 0);
+                const parsedImportantLinks = (Array.isArray(deepResult.insights.importantLinks)
+                    ? deepResult.insights.importantLinks
+                    : []
+                )
+                    .map((link: any) => ({
+                        url: link?.url,
+                        label: typeof link?.label === "string" ? link.label : undefined,
+                        reason: typeof link?.reason === "string" ? link.reason : undefined,
+                        inferred: link?.inferred === true,
+                    }))
+                    .filter((link: any) => typeof link.url === "string" && link.url.trim().length > 0);
 
                 const emailEntry: any = {
                     messageId,
@@ -194,6 +214,8 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                         mimeType: a.mimeType,
                         size: a.size,
                     })),
+                    importantLinks: parsedImportantLinks,
+                    checklist: parsedChecklist,
                     extractedFacts: deepResult.insights.extractedFacts,
                     ai: {
                         intent: deepResult.insights.intent,
@@ -260,6 +282,10 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                         })),
                         attachments: emailEntry.attachments.map((a: any) => ({
                             ...a,
+                            sourceEmailId: messageId,
+                        })),
+                        checklist: parsedChecklist.map((item: any) => ({
+                            ...item,
                             sourceEmailId: messageId,
                         })),
                         extractedFacts: deepResult.insights.extractedFacts,
@@ -332,6 +358,24 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                             sourceEmailId: entry.messageId,
                         }))
                     );
+                    const checklistByKey = new Map<string, any>();
+                    for (const entry of boundedEmails) {
+                        const items = Array.isArray(entry?.checklist) ? entry.checklist : [];
+                        for (const item of items) {
+                            const task = typeof item?.task === "string" ? item.task.trim() : "";
+                            if (!task) continue;
+                            const dueDateIso = item?.dueDate ? new Date(item.dueDate).toISOString() : "";
+                            const key = `${task.toLowerCase()}|${dueDateIso}`;
+                            checklistByKey.set(key, {
+                                task,
+                                status: "pending",
+                                dueDate: item?.dueDate ? new Date(item.dueDate) : undefined,
+                                reason: typeof item?.reason === "string" ? item.reason : undefined,
+                                inferred: item?.inferred === true,
+                                sourceEmailId: entry.messageId,
+                            });
+                        }
+                    }
 
                     insight.docType = "thread_insight";
                     insight.emailIds = boundedEmails.map((entry: any) => entry.messageId);
@@ -363,6 +407,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                             : insight.importanceScore;
                     insight.dates = flattenedDates as any;
                     insight.attachments = flattenedAttachments as any;
+                    insight.checklist = Array.from(checklistByKey.values()) as any;
                     insight.extractedFacts = latestEmail?.extractedFacts || insight.extractedFacts;
                     insight.baseScore = baseScoreResult.baseScore;
                     insight.baseScoreBreakdown = {

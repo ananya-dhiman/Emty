@@ -55,6 +55,20 @@ export interface PriorityRankingItem {
     internalDate?: Date | string;
     extractedFacts?: Record<string, any>;
   }>;
+  checklistItems?: Array<{
+    task: string;
+    status: 'pending';
+    dueDate?: Date | string;
+    reason?: string;
+    inferred?: boolean;
+    sourceEmailId?: string;
+  }>;
+  importantLinksByEmail?: Record<string, Array<{
+    url: string;
+    label?: string;
+    reason?: string;
+    inferred?: boolean;
+  }>>;
   checklist?: string[];
 }
 
@@ -317,6 +331,47 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const selectedDates = normalizeDates((selectedEmail as any)?.dates);
   const selectedAttachments = Array.isArray(selectedEmail?.attachments) ? selectedEmail!.attachments : [];
   const selectedChecklist = Array.isArray(selectedEmail?.checklist) ? selectedEmail!.checklist : [];
+  const selectedChecklistItems = Array.isArray((selectedEmail as any)?.checklistItems)
+    ? ((selectedEmail as any).checklistItems as Array<any>)
+        .map((item: any) => ({
+          task: typeof item?.task === 'string' ? item.task.trim() : '',
+          status: 'pending' as const,
+          dueDate: normalizeDateValue(item?.dueDate),
+          reason: typeof item?.reason === 'string' ? item.reason : undefined,
+          inferred: item?.inferred === true,
+          sourceEmailId: typeof item?.sourceEmailId === 'string' ? item.sourceEmailId : undefined,
+        }))
+        .filter((item: any) => item.task.length > 0)
+    : selectedChecklist.map((task) => ({
+        task,
+        status: 'pending' as const,
+        dueDate: null,
+        reason: undefined,
+        inferred: false,
+        sourceEmailId: undefined,
+      }));
+  const selectedImportantLinksByEmail = (selectedEmail?.importantLinksByEmail && typeof selectedEmail.importantLinksByEmail === 'object')
+    ? selectedEmail.importantLinksByEmail
+    : {};
+  const selectedLinkGroups = Object.entries(selectedImportantLinksByEmail)
+    .map(([sourceId, links]) => {
+      const seen = new Set<string>();
+      const normalizedLinks = (Array.isArray(links) ? links : [])
+        .map((link: any) => ({
+          url: typeof link?.url === 'string' ? link.url.trim() : '',
+          label: typeof link?.label === 'string' ? link.label : undefined,
+          reason: typeof link?.reason === 'string' ? link.reason : undefined,
+          inferred: link?.inferred === true,
+        }))
+        .filter((link: any) => {
+          if (!link.url) return false;
+          if (seen.has(link.url)) return false;
+          seen.add(link.url);
+          return true;
+        });
+      return { sourceId, links: normalizedLinks };
+    })
+    .filter((group) => group.links.length > 0);
 
   const attachmentsByEmail = selectedAttachments.reduce((acc, att) => {
     const key = att.sourceEmailId || 'unknown';
@@ -807,6 +862,102 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               </div>
             )}
 
+            <div className="det-blk">
+              <span className="blk-lbl">Important Links</span>
+              {selectedLinkGroups.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {selectedLinkGroups.map(({ sourceId, links }) => {
+                    const context = selectedEmail?.emailContextById?.[sourceId];
+                    const sourceTitle = context?.subject || sourceId;
+                    return (
+                      <div className="link-group" key={sourceId}>
+                        {sourceId !== 'unknown' && (
+                          <div
+                            className="link-group-title"
+                            onClick={() => setSelectedSourceMessageId(sourceId)}
+                            style={{ cursor: 'pointer' }}
+                            title="Show source email context"
+                          >
+                            {sourceTitle}
+                          </div>
+                        )}
+                        <div className="link-list">
+                          {links.map((link, idx) => {
+                            let host = '';
+                            try {
+                              host = new URL(link.url).hostname;
+                            } catch {
+                              host = 'link';
+                            }
+                            return (
+                              <a
+                                className="link-item"
+                                key={`${sourceId}-${link.url}-${idx}`}
+                                href={link.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={link.url}
+                              >
+                                <div className="link-main">
+                                  <div className="link-label">{link.label || host}</div>
+                                  <div className="link-url">{link.url}</div>
+                                </div>
+                                <div className="link-meta">
+                                  {link.reason && <span className="link-badge">{link.reason}</span>}
+                                  {link.inferred && <span className="link-badge inf">inferred</span>}
+                                </div>
+                              </a>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="blk-txt">No important links detected.</div>
+              )}
+            </div>
+
+            <div className="det-blk">
+              <span className="blk-lbl">Action Checklist</span>
+              {selectedChecklistItems.length > 0 ? (
+                <div className="task-list">
+                  {selectedChecklistItems.map((item, idx) => {
+                    const dueDateLabel = item.dueDate
+                      ? new Date(item.dueDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+                      : null;
+                    const sourceTitle = item.sourceEmailId
+                      ? (selectedEmail?.emailContextById?.[item.sourceEmailId]?.subject || item.sourceEmailId)
+                      : null;
+                    return (
+                      <div className="task-item" key={`${item.task}-${idx}`}>
+                        <div className="task-dot" />
+                        <div className="task-content">
+                          <div className="task-text">{item.task}</div>
+                          <div className="task-meta">
+                            {dueDateLabel && <span className="task-chip due">Due {dueDateLabel}</span>}
+                            {item.inferred && <span className="task-chip inf">Inferred</span>}
+                            {sourceTitle && (
+                              <span
+                                className="task-chip src"
+                                onClick={() => setSelectedSourceMessageId(item.sourceEmailId || null)}
+                                style={{ cursor: 'pointer' }}
+                              >
+                                {sourceTitle}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="blk-txt">No action checklist detected for this thread.</div>
+              )}
+            </div>
+
             {selectedAttachments.length > 0 && (
               <div className="det-blk">
                 <span className="blk-lbl">Attachments</span>
@@ -863,17 +1014,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                   {selectedSourceContext.internalDate
                     ? ` • ${new Date(selectedSourceContext.internalDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
                     : ''}
-                </div>
-              </div>
-            )}
-
-            {selectedChecklist.length > 0 && (
-              <div className="det-blk">
-                <span className="blk-lbl">Checklist</span>
-                <div className="dates-list">
-                  {selectedChecklist.map((item, idx) => (
-                    <div className="blk-txt" key={`${item}-${idx}`}>{item}</div>
-                  ))}
                 </div>
               </div>
             )}

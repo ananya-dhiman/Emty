@@ -392,6 +392,23 @@ export interface PriorityRankingItem {
       internalDate?: Date;
     }
   >;
+  checklistItems?: Array<{
+    task: string;
+    status: "pending";
+    dueDate?: Date;
+    reason?: string;
+    inferred?: boolean;
+    sourceEmailId?: string;
+  }>;
+  importantLinksByEmail?: Record<
+    string,
+    Array<{
+      url: string;
+      label?: string;
+      reason?: string;
+      inferred?: boolean;
+    }>
+  >;
   checklist?: string[];
 }
 
@@ -622,6 +639,14 @@ export const getPriorityRanking = async (params: {
     const recencyNorm = Math.exp(-ageHours / RECENCY_DECAY_HOURS);
 
     const embeddedEmails = Array.isArray((insight as any).emails) ? (insight as any).emails : [];
+    const derivedChecklist = Array.isArray((insight as any).checklist)
+      ? (insight as any).checklist
+      : embeddedEmails.flatMap((entry: any) =>
+          (Array.isArray(entry?.checklist) ? entry.checklist : []).map((item: any) => ({
+            ...item,
+            sourceEmailId: entry?.messageId,
+          }))
+        );
     const derivedDates = embeddedEmails.length > 0
       ? flattenDatesFromEmails(embeddedEmails)
       : (Array.isArray(insight.dates) ? insight.dates : []);
@@ -745,8 +770,52 @@ export const getPriorityRanking = async (params: {
         emailContextById
       ),
       emailContextById,
-      checklist: Array.isArray((insight as any).checklist)
-        ? ((insight as any).checklist as string[])
+      checklistItems: Array.isArray(derivedChecklist)
+        ? (derivedChecklist as any[])
+            .map((item: any) => {
+              const task = typeof item?.task === "string" ? item.task.trim() : "";
+              if (!task) return null;
+              const parsedDueDate = item?.dueDate ? new Date(item.dueDate) : undefined;
+              return {
+                task,
+                status: "pending" as const,
+                dueDate: parsedDueDate && !Number.isNaN(parsedDueDate.getTime()) ? parsedDueDate : undefined,
+                reason: typeof item?.reason === "string" ? item.reason : undefined,
+                inferred: item?.inferred === true,
+                sourceEmailId: typeof item?.sourceEmailId === "string" ? item.sourceEmailId : undefined,
+              };
+            })
+            .filter(Boolean) as Array<{
+            task: string;
+            status: "pending";
+            dueDate?: Date;
+            reason?: string;
+            inferred?: boolean;
+            sourceEmailId?: string;
+          }>
+        : [],
+      importantLinksByEmail: embeddedEmails.reduce((acc: Record<string, Array<{ url: string; label?: string; reason?: string; inferred?: boolean }>>, entry: any) => {
+        const messageId = typeof entry?.messageId === "string" ? entry.messageId : "";
+        if (!messageId) return acc;
+        const deduped = new Map<string, { url: string; label?: string; reason?: string; inferred?: boolean }>();
+        const links = Array.isArray(entry?.importantLinks) ? entry.importantLinks : [];
+        for (const link of links) {
+          const url = typeof link?.url === "string" ? link.url.trim() : "";
+          if (!url || deduped.has(url)) continue;
+          deduped.set(url, {
+            url,
+            label: typeof link?.label === "string" ? link.label : undefined,
+            reason: typeof link?.reason === "string" ? link.reason : undefined,
+            inferred: link?.inferred === true,
+          });
+        }
+        acc[messageId] = Array.from(deduped.values());
+        return acc;
+      }, {}),
+      checklist: Array.isArray(derivedChecklist)
+        ? (derivedChecklist as any[])
+            .map((item: any) => (typeof item === "string" ? item : item?.task))
+            .filter((task: any): task is string => typeof task === "string" && task.trim().length > 0)
         : [],
     });
   }

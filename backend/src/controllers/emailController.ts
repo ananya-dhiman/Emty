@@ -408,6 +408,26 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
                     type: d.type,
                     date: new Date(d.date),
                 }));
+                const parsedChecklist = (Array.isArray(processed.insights.checklist) ? processed.insights.checklist : [])
+                    .map((item: any) => ({
+                        task: item?.task,
+                        status: "pending" as const,
+                        dueDate: item?.dueDate ? new Date(item.dueDate) : undefined,
+                        reason: item?.reason,
+                        inferred: item?.inferred === true,
+                    }))
+                    .filter((item: any) => typeof item.task === "string" && item.task.trim().length > 0);
+                const parsedImportantLinks = (Array.isArray(processed.insights.importantLinks)
+                    ? processed.insights.importantLinks
+                    : []
+                )
+                    .map((link: any) => ({
+                        url: link?.url,
+                        label: typeof link?.label === "string" ? link.label : undefined,
+                        reason: typeof link?.reason === "string" ? link.reason : undefined,
+                        inferred: link?.inferred === true,
+                    }))
+                    .filter((link: any) => typeof link.url === "string" && link.url.trim().length > 0);
                 const emailEntry: any = {
                     messageId: metadata.messageId,
                     internalDate: Number.isFinite(parseInt(metadata.internalDate, 10))
@@ -426,6 +446,8 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
                         mimeType: a.mimeType,
                         size: a.size,
                     })),
+                    importantLinks: parsedImportantLinks,
+                    checklist: parsedChecklist,
                     extractedFacts: processed.insights.extractedFacts,
                     ai: {
                         intent: processed.insights.intent,
@@ -477,6 +499,10 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
                         })),
                         attachments: emailEntry.attachments.map((a: any) => ({
                             ...a,
+                            sourceEmailId: metadata.messageId,
+                        })),
+                        checklist: parsedChecklist.map((item: any) => ({
+                            ...item,
                             sourceEmailId: metadata.messageId,
                         })),
                         state: null,
@@ -533,6 +559,25 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
                             sourceEmailId: entry.messageId,
                         }))
                     ) as any;
+                    const checklistByKey = new Map<string, any>();
+                    for (const entry of boundedEmails) {
+                        const items = Array.isArray(entry?.checklist) ? entry.checklist : [];
+                        for (const item of items) {
+                            const task = typeof item?.task === "string" ? item.task.trim() : "";
+                            if (!task) continue;
+                            const dueDateIso = item?.dueDate ? new Date(item.dueDate).toISOString() : "";
+                            const key = `${task.toLowerCase()}|${dueDateIso}`;
+                            checklistByKey.set(key, {
+                                task,
+                                status: "pending",
+                                dueDate: item?.dueDate ? new Date(item.dueDate) : undefined,
+                                reason: typeof item?.reason === "string" ? item.reason : undefined,
+                                inferred: item?.inferred === true,
+                                sourceEmailId: entry.messageId,
+                            });
+                        }
+                    }
+                    insight.checklist = Array.from(checklistByKey.values()) as any;
                     insight.extractedFacts = latest?.extractedFacts || insight.extractedFacts;
                     await insight.save();
                 }

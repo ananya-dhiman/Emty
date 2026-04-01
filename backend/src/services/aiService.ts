@@ -5,6 +5,7 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
+import { inferActionIntelligence } from './insightInference';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -23,6 +24,19 @@ export interface AIInsightExtraction {
     }>;
     extractedFacts: Record<string, any>;
     importanceScore?: number;
+    importantLinks: Array<{
+        url: string;
+        label?: string;
+        reason?: string;
+        inferred?: boolean;
+    }>;
+    checklist: Array<{
+        task: string;
+        status: 'pending';
+        dueDate?: string;
+        reason?: string;
+        inferred?: boolean;
+    }>;
 }
 
 // Custom error thrown when the AI response cannot be parsed as JSON
@@ -95,6 +109,8 @@ Extract and return a JSON object with:
 5. dates: Array of important dates with type ('deadline', 'event', 'followup') and ISO date string
 6. extractedFacts: Object with any important facts (e.g., company, position, salary, event details)
 7. importanceScore: A number from 0.0 to 1.0 representing how important this email is
+8. importantLinks: Array of important URLs with optional label/reason. Include application links, forms, payment links, meeting links, portals, or docs.
+9. checklist: Array of actionable tasks with shape { task, status, dueDate?, reason? }. Keep status as "pending".
 
 Return ONLY valid JSON, no markdown code blocks.`;
 };
@@ -141,6 +157,95 @@ const normalizeDates = (insights: AIInsightExtraction): AIInsightExtraction => {
     return insights;
 };
 
+const normalizeLinksAndChecklist = (insights: AIInsightExtraction): AIInsightExtraction => {
+    if (!Array.isArray((insights as any).importantLinks)) {
+        (insights as any).importantLinks = [];
+    }
+    if (!Array.isArray((insights as any).checklist)) {
+        (insights as any).checklist = [];
+    }
+
+    const normalizeUrl = (value: any): string | null => {
+        if (typeof value !== 'string') return null;
+        const trimmed = value.trim().replace(/[),.;!?]+$/, '');
+        if (!trimmed) return null;
+        const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+        try {
+            const parsed = new URL(withProtocol);
+            if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+            return parsed.toString();
+        } catch {
+            return null;
+        }
+    };
+
+    const dedupedLinks = new Map<string, AIInsightExtraction['importantLinks'][number]>();
+    for (const raw of (insights as any).importantLinks) {
+        const normalizedUrl = normalizeUrl(raw?.url ?? raw);
+        if (!normalizedUrl) continue;
+        if (!dedupedLinks.has(normalizedUrl)) {
+            dedupedLinks.set(normalizedUrl, {
+                url: normalizedUrl,
+                label: typeof raw?.label === 'string' ? raw.label.trim().slice(0, 80) : undefined,
+                reason: typeof raw?.reason === 'string' ? raw.reason.trim().slice(0, 160) : undefined,
+                inferred: raw?.inferred === true,
+            });
+        }
+    }
+    insights.importantLinks = Array.from(dedupedLinks.values()).slice(0, 12);
+
+    const dedupedChecklist = new Map<string, AIInsightExtraction['checklist'][number]>();
+    for (const raw of (insights as any).checklist) {
+        const task = typeof raw?.task === 'string' ? raw.task.trim() : typeof raw === 'string' ? raw.trim() : '';
+        if (!task) continue;
+        const boundedTask = task.length > 180 ? `${task.slice(0, 177).trim()}...` : task;
+        const key = boundedTask.toLowerCase();
+        if (!dedupedChecklist.has(key)) {
+            dedupedChecklist.set(key, {
+                task: boundedTask,
+                status: 'pending',
+                dueDate: typeof raw?.dueDate === 'string' ? raw.dueDate : undefined,
+                reason: typeof raw?.reason === 'string' ? raw.reason.trim().slice(0, 160) : undefined,
+                inferred: raw?.inferred === true,
+            });
+        }
+    }
+    insights.checklist = Array.from(dedupedChecklist.values()).slice(0, 8);
+    return insights;
+};
+
+const applyInferenceFallback = (
+    insights: AIInsightExtraction,
+    emailContent: { body: string }
+): AIInsightExtraction => {
+    const inferred = inferActionIntelligence({
+        body: emailContent.body || '',
+        intent: insights.intent,
+        dates: Array.isArray(insights.dates) ? insights.dates : [],
+    });
+
+    const existingLinkUrls = new Set((insights.importantLinks || []).map((link) => link.url));
+    for (const inferredLink of inferred.importantLinks) {
+        if (!existingLinkUrls.has(inferredLink.url)) {
+            insights.importantLinks.push(inferredLink);
+            existingLinkUrls.add(inferredLink.url);
+        }
+    }
+
+    if (insights.intent === 'action_required' || (insights.checklist || []).length === 0) {
+        const existingTaskKeys = new Set((insights.checklist || []).map((item) => item.task.toLowerCase()));
+        for (const inferredTask of inferred.checklist) {
+            const key = inferredTask.task.toLowerCase();
+            if (!existingTaskKeys.has(key)) {
+                insights.checklist.push(inferredTask);
+                existingTaskKeys.add(key);
+            }
+        }
+    }
+
+    return normalizeLinksAndChecklist(insights);
+};
+
 // Validate the insight structure
 const validateInsights = (insights: AIInsightExtraction): void => {
     if (!insights.intent || !insights.shortSnippet || !Array.isArray(insights.labels)) {
@@ -148,6 +253,15 @@ const validateInsights = (insights: AIInsightExtraction): void => {
     }
     if (typeof insights.suggestedLabel !== 'string') {
         insights.suggestedLabel = null;
+    }
+    if (!insights.extractedFacts || typeof insights.extractedFacts !== 'object') {
+        insights.extractedFacts = {};
+    }
+    if (!Array.isArray(insights.importantLinks)) {
+        insights.importantLinks = [];
+    }
+    if (!Array.isArray(insights.checklist)) {
+        insights.checklist = [];
     }
 };
 
@@ -177,6 +291,7 @@ const extractWithGemini = async (prompt: string): Promise<AIInsightExtraction | 
 
         const insights = parseAIResponse(text);
         normalizeDates(insights);
+        normalizeLinksAndChecklist(insights);
         validateInsights(insights);
         console.log('[AI] Gemini extraction successful');
         return insights;
@@ -295,6 +410,7 @@ const extractWithOpenRouter = async (prompt: string): Promise<AIInsightExtractio
     }
 
     normalizeDates(insights);
+    normalizeLinksAndChecklist(insights);
     validateInsights(insights);
     console.log('[AI] OpenRouter extraction successful');
     return insights;
@@ -319,10 +435,11 @@ export const extractInsightsFromEmail = async (
     // Try Gemini first
     const geminiResult = await extractWithGemini(prompt);
     if (geminiResult) {
-        return geminiResult;
+        return applyInferenceFallback(geminiResult, emailContent);
     }
 
     // Fallback to OpenRouter
     console.log('[AI] Falling back to OpenRouter provider');
-    return extractWithOpenRouter(prompt);
+    const result = await extractWithOpenRouter(prompt);
+    return applyInferenceFallback(result, emailContent);
 };

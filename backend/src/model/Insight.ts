@@ -40,6 +40,19 @@ export interface IInsight extends Document {
       mimeType: string;
       size: number;
     }>;
+    importantLinks?: Array<{
+      url: string;
+      label?: string;
+      reason?: string;
+      inferred?: boolean;
+    }>;
+    checklist?: Array<{
+      task: string;
+      status: "pending";
+      dueDate?: Date;
+      reason?: string;
+      inferred?: boolean;
+    }>;
     extractedFacts?: Record<string, any>;
     ai: {
       intent: ThreadIntent;
@@ -90,6 +103,14 @@ export interface IInsight extends Document {
     filename: string;
     mimeType: string;
     size: number;
+    sourceEmailId: string;
+  }>;
+  checklist?: Array<{
+    task: string;
+    status: "pending";
+    dueDate?: Date;
+    reason?: string;
+    inferred?: boolean;
     sourceEmailId: string;
   }>;
   state?: {
@@ -157,6 +178,23 @@ const InsightSchema = new Schema<IInsight>(
                 filename: { type: String, required: true },
                 mimeType: { type: String, required: true },
                 size: { type: Number, required: true },
+              },
+            ],
+            importantLinks: [
+              {
+                url: { type: String, required: true },
+                label: { type: String },
+                reason: { type: String },
+                inferred: { type: Boolean, default: false },
+              },
+            ],
+            checklist: [
+              {
+                task: { type: String, required: true },
+                status: { type: String, enum: ["pending"], default: "pending" },
+                dueDate: { type: Date },
+                reason: { type: String },
+                inferred: { type: Boolean, default: false },
               },
             ],
             extractedFacts: { type: Schema.Types.Mixed },
@@ -328,6 +366,16 @@ const InsightSchema = new Schema<IInsight>(
           sourceEmailId: { type: String, required: true },
         },
       ],
+    checklist: [
+      {
+        task: { type: String, required: true },
+        status: { type: String, enum: ["pending"], default: "pending" },
+        dueDate: { type: Date },
+        reason: { type: String },
+        inferred: { type: Boolean, default: false },
+        sourceEmailId: { type: String, required: true },
+      },
+    ],
 
     state: {
       relevance: {
