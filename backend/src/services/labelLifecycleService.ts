@@ -228,8 +228,6 @@ export const recordSuggestedLabel = async (params: {
       name: rawName,
       nameNormalized,
       description: "",
-      suggestionCount: 0,
-      sampleThreadIds: [],
     },
     $inc: { suggestionCount: 1 },
     $set: {
