@@ -53,6 +53,7 @@ export interface PriorityRankingItem {
       domain?: string;
     };
     internalDate?: Date | string;
+    extractedFacts?: Record<string, any>;
   }>;
   checklist?: string[];
 }
@@ -91,6 +92,41 @@ const normalizeDates = (dates: any): Array<{ type: 'deadline' | 'event' | 'follo
       };
     })
     .filter(Boolean) as Array<{ type: 'deadline' | 'event' | 'followup'; date: Date; sourceEmailId?: string }>;
+};
+
+const TimelineItem = ({ item, isFirst, selectedEmail, onSourceClick }: any) => {
+  const [isOpen, setIsOpen] = useState(isFirst);
+  const context = item.sourceEmailId ? selectedEmail?.emailContextById?.[item.sourceEmailId] : null;
+  const hasFacts = context && context.extractedFacts;
+  const reasonStr = hasFacts ? Object.values(context.extractedFacts).join(' · ') : '';
+  const sourceName = context?.subject || item.sourceEmailId || 'Unknown source';
+  
+  return (
+    <div className="tl-item">
+      <div className={`tl-dot ${isFirst ? 'active' : ''}`}></div>
+      <div className="tl-card">
+        <div className="tl-header" onClick={() => setIsOpen(!isOpen)}>
+          <div className="tl-date">{new Date(item.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+          <span className="tl-type-tag">{item.type}</span>
+          <svg className={`tl-toggle ${isOpen ? 'open' : ''}`} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </div>
+        <div className={`tl-body ${isOpen ? 'open' : ''}`}>
+          {reasonStr || `Scheduled ${item.type} date.`}
+          {item.sourceEmailId && (
+            <div 
+              className="tl-source" 
+              onClick={(e) => { e.stopPropagation(); onSourceClick(item.sourceEmailId); }}
+              style={{ cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              source: {(sourceName).length > 50 ? (sourceName).slice(0, 50) + '...' : sourceName}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 interface DashboardProps {
@@ -281,6 +317,13 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const selectedDates = normalizeDates((selectedEmail as any)?.dates);
   const selectedAttachments = Array.isArray(selectedEmail?.attachments) ? selectedEmail!.attachments : [];
   const selectedChecklist = Array.isArray(selectedEmail?.checklist) ? selectedEmail!.checklist : [];
+
+  const attachmentsByEmail = selectedAttachments.reduce((acc, att) => {
+    const key = att.sourceEmailId || 'unknown';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(att);
+    return acc;
+  }, {} as Record<string, typeof selectedAttachments>);
 
   const selectEmail = (item: PriorityRankingItem) => {
     setSelectedInsightId(item.insightId);
@@ -749,24 +792,16 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             {selectedDates.length > 0 && (
               <div className="det-blk">
                 <span className="blk-lbl">Dates</span>
-                <div className="dates-list">
+                <div className="timeline">
+                  <div className="tl-line"></div>
                   {selectedDates.map((item, idx) => (
-                    <div
-                      className="dl-blk"
+                    <TimelineItem
                       key={`${item.type}-${item.date}-${idx}`}
-                      onClick={() => setSelectedSourceMessageId(item.sourceEmailId || null)}
-                      style={{ cursor: item.sourceEmailId ? 'pointer' : 'default' }}
-                    >
-                      <div className="dlb-left">
-                        <div className="dlb-type">{item.type}</div>
-                        <div className="dlb-date">{new Date(item.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</div>
-                        {item.sourceEmailId && (
-                          <div className="dlb-date" style={{ opacity: 0.75, marginTop: '2px' }}>
-                            source: {(selectedEmail?.emailContextById?.[item.sourceEmailId]?.subject || item.sourceEmailId).slice(0, 50)}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                      item={item}
+                      isFirst={idx === 0}
+                      selectedEmail={selectedEmail}
+                      onSourceClick={(id: string) => setSelectedSourceMessageId(id)}
+                    />
                   ))}
                 </div>
               </div>
@@ -774,29 +809,45 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
             {selectedAttachments.length > 0 && (
               <div className="det-blk">
-                <span className="blk-lbl">Attachment</span>
-                <div className="dates-list">
-                  {selectedAttachments.map((attachment, idx) => (
-                    <div
-                      className="att"
-                      key={`${attachment.filename}-${idx}`}
-                      onClick={() => setSelectedSourceMessageId(attachment.sourceEmailId || null)}
-                      style={{ cursor: attachment.sourceEmailId ? 'pointer' : 'default' }}
-                    >
-                      <div className="att-ext">{attachment.filename.split('.').pop()?.toUpperCase() || 'FILE'}</div>
-                      <div className="att-name">
-                        {attachment.filename}
-                        {attachment.sourceEmailId && (
-                          <div style={{ fontSize: '10px', opacity: 0.75 }}>
-                            source: {(selectedEmail?.emailContextById?.[attachment.sourceEmailId]?.subject || attachment.sourceEmailId).slice(0, 50)}
+                <span className="blk-lbl">Attachments</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {Object.entries(attachmentsByEmail).map(([sourceId, atts], groupIdx) => {
+                    const emailContext = selectedEmail?.emailContextById?.[sourceId];
+                    const emailTitle = emailContext?.subject || sourceId;
+                    return (
+                      <div key={sourceId || groupIdx} className="att-group">
+                        {sourceId !== 'unknown' && (
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-1)', paddingBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', borderBottom: '1px solid var(--border-lt)' }}>
+                            {emailTitle}
                           </div>
                         )}
+                        <div className="attachments-grid">
+                          {atts.map((attachment, idx) => {
+                            const ext = attachment.filename.split('.').pop()?.toUpperCase() || 'FILE';
+                            return (
+                              <div
+                                className="att-card"
+                                key={`${attachment.filename}-${idx}`}
+                                onClick={() => setSelectedSourceMessageId(attachment.sourceEmailId || null)}
+                              >
+                                <div className="att-icon">
+                                  <svg viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <rect x="0.5" y="0.5" width="35" height="43" rx="4" fill="var(--surface-2)" stroke="var(--border)"/>
+                                    <rect x="4" y="30" width="28" height="3" rx="1.5" fill="var(--accent)"/>
+                                    <rect x="4" y="35" width="18" height="3" rx="1.5" fill="var(--border-lt)"/>
+                                    <rect x="4" y="10" width="28" height="14" rx="2" fill="var(--surface-2)"/>
+                                    <text x="18" y="20" textAnchor="middle" fontSize="7" fontWeight="600" fill="var(--text-3)" fontFamily="var(--font-mono)">{ext.substring(0, 4)}</text>
+                                  </svg>
+                                </div>
+                                <div className="att-name">{attachment.filename}</div>
+                                <div className="att-size">{typeof attachment.size === 'number' ? `${Math.max(1, Math.round(attachment.size / 1024))} KB` : '-'}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <div className="att-sz">
-                        {typeof attachment.size === 'number' ? `${Math.max(1, Math.round(attachment.size / 1024))} KB` : '-'}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
