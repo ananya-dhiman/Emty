@@ -166,6 +166,8 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [sidebarLabels, setSidebarLabels] = useState<{id: string, name: string, color: string, rank: number, count: number}[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [notification, setNotification] = useState<{show: boolean, message: string, detail?: string, type: 'success' | 'error' | 'info'} | null>(null);
+  // Holds counts from the initial sync HTTP response so the poller can surface them on completion
+  const manualSyncCountsRef = React.useRef<{processed: number; succeeded: number; failed: number} | null>(null);
 
   // feedbackMap: insightId -> 'boost' | 'suppress' | null
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'boost' | 'suppress' | null>>({});
@@ -454,51 +456,103 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
   const handleSync = async () => {
     if (!user?.gmailAccountId) return;
-    
+
     const API_URL = 'http://localhost:5000';
     const token = localStorage.getItem('firebaseToken');
-    
+
+    setIsSyncing(true);
+    setNotification(null);
+    manualSyncCountsRef.current = null;
+
     try {
-      setIsSyncing(true);
-      setNotification(null);
-      // We do not clear existing items so UI remains stable during sync.
-      
-      const response = await axios.post(`${API_URL}/api/emails/sync`, {
-        accountId: user.gmailAccountId
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.data.success) {
-        const { processed, succeeded, failed } = response.data;
+      // Step 1: Kick off the sync. The backend responds immediately after
+      // fetching new email candidates — AI workers run asynchronously after.
+      const response = await axios.post(
+        `${API_URL}/api/emails/sync`,
+        { accountId: user.gmailAccountId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (!response.data.success) {
         setNotification({
-            show: true,
-            type: 'success',
-            message: 'Sync completed successfully',
-            detail: `Processed: ${processed} | Success: ${succeeded} | Failed: ${failed}`
+          show: true,
+          type: 'error',
+          message: 'Sync failed',
+          detail: response.data.message,
         });
-        // Fetch new results without full page reload, in background mode to keep UI stable
-        await fetchInsights(true);
-      } else {
-        setNotification({
-            show: true,
-            type: 'error',
-            message: 'Sync failed',
-            detail: response.data.message
-        });
-      }
-    } catch (err: any) {
-        console.error("Error syncing emails:", err);
-        setNotification({
-            show: true,
-            type: 'error',
-            message: 'Sync error',
-            detail: err.response?.data?.message || 'An error occurred during sync'
-        });
-    } finally {
         setIsSyncing(false);
-        // Hide notification after 5 seconds
         setTimeout(() => setNotification(null), 5000);
+        return;
+      }
+
+      // Stash counts from the fetch stage to surface them on AI completion
+      manualSyncCountsRef.current = {
+        processed: response.data.processed ?? 0,
+        succeeded: response.data.succeeded ?? 0,
+        failed: response.data.failed ?? 0,
+      };
+
+      // Step 2: Poll sync-progress until the backend reports 'completed'.
+      // This ensures the button stays in syncing state until AI processing is done.
+      const MAX_WAIT_MS = 5 * 60 * 1000; // 5-minute safety cap
+      const POLL_INTERVAL_MS = 2000;
+      const startedAt = Date.now();
+
+      await new Promise<void>((resolve) => {
+        const poll = async () => {
+          try {
+            const { data } = await axios.get(
+              `${API_URL}/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+
+            const stage = data?.progressStage;
+
+            if (stage === 'completed' || stage === 'error') {
+              resolve();
+              return;
+            }
+
+            if (Date.now() - startedAt > MAX_WAIT_MS) {
+              console.warn('[Sync] Poller timed out waiting for AI completion.');
+              resolve();
+              return;
+            }
+          } catch (pollErr) {
+            console.warn('[Sync] Progress poll error (non-blocking):', pollErr);
+          }
+
+          setTimeout(poll, POLL_INTERVAL_MS);
+        };
+
+        // Start first poll immediately
+        void poll();
+      });
+
+      // Step 3: AI processing is done — refresh insights silently, then notify.
+      await fetchInsights(true);
+
+      const counts = manualSyncCountsRef.current;
+      setNotification({
+        show: true,
+        type: 'success',
+        message: 'Sync completed',
+        detail: counts
+          ? `Processed: ${counts.processed} | Success: ${counts.succeeded} | Failed: ${counts.failed}`
+          : 'Inbox is up to date.',
+      });
+    } catch (err: any) {
+      console.error('[Sync] Error:', err);
+      setNotification({
+        show: true,
+        type: 'error',
+        message: 'Sync error',
+        detail: err.response?.data?.message || 'An error occurred during sync',
+      });
+    } finally {
+      setIsSyncing(false);
+      manualSyncCountsRef.current = null;
+      setTimeout(() => setNotification(null), 5000);
     }
   };
 

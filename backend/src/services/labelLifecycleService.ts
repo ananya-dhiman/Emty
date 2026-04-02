@@ -1,5 +1,6 @@
 import { ILabel, LabelModel } from "../model/Label";
 import { Types } from "mongoose";
+import { canonicalizeLabelName } from "../utils/labelNormalization";
 
 export const AI_LABEL_SUGGESTION_MIN_MATCHES = Number(
   process.env.AI_LABEL_SUGGESTION_MIN_MATCHES || 5
@@ -35,8 +36,7 @@ export interface NormalizedAIClassification {
   suggestedLabelName?: string;
 }
 
-export const normalizeLabelName = (name: string): string =>
-  name.trim().replace(/\s+/g, " ").toLowerCase();
+export const normalizeLabelName = canonicalizeLabelName;
 
 const toCandidate = (label: ILabel): LabelCandidate => ({
   _id: label._id as Types.ObjectId,
@@ -137,9 +137,14 @@ export const normalizeAIClassification = (
   suggestedLabel: string | undefined,
   assignableLabels: LabelCandidate[]
 ): NormalizedAIClassification => {
-  const labelMap = new Map(
-    assignableLabels.map((label) => [label.nameNormalized, label])
-  );
+  const labelMap = new Map<string, LabelCandidate>();
+  for (const label of assignableLabels) {
+    const canonicalKey = normalizeLabelName(label.nameNormalized || label.name);
+    if (!canonicalKey || labelMap.has(canonicalKey)) {
+      continue;
+    }
+    labelMap.set(canonicalKey, label);
+  }
   const assignedLabels: LabelCandidate[] = [];
   const seenAssigned = new Set<string>();
   const unmatched: string[] = [];
@@ -156,9 +161,12 @@ export const normalizeAIClassification = (
 
     const matched = labelMap.get(normalized);
     if (matched) {
-      if (!seenAssigned.has(matched.nameNormalized)) {
+      const matchedKey = normalizeLabelName(
+        matched.nameNormalized || matched.name
+      );
+      if (!seenAssigned.has(matchedKey)) {
         assignedLabels.push(matched);
-        seenAssigned.add(matched.nameNormalized);
+        seenAssigned.add(matchedKey);
       }
       continue;
     }
@@ -169,12 +177,35 @@ export const normalizeAIClassification = (
   const normalizedSuggested = suggestedLabel
     ? suggestedLabel.trim().replace(/\s+/g, " ")
     : "";
+  const normalizedSuggestedKey = normalizedSuggested
+    ? normalizeLabelName(normalizedSuggested)
+    : "";
+
+  if (normalizedSuggestedKey) {
+    const matchedSuggested = labelMap.get(normalizedSuggestedKey);
+    if (
+      matchedSuggested &&
+      !seenAssigned.has(
+        normalizeLabelName(
+          matchedSuggested.nameNormalized || matchedSuggested.name
+        )
+      )
+    ) {
+      const suggestedMatchedKey = normalizeLabelName(
+        matchedSuggested.nameNormalized || matchedSuggested.name
+      );
+      assignedLabels.push(matchedSuggested);
+      seenAssigned.add(suggestedMatchedKey);
+    }
+  }
 
   const fallbackSuggestion = unmatched.find(
     (label) => !labelMap.has(normalizeLabelName(label))
   );
 
-  const chosenSuggestion = normalizedSuggested || fallbackSuggestion;
+  const chosenSuggestion = labelMap.has(normalizedSuggestedKey)
+    ? ""
+    : normalizedSuggested || fallbackSuggestion;
 
   return {
     assignedLabels,

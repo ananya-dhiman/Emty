@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { canonicalizeLabelName } from "../utils/labelNormalization";
 
 // ================================
 // Label Model (Organization)
@@ -41,7 +42,7 @@ const LabelSchema = new Schema<ILabel>(
 LabelSchema.pre("validate", function () {
     if (this.name) {
         this.name = this.name.trim();
-        this.nameNormalized = this.name.toLowerCase();
+        this.nameNormalized = canonicalizeLabelName(this.name);
     }
 });
 
