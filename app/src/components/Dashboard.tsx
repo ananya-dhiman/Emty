@@ -842,7 +842,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                           <span className="tag" key={lbl}>{lbl}</span>
                         ))}
                       </div>
-                      <FeedbackButtons insightId={item.insightId} />
                     </div>
                     <div className="ar-time">
                        {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
