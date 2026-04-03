@@ -76,14 +76,19 @@ export const upsertIntentProfile = async (
     update.onboardingCompleted = onboardingCompleted;
 
   try {
+    const existingProfile = await UserIntentProfileModel.findOne({ userId })
+      .select("onboardingCompleted")
+      .lean();
+    const wasOnboardingCompleted = existingProfile?.onboardingCompleted === true;
+
     const profile = await UserIntentProfileModel.findOneAndUpdate(
       { userId },
       { $set: update },
       { upsert: true, new: true }
     );
 
-    // If onboarding just finished, trigger the background async processing sequence
-    if (onboardingCompleted === true) {
+    // Trigger background sequence only when onboarding transitions false -> true.
+    if (onboardingCompleted === true && !wasOnboardingCompleted) {
       console.log(`[ONBOARDING] Completed, starting background async sequence for user ${userId}`);
       (async () => {
         try {

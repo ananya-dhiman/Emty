@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import '../styles/LandingPage.css';
 
+interface LandingPageProps {
+  onSignInClick?: () => void;
+}
+
 /* ════════════════════════════════════════════════
    LandingPage.tsx
    - Reads/writes data-mode="dark|light" on <html>
@@ -254,7 +258,7 @@ const Tape: React.FC<{ reversed?: boolean }> = ({ reversed = false }) => (
 /* ════════════════════════════════════════════════
    MAIN COMPONENT
 ════════════════════════════════════════════════ */
-const LandingPage: React.FC = () => {
+const LandingPage: React.FC<LandingPageProps> = ({ onSignInClick }) => {
   const { mode, toggle } = useAppTheme();
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const twText = useTypewriter(2000);
@@ -265,6 +269,11 @@ const LandingPage: React.FC = () => {
 
   const toggleFaq = (i: number) =>
     setOpenFaq(prev => (prev === i ? null : i));
+
+  const handleEarlyAccessClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    onSignInClick?.();
+  };
 
   return (
     <div className="lp-root">
@@ -289,7 +298,7 @@ const LandingPage: React.FC = () => {
             <span>{mode === 'dark' ? '☀' : '☾'}</span>
             <span>{mode === 'dark' ? 'LIGHT' : 'DARK'}</span>
           </button>
-          <a className="lp-btn-primary" href="#">Get early access</a>
+          <a className="lp-btn-primary" href="#" onClick={handleEarlyAccessClick}>Get early access</a>
         </div>
       </nav>
 
@@ -314,6 +323,7 @@ const LandingPage: React.FC = () => {
               <a
                 className="lp-btn-primary"
                 href="#"
+                onClick={handleEarlyAccessClick}
                 style={{ fontSize: 14, padding: '14px 28px' }}
               >
                 Get early access →
@@ -447,6 +457,7 @@ const LandingPage: React.FC = () => {
               <a
                 className="lp-btn-primary"
                 href="#"
+                onClick={handleEarlyAccessClick}
                 style={{ fontSize: 14, padding: '14px 24px' }}
               >
                 Get early access →

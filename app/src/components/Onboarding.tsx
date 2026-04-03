@@ -271,7 +271,6 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
           preferredDomains: senders,
           inferredLabels: labelChips,
           userPrompt: filledPrompts,
-          onboardingCompleted: true,
         },
         { headers }
       );
@@ -284,11 +283,6 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
   };
 
   const skipStep1 = async () => {
-    try {
-      await axios.post(`${API_URL}/api/intent/profile`, { onboardingCompleted: true }, { headers });
-    } catch {
-      // Non-blocking
-    }
     setStep(2);
   };
 
@@ -332,6 +326,14 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     }
   };
 
+  const completeOnboardingAndStartProcessing = async () => {
+    await axios.post(
+      `${API_URL}/api/intent/profile`,
+      { onboardingCompleted: true },
+      { headers }
+    );
+  };
+
   const handleConfirm = async () => {
     console.log('[Onboarding] handleConfirm called. gmailAccountId:', user?.gmailAccountId, 'hasToken:', !!token);
     if (!user?.gmailAccountId || !token) { onNavigate('dashboard'); return; }
@@ -347,6 +349,8 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
         { accountId: user.gmailAccountId },
         { headers }
       );
+
+      await completeOnboardingAndStartProcessing();
       
       // User opted for live-stream dashboard! Route immediately to dashboard
       // where emails will pop in as the background worker runs.
@@ -654,7 +658,18 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <button
-              onClick={() => { console.log('[Onboarding] Step 2 Skip -> dashboard'); onNavigate('dashboard'); }}
+              onClick={async () => {
+                console.log('[Onboarding] Step 2 Skip -> dashboard');
+                if (!token) { onNavigate('dashboard'); return; }
+                try {
+                  setSaving(true);
+                  await completeOnboardingAndStartProcessing();
+                } catch (err) {
+                  console.error('[Onboarding] Failed to complete onboarding on skip:', err);
+                } finally {
+                  onNavigate('dashboard');
+                }
+              }}
               disabled={saving}
               style={{ background: 'transparent', border: 'none', color: 'var(--text-3)', fontFamily: 'var(--font-ui)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', padding: '8px 0' }}>
               Skip
@@ -669,5 +684,4 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     </div>
   );
 }
-
 
