@@ -17,6 +17,8 @@ import { ProcessedEmailLogModel } from "../model/ProcessedEmailLog";
 import { GmailAccountModel } from "../model/GmailAccount";
 import { InsightModel } from "../model/Insight";
 import { LabelModel } from "../model/Label";
+import { EmailMessageModel } from "../model/EmailMessage";
+import { UserIntentProfileModel } from "../model/UserIntentProfile";
 import rulesEngine, { EmailMetadata } from "./rulesEngine";
 import { processEmailDeep } from "./emailProcessingService";
 import { refreshAccessToken } from "./gmailAuth";
@@ -32,8 +34,8 @@ import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService
 
 const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT  ? parseInt(process.env.SYNC_LOCK_TIMEOUT): 3 * 60 * 1000;
 const TEST_MODE = true; // Set to false for production
-const MAX_EMAILS_TEST_MODE = 20;
-const MAX_FETCH_TEST_MODE = 50; // cap fetched candidate messages in test mode
+const MAX_EMAILS_TEST_MODE = 5;
+const MAX_FETCH_TEST_MODE = 20; // cap fetched candidate messages in test mode
 const MAX_RETRIES = process.env.MAX_RETRIES ? parseInt(process.env.MAX_RETRIES) : 5;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -517,187 +519,9 @@ export class IncrementalSyncService {
 
       const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
-      // ===== PRIORITY: Process pending retry candidates (DB-driven) =====
-      // Find emails from previous syncs that failed but haven't exceeded max retries and aren't permanently failed
-      const retryCandidates = await ProcessedEmailLogModel.find({
-        accountId: objectIdAccountId,
-        retryCount: { $gt: 0 },
-        errorType: { $ne: 'permanent' },
-      });
-
-      const retriedSet = new Set<string>();
-      if (retryCandidates && retryCandidates.length > 0) {
-        console.log(`[SYNC] Found ${retryCandidates.length} retry candidates, processing them first`);
-        for (const candidate of retryCandidates) {
-          const messageId = candidate.messageId;
-          try {
-            // Fetch metadata and attempt deep processing
-            const metadata = await this.fetchEmailMetadata(gmail, messageId);
-            const stateHash = this.computeStateHash(metadata);
-            const shouldProcess = await this.shouldDeepProcess(accountId, messageId, stateHash);
-
-            if (shouldProcess) {
-              const relevantLabels = rulesEngine.getRelevantLabels(
-                `${metadata.subject}\n${metadata.snippet}`,
-                labelCandidates
-              );
-              const deepResult = await this.deepProcessing(
-                gmail,
-                messageId,
-                metadata.threadId,
-                metadata,
-                relevantLabels
-              );
-
-              // Upsert Insight (reuse existing logic)
-              const normalizedLabels = normalizeAIClassification(
-                deepResult.insights.labels,
-                deepResult.insights.suggestedLabel || undefined,
-                assignableLabels
-              );
-              const suggestedLabel = await recordSuggestedLabel({
-                userId: gmailAccount.userId,
-                accountId: objectIdAccountId.toString(),
-                suggestionName: normalizedLabels.suggestedLabelName,
-                threadId: metadata.threadId,
-              });
-
-              const parsedImportanceScore = (deepResult.insights as any)?.importanceScore;
-              const boundedImportanceScore =
-                typeof parsedImportanceScore === "number"
-                  ? Math.max(0, Math.min(parsedImportanceScore, 1))
-                  : undefined;
-              const baseScoreResult = computeBaseScore({
-                importanceScore: boundedImportanceScore,
-                labels: normalizedLabels.assignedLabels.map((label: any) => ({
-                  labelId: label._id,
-                  name: label.name,
-                })),
-                context: priorityScoringContext,
-              });
-
-              const insightData: any = {
-                userId: gmailAccount.userId,
-                accountId: objectIdAccountId,
-                gmailThreadId: metadata.threadId,
-                emailIds: [messageId],
-                from: deepResult.from,
-                labels: normalizedLabels.assignedLabels.map((label) => ({
-                  labelId: label._id,
-                  name: label.name,
-                  source: label.source,
-                  statusSnapshot: label.status,
-                })),
-                labelSuggestions: suggestedLabel && suggestedLabel.status !== "rejected"
-                  ? [
-                      {
-                        labelId: suggestedLabel._id,
-                        name: suggestedLabel.name,
-                        source: "ai",
-                        status: suggestedLabel.status,
-                        confidence: Math.min(
-                          (suggestedLabel.suggestionCount || 0) /
-                            AI_LABEL_SUGGESTION_MIN_MATCHES,
-                          1
-                        ),
-                        generatedAt: new Date(),
-                      },
-                    ]
-                  : [],
-                summary: {
-                  shortSnippet: deepResult.insights.shortSnippet,
-                  intent: deepResult.insights.intent,
-                },
-                dates: deepResult.insights.dates
-                  .map((d: any) => {
-                    const parsed = safeParseDate(d.date);
-                    if (!parsed) return null;
-                    return {
-                      type: d.type,
-                      date: parsed,
-                      sourceEmailId: messageId,
-                    };
-                  })
-                  .filter(Boolean),
-                attachments: deepResult.attachmentMetadata,
-                extractedFacts: deepResult.insights.extractedFacts,
-                state: {
-                  relevance: "active",
-                  firstSeenAt: new Date(),
-                  lastSignalAt: new Date(),
-                  lastVerifiedAt: new Date(),
-                },
-              };
-              if (typeof boundedImportanceScore === "number") {
-                insightData.importanceScore = boundedImportanceScore;
-              }
-
-              const insight = await InsightModel.findOneAndUpdate(
-                {
-                  userId: gmailAccount.userId,
-                  gmailThreadId: metadata.threadId,
-                },
-                {
-                  $set: insightData,
-                  $setOnInsert: {
-                    baseScore: baseScoreResult.baseScore,
-                    baseScoreBreakdown: {
-                      importanceNorm: baseScoreResult.importanceNorm,
-                      labelNorm: baseScoreResult.labelNorm,
-                      matchedLabelRank: baseScoreResult.matchedLabelRank,
-                    },
-                    baseScoreComputedAt: new Date(),
-                  },
-                },
-                { upsert: true, new: true }
-              );
-
-              if (insight) {
-                // Clear retry state on successful processing
-                await ProcessedEmailLogModel.findOneAndUpdate(
-                  { accountId: objectIdAccountId, messageId },
-                  {
-                    insightId: insight._id,
-                    threadId: metadata.threadId,
-                    previousStateHash: stateHash,
-                    previousLabels: metadata.labels,
-                    internalDate: metadata.internalDate,
-                    processedAt: new Date(),
-                    retryCount: 0,
-                    lastRetryAt: null,
-                    lastErrorMessage: null,
-                    errorType: 'none',
-                  },
-                  { upsert: true }
-                );
-
-                retriedSet.add(messageId);
-              }
-            }
-          } catch (err: any) {
-            console.error(`[SYNC] Retry candidate failed for ${messageId}:`, err.message || err);
-            // Classification: mark as permanent if errorType is 'permanent' or if retryCount hit max
-            const errorType = classifyError(err);
-            const existing = await ProcessedEmailLogModel.findOne({ accountId: objectIdAccountId, messageId });
-            const newRetryCount = (existing?.retryCount || 0) + 1;
-            const isPermanent = errorType === 'permanent' || newRetryCount >= MAX_RETRIES;
-            const finalErrorType = isPermanent ? 'permanent' : errorType;
-
-            await ProcessedEmailLogModel.findOneAndUpdate(
-              { accountId: objectIdAccountId, messageId },
-              {
-                retryCount: newRetryCount,
-                lastRetryAt: new Date(),
-                lastErrorMessage: err.message || String(err),
-                errorType: finalErrorType,
-              },
-              { upsert: true }
-            );
-          }
-        }
-      }
-
-   
+      // ===== RETRY CANDIDATES MOVED TO ASYNC AI WORKER =====
+      // The synchronous AI processing retry block has been removed from the fetch step 
+      // and delegated to the standalone AI Processing Worker.
 
       // ===== STEP 4: Determine Sync Strategy & Fetch Candidates =====
       const emailSource = this.determineEmailSource(checkpoint);
@@ -789,18 +613,14 @@ export class IncrementalSyncService {
         }
       }
 
-      const filteredEmails = rulesEngine.applyRulesAndRelevance(metadataList);
-      console.log(
-        `[SYNC] Filtered: ${metadataList.length} → ${filteredEmails.length}`
-      );
-
-      // Remove any emails we already retried above so we don't double-process
-      const filteredWithoutRetried = filteredEmails.filter((e) => !retriedSet.has(e.messageId));
-
+      // We no longer filter emails before staging them.
+      // All fetched metadata is inserted into EmailMessage for the async 
+      // Scoring Worker to evaluate against the UserIntentProfile.
+      
       // Limit emails in test mode
       const emailsToProcess = TEST_MODE
-        ? filteredWithoutRetried.slice(0, MAX_EMAILS_TEST_MODE)
-        : filteredWithoutRetried;
+        ? metadataList.slice(0, MAX_EMAILS_TEST_MODE)
+        : metadataList;
 
       await this.updateProgress(objectIdAccountId, {
         progressPercent: 40,
@@ -810,9 +630,9 @@ export class IncrementalSyncService {
         processedCandidates: 0,
       });
 
-      if (TEST_MODE && filteredWithoutRetried.length > MAX_EMAILS_TEST_MODE) {
+      if (TEST_MODE && emailsToProcess.length > MAX_EMAILS_TEST_MODE) {
         console.log(
-          `[SYNC] TEST_MODE active: limiting to ${MAX_EMAILS_TEST_MODE} emails (${filteredWithoutRetried.length} total available)`
+          `[SYNC] TEST_MODE active: limiting to ${MAX_EMAILS_TEST_MODE} emails (${emailsToProcess.length} total available)`
         );
       }
 
@@ -825,206 +645,49 @@ export class IncrementalSyncService {
       for (const email of emailsToProcess) {
         processed++;
         if (totalToProcess > 0 && (processed % 5 === 0 || processed === totalToProcess)) {
-          const ratio = processed / totalToProcess;
-          await this.updateProgress(objectIdAccountId, {
-            progressPercent: 40 + Math.floor(ratio * 55),
-            progressStage: "processing_emails",
-            progressMessage: "Processing inbox content...",
-            totalCandidates: totalToProcess,
-            processedCandidates: processed,
-          });
+           const ratio = processed / totalToProcess;
+           await this.updateProgress(objectIdAccountId, {
+             progressPercent: 40 + Math.floor(ratio * 55),
+             progressStage: "processing_emails",
+             progressMessage: "Saving features directly to staging...",
+             totalCandidates: totalToProcess,
+             processedCandidates: processed,
+           });
         }
         try {
-          // Compute current state hash
-          const stateHash = this.computeStateHash(email);
-
-          // Check if should deep process
-          const shouldProcess = await this.shouldDeepProcess(
-            accountId,
-            email.messageId,
-            stateHash
-          );
-
-          let insight: any = null;
-
-          if (shouldProcess) {
-            // Deep process: fetch full body and extract insights
-            const relevantLabels = rulesEngine.getRelevantLabels(
+           const relevantLabels = rulesEngine.getRelevantLabels(
               `${email.subject}\n${email.snippet}`,
               labelCandidates
-            );
-            const deepResult = await this.deepProcessing(
-              gmail,
-              email.messageId,
-              email.threadId,
-              email,
-              relevantLabels
-            );
+           );
 
-            // Upsert Insight
-            const normalizedLabels = normalizeAIClassification(
-              deepResult.insights.labels,
-              deepResult.insights.suggestedLabel || undefined,
-              assignableLabels
-            );
-            const suggestedLabel = await recordSuggestedLabel({
-              userId: gmailAccount.userId,
-              accountId: objectIdAccountId.toString(),
-              suggestionName: normalizedLabels.suggestedLabelName,
-              threadId: email.threadId,
-            });
-
-            const parsedImportanceScore = (deepResult.insights as any)?.importanceScore;
-            const boundedImportanceScore =
-              typeof parsedImportanceScore === "number"
-                ? Math.max(0, Math.min(parsedImportanceScore, 1))
-                : undefined;
-            const baseScoreResult = computeBaseScore({
-              importanceScore: boundedImportanceScore,
-              labels: normalizedLabels.assignedLabels.map((label: any) => ({
-                labelId: label._id,
-                name: label.name,
-              })),
-              context: priorityScoringContext,
-            });
-
-            const insightData: any = {
-              userId: gmailAccount.userId,
-              accountId: objectIdAccountId,
-              gmailThreadId: email.threadId,
-              emailIds: [email.messageId],
-              from: deepResult.from,
-              labels: normalizedLabels.assignedLabels.map((label) => ({
-                labelId: label._id,
-                name: label.name,
-                source: label.source,
-                statusSnapshot: label.status,
-              })),
-              labelSuggestions: suggestedLabel && suggestedLabel.status !== "rejected"
-                ? [
-                    {
-                      labelId: suggestedLabel._id,
-                      name: suggestedLabel.name,
-                      source: "ai",
-                      status: suggestedLabel.status,
-                      confidence: Math.min(
-                        (suggestedLabel.suggestionCount || 0) /
-                          AI_LABEL_SUGGESTION_MIN_MATCHES,
-                        1
-                      ),
-                      generatedAt: new Date(),
-                    },
-                  ]
-                : [],
-              summary: {
-                shortSnippet: deepResult.insights.shortSnippet,
-                intent: deepResult.insights.intent,
-              },
-              dates: deepResult.insights.dates
-                .map((d: any) => {
-                  const parsed = safeParseDate(d.date);
-                  if (!parsed) return null;
-                  return {
-                    type: d.type,
-                    date: parsed,
-                    sourceEmailId: email.messageId,
-                  };
-                })
-                .filter(Boolean),
-              attachments: deepResult.attachmentMetadata,
-              extractedFacts: deepResult.insights.extractedFacts,
-              state: {
-                relevance: "active",
-                firstSeenAt: new Date(),
-                lastSignalAt: new Date(),
-                lastVerifiedAt: new Date(),
-              },
-            };
-            if (typeof boundedImportanceScore === "number") {
-              insightData.importanceScore = boundedImportanceScore;
-            }
-
-            insight = await InsightModel.findOneAndUpdate(
-              {
-                userId: gmailAccount.userId,
-                gmailThreadId: email.threadId,
-              },
-              {
-                $set: insightData,
-                $setOnInsert: {
-                  baseScore: baseScoreResult.baseScore,
-                  baseScoreBreakdown: {
-                    importanceNorm: baseScoreResult.importanceNorm,
-                    labelNorm: baseScoreResult.labelNorm,
-                    matchedLabelRank: baseScoreResult.matchedLabelRank,
-                  },
-                  baseScoreComputedAt: new Date(),
-                },
-              },
-              { upsert: true, new: true }
-            );
-          } else {
-            // Metadata-only update: no deep processing needed
-            const existing = await ProcessedEmailLogModel.findOne({
-              accountId: objectIdAccountId,
-              messageId: email.messageId,
-            });
-            insight = await InsightModel.findById(existing?.insightId);
-
-            if (insight) {
-              insight.labels = email.labels?.map((label: string) => ({
-                name: label,
-                source: "system",
-                statusSnapshot: "active",
-              })) || [];
-              await insight.save();
-            }
-          }
-
-          // Upsert ProcessedEmailLog
-          if (insight) {
-            await ProcessedEmailLogModel.findOneAndUpdate(
-              {
-                accountId: objectIdAccountId,
-                messageId: email.messageId,
-              },
-              {
-                insightId: insight._id,
-                threadId: email.threadId,
-                previousStateHash: stateHash,
-                previousLabels: email.labels,
-                internalDate: email.internalDate,
-                processedAt: new Date(),
-                  retryCount: 0,
-                  errorType: 'none',
-              },
-              { upsert: true }
-            );
-
-            succeeded++;
-          }
+           await EmailMessageModel.findOneAndUpdate(
+             { accountId: objectIdAccountId, messageId: email.messageId },
+             {
+               $set: {
+                 userId: gmailAccount.userId,
+                 threadId: email.threadId,
+                 from: email.from,
+                 subject: email.subject,
+                 snippet: email.snippet,
+                 internalDate: new Date(parseInt(email.internalDate)),
+                 hasAttachments: email.hasAttachments,
+                 extractedFeatures: relevantLabels.map(l => l.name),
+               },
+               $setOnInsert: {
+                 score: null,
+                 aiProcessed: false,
+                 priorityState: 'pending',
+                 createdAt: new Date(),
+               }
+             },
+             { upsert: true }
+           );
+           
+           succeeded++;
         } catch (error: any) {
-          console.error(`[SYNC] Error processing ${email.messageId}: ${error.message}`);
+          console.error(`[SYNC] Error saving staging email ${email.messageId}: ${error.message}`);
           failed++;
           errors.push({ messageId: email.messageId, reason: error.message });
-
-          // Classification: mark as permanent if errorType is 'permanent' or if retryCount hit max
-          const errorType = classifyError(error);
-          const existing = await ProcessedEmailLogModel.findOne({ accountId: objectIdAccountId, messageId: email.messageId });
-          const newRetryCount = (existing?.retryCount || 0) + 1;
-          const isPermanent = errorType === 'permanent' || newRetryCount >= MAX_RETRIES;
-          const finalErrorType = isPermanent ? 'permanent' : errorType;
-
-          await ProcessedEmailLogModel.findOneAndUpdate(
-            { accountId: objectIdAccountId, messageId: email.messageId },
-            {
-              retryCount: newRetryCount,
-              lastRetryAt: new Date(),
-              lastErrorMessage: error.message,
-              errorType: finalErrorType,
-            },
-            { upsert: true }
-          );
         }
       }
 

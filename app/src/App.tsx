@@ -53,7 +53,7 @@ function App() {
 
     if (gmailSuccess === 'true') {
       setIsGmailConnected(true);
-      setRoute('onboarding');
+      setRoute('syncing'); // Sync runs first; it navigates to onboarding when done
       // Clean up URL
       window.history.replaceState({}, document.title, window.location.pathname);
     } else if (gmailError) {

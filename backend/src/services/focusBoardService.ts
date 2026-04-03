@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { ILabel, LabelModel } from "../model/Label";
 import { InsightModel } from "../model/Insight";
+import { EmailMessageModel } from "../model/EmailMessage";
 import {
   ILabelPriorityConfig,
   LabelPriorityConfigModel,
@@ -383,6 +384,31 @@ export interface PriorityRankingItem {
     size: number;
     sourceEmailId?: string;
   }>;
+  emailContextById?: Record<
+    string,
+    {
+      subject?: string;
+      from?: { email?: string; name?: string; domain?: string };
+      internalDate?: Date;
+    }
+  >;
+  checklistItems?: Array<{
+    task: string;
+    status: "pending";
+    dueDate?: Date;
+    reason?: string;
+    inferred?: boolean;
+    sourceEmailId?: string;
+  }>;
+  importantLinksByEmail?: Record<
+    string,
+    Array<{
+      url: string;
+      label?: string;
+      reason?: string;
+      inferred?: boolean;
+    }>
+  >;
   checklist?: string[];
 }
 
@@ -474,6 +500,70 @@ const resolveEnvInt = (value: string | undefined, fallback: number): number => {
   return parsed;
 };
 
+const flattenDatesFromEmails = (emails: any[]): Array<{
+  type: "deadline" | "event" | "followup";
+  date: Date;
+  sourceEmailId?: string;
+}> =>
+  emails.flatMap((entry: any) =>
+    (Array.isArray(entry?.dates) ? entry.dates : [])
+      .map((d: any) => {
+        const parsed = new Date(d?.date);
+        if (!["deadline", "event", "followup"].includes(d?.type) || Number.isNaN(parsed.getTime())) {
+          return null;
+        }
+        return {
+          type: d.type,
+          date: parsed,
+          sourceEmailId: entry?.messageId,
+        };
+      })
+      .filter(Boolean)
+  ) as Array<{ type: "deadline" | "event" | "followup"; date: Date; sourceEmailId?: string }>;
+
+const flattenAttachmentsFromEmails = (emails: any[]): Array<{
+  filename: string;
+  mimeType: string;
+  size: number;
+  sourceEmailId?: string;
+}> =>
+  emails.flatMap((entry: any) =>
+    (Array.isArray(entry?.attachments) ? entry.attachments : [])
+      .map((a: any) => {
+        if (!a?.filename) return null;
+        return {
+          filename: a.filename,
+          mimeType: a.mimeType || "application/octet-stream",
+          size: typeof a.size === "number" ? a.size : 0,
+          sourceEmailId: entry?.messageId,
+        };
+      })
+      .filter(Boolean)
+  ) as Array<{ filename: string; mimeType: string; size: number; sourceEmailId?: string }>;
+
+const sortBySignal = <T extends { date?: Date; sourceEmailId?: string }>(
+  arr: T[]
+): T[] =>
+  [...arr].sort((a, b) => {
+    const aTime = a.date ? new Date(a.date).getTime() : 0;
+    const bTime = b.date ? new Date(b.date).getTime() : 0;
+    return bTime - aTime;
+  });
+
+const sortAttachmentsBySourceDate = <T extends { sourceEmailId?: string }>(
+  arr: T[],
+  contextById: Record<string, { internalDate?: Date }>
+): T[] =>
+  [...arr].sort((a, b) => {
+    const aTime = a.sourceEmailId
+      ? new Date(contextById[a.sourceEmailId]?.internalDate || 0).getTime()
+      : 0;
+    const bTime = b.sourceEmailId
+      ? new Date(contextById[b.sourceEmailId]?.internalDate || 0).getTime()
+      : 0;
+    return bTime - aTime;
+  });
+
 export const getPriorityRanking = async (params: {
   userId: string;
   accountId: string;
@@ -503,7 +593,7 @@ export const getPriorityRanking = async (params: {
     ],
   })
     .select(
-      "gmailThreadId summary from labels importanceScore baseScore baseScoreBreakdown state createdAt updatedAt dates attachments checklist"
+      "gmailThreadId summary from labels importanceScore baseScore baseScoreBreakdown state createdAt updatedAt dates attachments checklist emails"
     )
     .lean()
     .exec();
@@ -548,16 +638,87 @@ export const getPriorityRanking = async (params: {
     );
     const recencyNorm = Math.exp(-ageHours / RECENCY_DECAY_HOURS);
 
-    const nearestDeadlineHours = getNearestDeadlineHours(
-      Array.isArray(insight.dates) ? insight.dates : [],
-      now
-    );
+    const embeddedEmails = Array.isArray((insight as any).emails) ? (insight as any).emails : [];
+    const derivedChecklist = Array.isArray((insight as any).checklist)
+      ? (insight as any).checklist
+      : embeddedEmails.flatMap((entry: any) =>
+          (Array.isArray(entry?.checklist) ? entry.checklist : []).map((item: any) => ({
+            ...item,
+            sourceEmailId: entry?.messageId,
+          }))
+        );
+    const derivedDates = embeddedEmails.length > 0
+      ? flattenDatesFromEmails(embeddedEmails)
+      : (Array.isArray(insight.dates) ? insight.dates : []);
+    const derivedAttachments = embeddedEmails.length > 0
+      ? flattenAttachmentsFromEmails(embeddedEmails)
+      : (Array.isArray(insight.attachments) ? insight.attachments : []);
+    const nearestDeadlineHours = getNearestDeadlineHours(derivedDates as any, now);
     const deadlineBoost =
       nearestDeadlineHours !== null && nearestDeadlineHours <= DEADLINE_WINDOW_HOURS
         ? DEADLINE_BOOST
         : 0;
     const dynamicScore = 0.2 * recencyNorm + deadlineBoost;
     const totalScore = baseScore + dynamicScore;
+
+    const emailContextById: Record<string, { subject?: string; from?: { email?: string; name?: string; domain?: string }; internalDate?: Date }> = {};
+    for (const email of embeddedEmails) {
+      if (!email?.messageId) continue;
+      emailContextById[email.messageId] = {
+        subject: email.subject,
+        from: email.from
+          ? {
+              email: email.from.email,
+              name: email.from.name,
+              domain: email.from.domain,
+            }
+          : undefined,
+        internalDate: email.internalDate ? new Date(email.internalDate) : undefined,
+      };
+    }
+
+    const missingSourceIds = Array.from(
+      new Set(
+        [
+          ...((Array.isArray(derivedDates) ? derivedDates : []).map((d: any) => d?.sourceEmailId)),
+          ...((Array.isArray(derivedAttachments) ? derivedAttachments : []).map((a: any) => a?.sourceEmailId)),
+        ]
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+          .filter((id) => !emailContextById[id])
+      )
+    );
+
+    if (missingSourceIds.length > 0) {
+      const fallbackEmails = await EmailMessageModel.find({
+        accountId: accountObjectId,
+        messageId: { $in: missingSourceIds },
+      })
+        .select("messageId from subject internalDate")
+        .lean()
+        .exec();
+
+      for (const fallbackEmail of fallbackEmails) {
+        const rawFrom = typeof fallbackEmail.from === "string" ? fallbackEmail.from : "";
+        const emailMatch = rawFrom.match(/<(.+?)>/);
+        const parsedEmail = emailMatch ? emailMatch[1] : rawFrom;
+        const parsedName = emailMatch
+          ? rawFrom.substring(0, rawFrom.indexOf("<")).trim().replace(/^["']|["']$/g, "")
+          : undefined;
+        const parsedDomain = parsedEmail.includes("@") ? parsedEmail.split("@")[1] : undefined;
+
+        emailContextById[fallbackEmail.messageId] = {
+          subject: fallbackEmail.subject || undefined,
+          from: parsedEmail
+            ? {
+                email: parsedEmail,
+                name: parsedName || undefined,
+                domain: parsedDomain || undefined,
+              }
+            : undefined,
+          internalDate: fallbackEmail.internalDate ? new Date(fallbackEmail.internalDate) : undefined,
+        };
+      }
+    }
 
     scoredItems.push({
       insightId: insight._id.toString(),
@@ -588,23 +749,73 @@ export const getPriorityRanking = async (params: {
         updatedAt: insight.updatedAt,
         lastSignalAt: insight.state?.lastSignalAt,
       },
-      dates: Array.isArray(insight.dates)
-        ? insight.dates.map((d: any) => ({
-            type: d.type,
-            date: d.date,
-            sourceEmailId: d.sourceEmailId,
-          }))
+      dates: sortBySignal(
+        Array.isArray(derivedDates)
+          ? derivedDates.map((d: any) => ({
+              type: d.type,
+              date: d.date,
+              sourceEmailId: d.sourceEmailId,
+            }))
+          : []
+      ),
+      attachments: sortAttachmentsBySourceDate(
+        Array.isArray(derivedAttachments)
+          ? derivedAttachments.map((a: any) => ({
+              filename: a.filename,
+              mimeType: a.mimeType,
+              size: a.size,
+              sourceEmailId: a.sourceEmailId,
+            }))
+          : [],
+        emailContextById
+      ),
+      emailContextById,
+      checklistItems: Array.isArray(derivedChecklist)
+        ? (derivedChecklist as any[])
+            .map((item: any) => {
+              const task = typeof item?.task === "string" ? item.task.trim() : "";
+              if (!task) return null;
+              const parsedDueDate = item?.dueDate ? new Date(item.dueDate) : undefined;
+              return {
+                task,
+                status: "pending" as const,
+                dueDate: parsedDueDate && !Number.isNaN(parsedDueDate.getTime()) ? parsedDueDate : undefined,
+                reason: typeof item?.reason === "string" ? item.reason : undefined,
+                inferred: item?.inferred === true,
+                sourceEmailId: typeof item?.sourceEmailId === "string" ? item.sourceEmailId : undefined,
+              };
+            })
+            .filter(Boolean) as Array<{
+            task: string;
+            status: "pending";
+            dueDate?: Date;
+            reason?: string;
+            inferred?: boolean;
+            sourceEmailId?: string;
+          }>
         : [],
-      attachments: Array.isArray(insight.attachments)
-        ? insight.attachments.map((a: any) => ({
-            filename: a.filename,
-            mimeType: a.mimeType,
-            size: a.size,
-            sourceEmailId: a.sourceEmailId,
-          }))
-        : [],
-      checklist: Array.isArray((insight as any).checklist)
-        ? ((insight as any).checklist as string[])
+      importantLinksByEmail: embeddedEmails.reduce((acc: Record<string, Array<{ url: string; label?: string; reason?: string; inferred?: boolean }>>, entry: any) => {
+        const messageId = typeof entry?.messageId === "string" ? entry.messageId : "";
+        if (!messageId) return acc;
+        const deduped = new Map<string, { url: string; label?: string; reason?: string; inferred?: boolean }>();
+        const links = Array.isArray(entry?.importantLinks) ? entry.importantLinks : [];
+        for (const link of links) {
+          const url = typeof link?.url === "string" ? link.url.trim() : "";
+          if (!url || deduped.has(url)) continue;
+          deduped.set(url, {
+            url,
+            label: typeof link?.label === "string" ? link.label : undefined,
+            reason: typeof link?.reason === "string" ? link.reason : undefined,
+            inferred: link?.inferred === true,
+          });
+        }
+        acc[messageId] = Array.from(deduped.values());
+        return acc;
+      }, {}),
+      checklist: Array.isArray(derivedChecklist)
+        ? (derivedChecklist as any[])
+            .map((item: any) => (typeof item === "string" ? item : item?.task))
+            .filter((task: any): task is string => typeof task === "string" && task.trim().length > 0)
         : [],
     });
   }

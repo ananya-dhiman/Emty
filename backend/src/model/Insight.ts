@@ -14,8 +14,53 @@ export type ThreadIntent =
 export interface IInsight extends Document {
     userId: string;
     accountId: Types.ObjectId;
-    gmailThreadId: string;
+  docType?: "thread_insight";
+  gmailThreadId: string;
   emailIds: string[];
+  emails?: Array<{
+    messageId: string;
+    internalDate: Date;
+    from: {
+      email: string;
+      name?: string;
+      domain?: string;
+    };
+    subject: string;
+    snippet?: string;
+    labels: Array<{
+      labelId?: Types.ObjectId;
+      name: string;
+    }>;
+    dates: Array<{
+      type: "deadline" | "event" | "followup";
+      date: Date;
+    }>;
+    attachments: Array<{
+      filename: string;
+      mimeType: string;
+      size: number;
+    }>;
+    importantLinks?: Array<{
+      url: string;
+      label?: string;
+      reason?: string;
+      inferred?: boolean;
+    }>;
+    checklist?: Array<{
+      task: string;
+      status: "pending";
+      dueDate?: Date;
+      reason?: string;
+      inferred?: boolean;
+    }>;
+    extractedFacts?: Record<string, any>;
+    ai: {
+      intent: ThreadIntent;
+      shortSnippet: string;
+      importanceScore?: number;
+      processedAt: Date;
+    };
+  }>;
   threadId?: Types.ObjectId;
   from: {
     email: string;
@@ -60,6 +105,14 @@ export interface IInsight extends Document {
     size: number;
     sourceEmailId: string;
   }>;
+  checklist?: Array<{
+    task: string;
+    status: "pending";
+    dueDate?: Date;
+    reason?: string;
+    inferred?: boolean;
+    sourceEmailId: string;
+  }>;
   state?: {
     relevance: "active" | "expired" | "ignored";
     firstSeenAt: Date;
@@ -80,9 +133,95 @@ const InsightSchema = new Schema<IInsight>(
         required: true,
         index: true,
         },
+        docType: {
+          type: String,
+          enum: ["thread_insight"],
+          default: "thread_insight",
+          index: true,
+        },
         accountId: { type: Schema.Types.ObjectId, ref: "GmailAccount", required: true },
         gmailThreadId: { type: String, required: true },
         emailIds: [{ type: String }],
+        emails: [
+          {
+            messageId: { type: String, required: true },
+            internalDate: { type: Date, required: true },
+            from: {
+              email: { type: String, required: true },
+              name: { type: String },
+              domain: { type: String },
+            },
+            subject: { type: String, required: true },
+            snippet: { type: String },
+            labels: [
+              {
+                labelId: {
+                  type: Schema.Types.ObjectId,
+                  ref: "Label",
+                  required: false,
+                },
+                name: { type: String, required: true },
+              },
+            ],
+            dates: [
+              {
+                type: {
+                  type: String,
+                  enum: ["deadline", "event", "followup"],
+                  required: true,
+                },
+                date: { type: Date, required: true },
+              },
+            ],
+            attachments: [
+              {
+                filename: { type: String, required: true },
+                mimeType: { type: String, required: true },
+                size: { type: Number, required: true },
+              },
+            ],
+            importantLinks: [
+              {
+                url: { type: String, required: true },
+                label: { type: String },
+                reason: { type: String },
+                inferred: { type: Boolean, default: false },
+              },
+            ],
+            checklist: [
+              {
+                task: { type: String, required: true },
+                status: { type: String, enum: ["pending"], default: "pending" },
+                dueDate: { type: Date },
+                reason: { type: String },
+                inferred: { type: Boolean, default: false },
+              },
+            ],
+            extractedFacts: { type: Schema.Types.Mixed },
+            ai: {
+              intent: {
+                type: String,
+                enum: [
+                  "action_required",
+                  "event",
+                  "opportunity",
+                  "information",
+                  "waiting",
+                  "noise",
+                ],
+                required: true,
+              },
+              shortSnippet: { type: String, required: true },
+              importanceScore: {
+                type: Number,
+                min: 0,
+                max: 1,
+                required: false,
+              },
+              processedAt: { type: Date, required: true },
+            },
+          },
+        ],
         threadId: { type: Schema.Types.ObjectId, ref: "Thread", unique: false },
         from: {
             email: { type: String, required: true },
@@ -227,6 +366,16 @@ const InsightSchema = new Schema<IInsight>(
           sourceEmailId: { type: String, required: true },
         },
       ],
+    checklist: [
+      {
+        task: { type: String, required: true },
+        status: { type: String, enum: ["pending"], default: "pending" },
+        dueDate: { type: Date },
+        reason: { type: String },
+        inferred: { type: Boolean, default: false },
+        sourceEmailId: { type: String, required: true },
+      },
+    ],
 
     state: {
       relevance: {
@@ -257,5 +406,6 @@ const InsightSchema = new Schema<IInsight>(
 
     { timestamps: true }
 );
+InsightSchema.index({ accountId: 1, gmailThreadId: 1 });
 
 export const InsightModel = mongoose.model<IInsight>("Insight", InsightSchema);

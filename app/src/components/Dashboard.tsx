@@ -45,6 +45,30 @@ export interface PriorityRankingItem {
     size?: number;
     sourceEmailId?: string;
   }>;
+  emailContextById?: Record<string, {
+    subject?: string;
+    from?: {
+      email?: string;
+      name?: string;
+      domain?: string;
+    };
+    internalDate?: Date | string;
+    extractedFacts?: Record<string, any>;
+  }>;
+  checklistItems?: Array<{
+    task: string;
+    status: 'pending';
+    dueDate?: Date | string;
+    reason?: string;
+    inferred?: boolean;
+    sourceEmailId?: string;
+  }>;
+  importantLinksByEmail?: Record<string, Array<{
+    url: string;
+    label?: string;
+    reason?: string;
+    inferred?: boolean;
+  }>>;
   checklist?: string[];
 }
 
@@ -84,6 +108,41 @@ const normalizeDates = (dates: any): Array<{ type: 'deadline' | 'event' | 'follo
     .filter(Boolean) as Array<{ type: 'deadline' | 'event' | 'followup'; date: Date; sourceEmailId?: string }>;
 };
 
+const TimelineItem = ({ item, isFirst, selectedEmail, onSourceClick }: any) => {
+  const [isOpen, setIsOpen] = useState(isFirst);
+  const context = item.sourceEmailId ? selectedEmail?.emailContextById?.[item.sourceEmailId] : null;
+  const hasFacts = context && context.extractedFacts;
+  const reasonStr = hasFacts ? Object.values(context.extractedFacts).join(' · ') : '';
+  const sourceName = context?.subject || item.sourceEmailId || 'Unknown source';
+  
+  return (
+    <div className="tl-item">
+      <div className={`tl-dot ${isFirst ? 'active' : ''}`}></div>
+      <div className="tl-card">
+        <div className="tl-header" onClick={() => setIsOpen(!isOpen)}>
+          <div className="tl-date">{new Date(item.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+          <span className="tl-type-tag">{item.type}</span>
+          <svg className={`tl-toggle ${isOpen ? 'open' : ''}`} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </div>
+        <div className={`tl-body ${isOpen ? 'open' : ''}`}>
+          {reasonStr || `Scheduled ${item.type} date.`}
+          {item.sourceEmailId && (
+            <div 
+              className="tl-source" 
+              onClick={(e) => { e.stopPropagation(); onSourceClick(item.sourceEmailId); }}
+              style={{ cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              source: {(sourceName).length > 50 ? (sourceName).slice(0, 50) + '...' : sourceName}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 interface DashboardProps {
   user: any;
   theme: 'light' | 'dark';
@@ -96,6 +155,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [calendarCol, setCalendarCol] = useState(false);
   const [rightCol, setRightCol] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState<string | null>(null);
+  const [selectedSourceMessageId, setSelectedSourceMessageId] = useState<string | null>(null);
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -106,6 +166,8 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [sidebarLabels, setSidebarLabels] = useState<{id: string, name: string, color: string, rank: number, count: number}[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [notification, setNotification] = useState<{show: boolean, message: string, detail?: string, type: 'success' | 'error' | 'info'} | null>(null);
+  // Holds counts from the initial sync HTTP response so the poller can surface them on completion
+  const manualSyncCountsRef = React.useRef<{processed: number; succeeded: number; failed: number} | null>(null);
 
   // feedbackMap: insightId -> 'boost' | 'suppress' | null
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'boost' | 'suppress' | null>>({});
@@ -214,6 +276,47 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     fetchInsights(false);
   }, [user]);
 
+  // Background polling for live-stream dashboard (Option B)
+  // Auto-refreshes the inbox while the background workers are active
+  useEffect(() => {
+    if (!user?.gmailAccountId) return;
+    const token = localStorage.getItem('firebaseToken');
+    if (!token) return;
+
+    let pollInterval: ReturnType<typeof setInterval>;
+    let isCurrentlyPolling = false;
+
+    const checkBackgroundProgress = async () => {
+      if (isCurrentlyPolling) return;
+      isCurrentlyPolling = true;
+      try {
+        const { data } = await axios.get(
+          `http://localhost:5000/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        
+        if (data?.success && data.progressStage && data.progressStage !== 'completed') {
+          // If a background sync is happening, fetch latest inbox items silently
+          setIsSyncing(true);
+          await fetchInsights(true);
+        } else if (data?.success && data.progressStage === 'completed') {
+           setIsSyncing(false);
+           clearInterval(pollInterval);
+        }
+      } catch (err) {
+        console.warn('[Dashboard] Background progress poll failed', err);
+      } finally {
+        isCurrentlyPolling = false;
+      }
+    };
+
+    checkBackgroundProgress(); // Check immediately on mount
+    pollInterval = setInterval(checkBackgroundProgress, 4000);
+
+    return () => clearInterval(pollInterval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   const allItems = [...focusItems, ...actionItems, ...agendaItems];
   const filteredItems = selectedLabel 
     ? allItems.filter(item => item.matchedLabels.includes(selectedLabel))
@@ -230,9 +333,58 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const selectedDates = normalizeDates((selectedEmail as any)?.dates);
   const selectedAttachments = Array.isArray(selectedEmail?.attachments) ? selectedEmail!.attachments : [];
   const selectedChecklist = Array.isArray(selectedEmail?.checklist) ? selectedEmail!.checklist : [];
+  const selectedChecklistItems = Array.isArray((selectedEmail as any)?.checklistItems)
+    ? ((selectedEmail as any).checklistItems as Array<any>)
+        .map((item: any) => ({
+          task: typeof item?.task === 'string' ? item.task.trim() : '',
+          status: 'pending' as const,
+          dueDate: normalizeDateValue(item?.dueDate),
+          reason: typeof item?.reason === 'string' ? item.reason : undefined,
+          inferred: item?.inferred === true,
+          sourceEmailId: typeof item?.sourceEmailId === 'string' ? item.sourceEmailId : undefined,
+        }))
+        .filter((item: any) => item.task.length > 0)
+    : selectedChecklist.map((task) => ({
+        task,
+        status: 'pending' as const,
+        dueDate: null,
+        reason: undefined,
+        inferred: false,
+        sourceEmailId: undefined,
+      }));
+  const selectedImportantLinksByEmail = (selectedEmail?.importantLinksByEmail && typeof selectedEmail.importantLinksByEmail === 'object')
+    ? selectedEmail.importantLinksByEmail
+    : {};
+  const selectedLinkGroups = Object.entries(selectedImportantLinksByEmail)
+    .map(([sourceId, links]) => {
+      const seen = new Set<string>();
+      const normalizedLinks = (Array.isArray(links) ? links : [])
+        .map((link: any) => ({
+          url: typeof link?.url === 'string' ? link.url.trim() : '',
+          label: typeof link?.label === 'string' ? link.label : undefined,
+          reason: typeof link?.reason === 'string' ? link.reason : undefined,
+          inferred: link?.inferred === true,
+        }))
+        .filter((link: any) => {
+          if (!link.url) return false;
+          if (seen.has(link.url)) return false;
+          seen.add(link.url);
+          return true;
+        });
+      return { sourceId, links: normalizedLinks };
+    })
+    .filter((group) => group.links.length > 0);
+
+  const attachmentsByEmail = selectedAttachments.reduce((acc, att) => {
+    const key = att.sourceEmailId || 'unknown';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(att);
+    return acc;
+  }, {} as Record<string, typeof selectedAttachments>);
 
   const selectEmail = (item: PriorityRankingItem) => {
     setSelectedInsightId(item.insightId);
+    setSelectedSourceMessageId(null);
     setRightCol(true);
   };
 
@@ -304,55 +456,110 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
   const handleSync = async () => {
     if (!user?.gmailAccountId) return;
-    
+
     const API_URL = 'http://localhost:5000';
     const token = localStorage.getItem('firebaseToken');
-    
+
+    setIsSyncing(true);
+    setNotification(null);
+    manualSyncCountsRef.current = null;
+
     try {
-      setIsSyncing(true);
-      setNotification(null);
-      // We do not clear existing items so UI remains stable during sync.
-      
-      const response = await axios.post(`${API_URL}/api/emails/sync`, {
-        accountId: user.gmailAccountId
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.data.success) {
-        const { processed, succeeded, failed } = response.data;
+      // Step 1: Kick off the sync. The backend responds immediately after
+      // fetching new email candidates — AI workers run asynchronously after.
+      const response = await axios.post(
+        `${API_URL}/api/emails/sync`,
+        { accountId: user.gmailAccountId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (!response.data.success) {
         setNotification({
-            show: true,
-            type: 'success',
-            message: 'Sync completed successfully',
-            detail: `Processed: ${processed} | Success: ${succeeded} | Failed: ${failed}`
+          show: true,
+          type: 'error',
+          message: 'Sync failed',
+          detail: response.data.message,
         });
-        // Fetch new results without full page reload, in background mode to keep UI stable
-        await fetchInsights(true);
-      } else {
-        setNotification({
-            show: true,
-            type: 'error',
-            message: 'Sync failed',
-            detail: response.data.message
-        });
-      }
-    } catch (err: any) {
-        console.error("Error syncing emails:", err);
-        setNotification({
-            show: true,
-            type: 'error',
-            message: 'Sync error',
-            detail: err.response?.data?.message || 'An error occurred during sync'
-        });
-    } finally {
         setIsSyncing(false);
-        // Hide notification after 5 seconds
         setTimeout(() => setNotification(null), 5000);
+        return;
+      }
+
+      // Stash counts from the fetch stage to surface them on AI completion
+      manualSyncCountsRef.current = {
+        processed: response.data.processed ?? 0,
+        succeeded: response.data.succeeded ?? 0,
+        failed: response.data.failed ?? 0,
+      };
+
+      // Step 2: Poll sync-progress until the backend reports 'completed'.
+      // This ensures the button stays in syncing state until AI processing is done.
+      const MAX_WAIT_MS = 5 * 60 * 1000; // 5-minute safety cap
+      const POLL_INTERVAL_MS = 2000;
+      const startedAt = Date.now();
+
+      await new Promise<void>((resolve) => {
+        const poll = async () => {
+          try {
+            const { data } = await axios.get(
+              `${API_URL}/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+
+            const stage = data?.progressStage;
+
+            if (stage === 'completed' || stage === 'error') {
+              resolve();
+              return;
+            }
+
+            if (Date.now() - startedAt > MAX_WAIT_MS) {
+              console.warn('[Sync] Poller timed out waiting for AI completion.');
+              resolve();
+              return;
+            }
+          } catch (pollErr) {
+            console.warn('[Sync] Progress poll error (non-blocking):', pollErr);
+          }
+
+          setTimeout(poll, POLL_INTERVAL_MS);
+        };
+
+        // Start first poll immediately
+        void poll();
+      });
+
+      // Step 3: AI processing is done — refresh insights silently, then notify.
+      await fetchInsights(true);
+
+      const counts = manualSyncCountsRef.current;
+      setNotification({
+        show: true,
+        type: 'success',
+        message: 'Sync completed',
+        detail: counts
+          ? `Processed: ${counts.processed} | Success: ${counts.succeeded} | Failed: ${counts.failed}`
+          : 'Inbox is up to date.',
+      });
+    } catch (err: any) {
+      console.error('[Sync] Error:', err);
+      setNotification({
+        show: true,
+        type: 'error',
+        message: 'Sync error',
+        detail: err.response?.data?.message || 'An error occurred during sync',
+      });
+    } finally {
+      setIsSyncing(false);
+      manualSyncCountsRef.current = null;
+      setTimeout(() => setNotification(null), 5000);
     }
   };
 
   const toggleSidebar = () => setSidebarCol(!sidebarCol);
+  const selectedSourceContext = selectedEmail && selectedSourceMessageId
+    ? selectedEmail.emailContextById?.[selectedSourceMessageId]
+    : null;
 
   return (
     <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -414,7 +621,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               style={{ cursor: isSyncing ? 'default' : 'pointer', background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--text-1)' }}
             >
               <div className={`sdot ${isSyncing ? 'pulse' : ''}`} style={isSyncing ? { background: 'var(--amber)' } : {}}></div>
-              {isSyncing ? 'Syncing...' : 'Sync'}
+              {isSyncing ? 'Syncing Inbox...' : 'Sync'}
             </button>
             <div className="bar-av" onClick={() => onNavigate('profile')}>{user?.name ? user.name.charAt(0).toUpperCase() : 'U'}</div>
           </div>
@@ -528,7 +735,9 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               <div className="track">
                 {loading && <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>Loading insights...</div>}
                 {!loading && focusItems.length === 0 && (
-                   <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>Inbox zero. Great job!</div>
+                   <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '13px', lineHeight: 1.5 }}>
+                     {isSyncing ? 'Evaluating emails in the background. Your most important emails will pop up here shortly...' : 'Inbox zero. Great job!'}
+                   </div>
                 )}
                 {!loading && focusItems.map((item) => (
                   <div
@@ -633,7 +842,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                           <span className="tag" key={lbl}>{lbl}</span>
                         ))}
                       </div>
-                      <FeedbackButtons insightId={item.insightId} />
                     </div>
                     <div className="ar-time">
                        {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
@@ -692,43 +900,173 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             {selectedDates.length > 0 && (
               <div className="det-blk">
                 <span className="blk-lbl">Dates</span>
-                <div className="dates-list">
+                <div className="timeline">
+                  <div className="tl-line"></div>
                   {selectedDates.map((item, idx) => (
-                    <div className="dl-blk" key={`${item.type}-${item.date}-${idx}`}>
-                      <div className="dlb-left">
-                        <div className="dlb-type">{item.type}</div>
-                        <div className="dlb-date">{new Date(item.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</div>
-                      </div>
-                    </div>
+                    <TimelineItem
+                      key={`${item.type}-${item.date}-${idx}`}
+                      item={item}
+                      isFirst={idx === 0}
+                      selectedEmail={selectedEmail}
+                      onSourceClick={(id: string) => setSelectedSourceMessageId(id)}
+                    />
                   ))}
                 </div>
               </div>
             )}
+
+            <div className="det-blk">
+              <span className="blk-lbl">Important Links</span>
+              {selectedLinkGroups.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {selectedLinkGroups.map(({ sourceId, links }) => {
+                    const context = selectedEmail?.emailContextById?.[sourceId];
+                    const sourceTitle = context?.subject || sourceId;
+                    return (
+                      <div className="link-group" key={sourceId}>
+                        {sourceId !== 'unknown' && (
+                          <div
+                            className="link-group-title"
+                            onClick={() => setSelectedSourceMessageId(sourceId)}
+                            style={{ cursor: 'pointer' }}
+                            title="Show source email context"
+                          >
+                            {sourceTitle}
+                          </div>
+                        )}
+                        <div className="link-list">
+                          {links.map((link, idx) => {
+                            let host = '';
+                            try {
+                              host = new URL(link.url).hostname;
+                            } catch {
+                              host = 'link';
+                            }
+                            return (
+                              <a
+                                className="link-item"
+                                key={`${sourceId}-${link.url}-${idx}`}
+                                href={link.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={link.url}
+                              >
+                                <div className="link-main">
+                                  <div className="link-label">{link.label || host}</div>
+                                  <div className="link-url">{link.url}</div>
+                                </div>
+                                <div className="link-meta">
+                                  {link.reason && <span className="link-badge">{link.reason}</span>}
+                                  {link.inferred && <span className="link-badge inf">inferred</span>}
+                                </div>
+                              </a>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="blk-txt">No important links detected.</div>
+              )}
+            </div>
+
+            <div className="det-blk">
+              <span className="blk-lbl">Action Checklist</span>
+              {selectedChecklistItems.length > 0 ? (
+                <div className="task-list">
+                  {selectedChecklistItems.map((item, idx) => {
+                    const dueDateLabel = item.dueDate
+                      ? new Date(item.dueDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+                      : null;
+                    const sourceTitle = item.sourceEmailId
+                      ? (selectedEmail?.emailContextById?.[item.sourceEmailId]?.subject || item.sourceEmailId)
+                      : null;
+                    return (
+                      <div className="task-item" key={`${item.task}-${idx}`}>
+                        <div className="task-dot" />
+                        <div className="task-content">
+                          <div className="task-text">{item.task}</div>
+                          <div className="task-meta">
+                            {dueDateLabel && <span className="task-chip due">Due {dueDateLabel}</span>}
+                            {item.inferred && <span className="task-chip inf">Inferred</span>}
+                            {sourceTitle && (
+                              <span
+                                className="task-chip src"
+                                onClick={() => setSelectedSourceMessageId(item.sourceEmailId || null)}
+                                style={{ cursor: 'pointer' }}
+                              >
+                                {sourceTitle}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="blk-txt">No action checklist detected for this thread.</div>
+              )}
+            </div>
 
             {selectedAttachments.length > 0 && (
               <div className="det-blk">
-                <span className="blk-lbl">Attachment</span>
-                <div className="dates-list">
-                  {selectedAttachments.map((attachment, idx) => (
-                    <div className="att" key={`${attachment.filename}-${idx}`}>
-                      <div className="att-ext">{attachment.filename.split('.').pop()?.toUpperCase() || 'FILE'}</div>
-                      <div className="att-name">{attachment.filename}</div>
-                      <div className="att-sz">
-                        {typeof attachment.size === 'number' ? `${Math.max(1, Math.round(attachment.size / 1024))} KB` : '-'}
+                <span className="blk-lbl">Attachments</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {Object.entries(attachmentsByEmail).map(([sourceId, atts], groupIdx) => {
+                    const emailContext = selectedEmail?.emailContextById?.[sourceId];
+                    const emailTitle = emailContext?.subject || sourceId;
+                    return (
+                      <div key={sourceId || groupIdx} className="att-group">
+                        {sourceId !== 'unknown' && (
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-1)', paddingBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', borderBottom: '1px solid var(--border-lt)' }}>
+                            {emailTitle}
+                          </div>
+                        )}
+                        <div className="attachments-grid">
+                          {atts.map((attachment, idx) => {
+                            const ext = attachment.filename.split('.').pop()?.toUpperCase() || 'FILE';
+                            return (
+                              <div
+                                className="att-card"
+                                key={`${attachment.filename}-${idx}`}
+                                onClick={() => setSelectedSourceMessageId(attachment.sourceEmailId || null)}
+                              >
+                                <div className="att-icon">
+                                  <svg viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <rect x="0.5" y="0.5" width="35" height="43" rx="4" fill="var(--surface-2)" stroke="var(--border)"/>
+                                    <rect x="4" y="30" width="28" height="3" rx="1.5" fill="var(--accent)"/>
+                                    <rect x="4" y="35" width="18" height="3" rx="1.5" fill="var(--border-lt)"/>
+                                    <rect x="4" y="10" width="28" height="14" rx="2" fill="var(--surface-2)"/>
+                                    <text x="18" y="20" textAnchor="middle" fontSize="7" fontWeight="600" fill="var(--text-3)" fontFamily="var(--font-mono)">{ext.substring(0, 4)}</text>
+                                  </svg>
+                                </div>
+                                <div className="att-name">{attachment.filename}</div>
+                                <div className="att-size">{typeof attachment.size === 'number' ? `${Math.max(1, Math.round(attachment.size / 1024))} KB` : '-'}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
 
-            {selectedChecklist.length > 0 && (
+            {selectedSourceContext && (
               <div className="det-blk">
-                <span className="blk-lbl">Checklist</span>
-                <div className="dates-list">
-                  {selectedChecklist.map((item, idx) => (
-                    <div className="blk-txt" key={`${item}-${idx}`}>{item}</div>
-                  ))}
+                <span className="blk-lbl">Source Email</span>
+                <div className="blk-txt" style={{ marginBottom: '6px' }}>
+                  {selectedSourceContext.subject || 'No subject'}
+                </div>
+                <div className="blk-txt" style={{ fontSize: '11px', opacity: 0.8 }}>
+                  {selectedSourceContext.from?.name || selectedSourceContext.from?.email || 'Unknown sender'}
+                  {selectedSourceContext.internalDate
+                    ? ` • ${new Date(selectedSourceContext.internalDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
+                    : ''}
                 </div>
               </div>
             )}

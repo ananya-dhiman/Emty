@@ -9,6 +9,8 @@ import { refreshAccessToken } from '../services/gmailAuth';
 import { processEmailDeep } from '../services/emailProcessingService';
 import rulesEngine from '../services/rulesEngine';
 import incrementalSyncService from '../services/incrementalSyncService';
+import { runScoringWorker } from '../services/scoringWorkerService';
+import { runAiProcessingWorker } from '../services/aiProcessingWorkerService';
 import {
     AI_LABEL_SUGGESTION_MIN_MATCHES,
     getAssignableLabels,
@@ -402,46 +404,183 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
                     threadId: metadata.threadId,
                 });
 
-                // Persist to Intelligence Index
-                const insight = new InsightModel({
+                const parsedDates = processed.insights.dates.map((d) => ({
+                    type: d.type,
+                    date: new Date(d.date),
+                }));
+                const parsedChecklist = (Array.isArray(processed.insights.checklist) ? processed.insights.checklist : [])
+                    .map((item: any) => ({
+                        task: item?.task,
+                        status: "pending" as const,
+                        dueDate: item?.dueDate ? new Date(item.dueDate) : undefined,
+                        reason: item?.reason,
+                        inferred: item?.inferred === true,
+                    }))
+                    .filter((item: any) => typeof item.task === "string" && item.task.trim().length > 0);
+                const parsedImportantLinks = (Array.isArray(processed.insights.importantLinks)
+                    ? processed.insights.importantLinks
+                    : []
+                )
+                    .map((link: any) => ({
+                        url: link?.url,
+                        label: typeof link?.label === "string" ? link.label : undefined,
+                        reason: typeof link?.reason === "string" ? link.reason : undefined,
+                        inferred: link?.inferred === true,
+                    }))
+                    .filter((link: any) => typeof link.url === "string" && link.url.trim().length > 0);
+                const emailEntry: any = {
+                    messageId: metadata.messageId,
+                    internalDate: Number.isFinite(parseInt(metadata.internalDate, 10))
+                        ? new Date(parseInt(metadata.internalDate, 10))
+                        : new Date(),
+                    from: processed.from,
+                    subject: processed.subject || metadata.subject,
+                    snippet: metadata.snippet,
+                    labels: normalizedLabels.assignedLabels.map((label) => ({
+                        labelId: label._id,
+                        name: label.name,
+                    })),
+                    dates: parsedDates,
+                    attachments: processed.attachmentMetadata.map((a) => ({
+                        filename: a.filename,
+                        mimeType: a.mimeType,
+                        size: a.size,
+                    })),
+                    importantLinks: parsedImportantLinks,
+                    checklist: parsedChecklist,
+                    extractedFacts: processed.insights.extractedFacts,
+                    ai: {
+                        intent: processed.insights.intent,
+                        shortSnippet: processed.insights.shortSnippet,
+                        processedAt: new Date(),
+                    },
+                };
+
+                let insight = await InsightModel.findOne({
                     userId: uid,
                     accountId: gmailAccount._id,
                     gmailThreadId: metadata.threadId,
-                    emailIds: [metadata.messageId],
-                    threadId: null, // Will be updated when Thread model is available
-                    from: processed.from,
-                    labels: normalizedLabels.assignedLabels.map((label) => ({
+                });
+
+                if (!insight) {
+                    const newInsight = new InsightModel({
+                        userId: uid,
+                        accountId: gmailAccount._id,
+                        docType: 'thread_insight',
+                        gmailThreadId: metadata.threadId,
+                        emailIds: [metadata.messageId],
+                        threadId: null,
+                        emails: [emailEntry],
+                        from: processed.from,
+                        labels: normalizedLabels.assignedLabels.map((label) => ({
+                            labelId: label._id,
+                            name: label.name,
+                            source: label.source,
+                            statusSnapshot: label.status,
+                        })),
+                        labelSuggestions: suggestedLabel
+                            ? [{
+                                labelId: suggestedLabel._id,
+                                name: suggestedLabel.name,
+                                source: 'ai',
+                                status: 'suggested',
+                                confidence: Math.min((suggestedLabel.suggestionCount || 0) / AI_LABEL_SUGGESTION_MIN_MATCHES, 1),
+                                generatedAt: new Date(),
+                            }]
+                            : [],
+                        importanceScore: null,
+                        summary: {
+                            shortSnippet: processed.insights.shortSnippet,
+                            intent: processed.insights.intent,
+                        },
+                        dates: parsedDates.map((d) => ({
+                            ...d,
+                            sourceEmailId: metadata.messageId,
+                        })),
+                        attachments: emailEntry.attachments.map((a: any) => ({
+                            ...a,
+                            sourceEmailId: metadata.messageId,
+                        })),
+                        checklist: parsedChecklist.map((item: any) => ({
+                            ...item,
+                            sourceEmailId: metadata.messageId,
+                        })),
+                        state: null,
+                        extractedFacts: processed.insights.extractedFacts,
+                    });
+                    await newInsight.save();
+                    insight = newInsight;
+                } else {
+                    const existingEmails = Array.isArray((insight as any).emails) ? [...(insight as any).emails] : [];
+                    const idx = existingEmails.findIndex((e: any) => e?.messageId === metadata.messageId);
+                    if (idx >= 0) existingEmails[idx] = { ...existingEmails[idx], ...emailEntry };
+                    else existingEmails.push(emailEntry);
+                    const boundedEmails = existingEmails
+                        .sort((a: any, b: any) => new Date(a.internalDate).getTime() - new Date(b.internalDate).getTime())
+                        .slice(-50);
+                    const latest = boundedEmails[boundedEmails.length - 1] || emailEntry;
+
+                    insight.docType = 'thread_insight';
+                    insight.emailIds = boundedEmails.map((e: any) => e.messageId);
+                    (insight as any).emails = boundedEmails;
+                    insight.from = latest.from || insight.from;
+                    insight.labels = normalizedLabels.assignedLabels.map((label) => ({
                         labelId: label._id,
                         name: label.name,
                         source: label.source,
                         statusSnapshot: label.status,
-                    })),
-                    labelSuggestions: suggestedLabel && suggestedLabel.status !== 'rejected'
+                    }));
+                    insight.labelSuggestions = suggestedLabel
                         ? [{
                             labelId: suggestedLabel._id,
                             name: suggestedLabel.name,
                             source: 'ai',
-                            status: suggestedLabel.status,
+                            status: 'suggested',
                             confidence: Math.min((suggestedLabel.suggestionCount || 0) / AI_LABEL_SUGGESTION_MIN_MATCHES, 1),
                             generatedAt: new Date(),
                         }]
-                        : [],
-                    importanceScore: null, // Will be calculated later
-                    summary: {
-                        shortSnippet: processed.insights.shortSnippet,
-                        intent: processed.insights.intent,
-                    },
-                    dates: processed.insights.dates.map((d) => ({
-                        type: d.type,
-                        date: new Date(d.date),
-                        sourceEmailId: metadata.messageId,
-                    })),
-                    attachments: processed.attachmentMetadata,
-                    state: null, // Will be set later
-                    extractedFacts: processed.insights.extractedFacts,
-                });
-
-                await insight.save();
+                        : [];
+                    insight.summary = {
+                        shortSnippet: latest?.ai?.shortSnippet || processed.insights.shortSnippet,
+                        intent: latest?.ai?.intent || processed.insights.intent,
+                    };
+                    insight.dates = boundedEmails.flatMap((entry: any) =>
+                        (Array.isArray(entry?.dates) ? entry.dates : []).map((d: any) => ({
+                            type: d.type,
+                            date: d.date,
+                            sourceEmailId: entry.messageId,
+                        }))
+                    ) as any;
+                    insight.attachments = boundedEmails.flatMap((entry: any) =>
+                        (Array.isArray(entry?.attachments) ? entry.attachments : []).map((a: any) => ({
+                            filename: a.filename,
+                            mimeType: a.mimeType,
+                            size: a.size,
+                            sourceEmailId: entry.messageId,
+                        }))
+                    ) as any;
+                    const checklistByKey = new Map<string, any>();
+                    for (const entry of boundedEmails) {
+                        const items = Array.isArray(entry?.checklist) ? entry.checklist : [];
+                        for (const item of items) {
+                            const task = typeof item?.task === "string" ? item.task.trim() : "";
+                            if (!task) continue;
+                            const dueDateIso = item?.dueDate ? new Date(item.dueDate).toISOString() : "";
+                            const key = `${task.toLowerCase()}|${dueDateIso}`;
+                            checklistByKey.set(key, {
+                                task,
+                                status: "pending",
+                                dueDate: item?.dueDate ? new Date(item.dueDate) : undefined,
+                                reason: typeof item?.reason === "string" ? item.reason : undefined,
+                                inferred: item?.inferred === true,
+                                sourceEmailId: entry.messageId,
+                            });
+                        }
+                    }
+                    insight.checklist = Array.from(checklistByKey.values()) as any;
+                    insight.extractedFacts = latest?.extractedFacts || insight.extractedFacts;
+                    await insight.save();
+                }
                 processedInsights.push({
                     messageId: metadata.messageId,
                     success: true,
@@ -501,8 +640,24 @@ export const syncEmails = async (req: AuthRequest, res: Response): Promise<void>
             return;
         }
 
-        // Trigger incremental sync
+        // Trigger incremental sync (fetches new candidates into EmailMessage staging DB)
         const result = await incrementalSyncService.sync(accountId);
+
+        // Phase 2: Start background workers to dynamically score and AI-process the new arrivals
+        // We run this asynchronously so the web request returns 200 immediately and the
+        // Dashboard can use its Option B auto-polling stream.
+        if (result.success && result.processed >= 0) {
+            console.log(`[SYNC] Completed fetch stage. Starting background workers for user ${uid}`);
+            (async () => {
+                try {
+                    await runScoringWorker(uid, accountId);
+                    await runAiProcessingWorker(uid, accountId);
+                } catch (err: any) {
+                    console.error('[BACKGROUND SEQUENCE FAIL from Sync]', err.message);
+                }
+            })();
+        }
+
 
         res.status(result.success ? 200 : 400).json({
             success: result.success,
