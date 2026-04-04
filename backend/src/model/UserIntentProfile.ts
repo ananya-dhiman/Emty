@@ -19,9 +19,7 @@ export interface IUserIntentProfile extends Document {
   intentSummary: string;
   userPrompt: string[]; // Array: one entry per instruction box
 
-  // Cold-start auto-extracted data
-  inferredKeywords: string[];
-  inferredDomains: string[];
+  // Cold-start auto-extracted labels
   inferredLabels: string[];
 
   // Weights for scoring engine (future use)
@@ -52,8 +50,6 @@ const UserIntentProfileSchema = new Schema<IUserIntentProfile>(
     intentSummary: { type: String, default: "" },
     userPrompt: { type: [String], default: [] },
 
-    inferredKeywords: { type: [String], default: [] },
-    inferredDomains: { type: [String], default: [] },
     inferredLabels: { type: [String], default: [] },
 
     weights: {

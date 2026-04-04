@@ -1,4 +1,3 @@
-import { InsightModel } from "../model/Insight";
 import { UserIntentProfileModel } from "../model/UserIntentProfile";
 import { EmailMessageModel } from "../model/EmailMessage";
 
@@ -128,7 +127,8 @@ export async function extractColdStartFeatures(
 /**
  * Runs extractColdStartFeatures and persists the result into
  * UserIntentProfile (upsert). Safe to call multiple times —
- * only updates the inferred fields, does not overwrite user edits.
+ * seeds keyword/domain preferences for fresh profiles and stores inferred labels.
+ * Existing user-edited keyword/domain preferences are never overwritten.
  *
  * @returns The full ColdStartResult plus the saved profile
  */
@@ -138,16 +138,26 @@ export async function runAndPersistColdStart(
   limit: number = COLD_START_LIMIT_TEST
 ): Promise<ColdStartResult> {
   const result = await extractColdStartFeatures(userId, accountId, limit);
+  const existingProfile = await UserIntentProfileModel.findOne({ userId })
+    .select("includeKeywords preferredDomains")
+    .lean();
+
+  const setPayload: Record<string, any> = {
+    inferredLabels: result.inferredLabels,
+    lastUpdated: new Date(),
+  };
+
+  if (!Array.isArray(existingProfile?.includeKeywords) || existingProfile.includeKeywords.length === 0) {
+    setPayload.includeKeywords = result.inferredKeywords;
+  }
+  if (!Array.isArray(existingProfile?.preferredDomains) || existingProfile.preferredDomains.length === 0) {
+    setPayload.preferredDomains = result.inferredDomains;
+  }
 
   await UserIntentProfileModel.findOneAndUpdate(
     { userId },
     {
-      $set: {
-        inferredKeywords: result.inferredKeywords,
-        inferredDomains: result.inferredDomains,
-        inferredLabels: result.inferredLabels,
-        lastUpdated: new Date(),
-      },
+      $set: setPayload,
     },
     { upsert: true, new: true }
   );

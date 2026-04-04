@@ -196,7 +196,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
   const token = localStorage.getItem('firebaseToken');
   const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
 
-  // Load inferred data from UserIntentProfile on mount
+  // Load existing preference data from UserIntentProfile on mount
   useEffect(() => {
     const fetchProfile = async () => {
       if (!token) { setLoadingProfile(false); return; }
@@ -204,9 +204,8 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
         const { data } = await axios.get(`${API_URL}/api/intent/profile`, { headers });
         if (data.success && data.profile) {
           const p = data.profile;
-          // Merge inferred + include lists for display (start from what was detected)
-          setKeywords([...new Set([...(p.inferredKeywords || []), ...(p.includeKeywords || [])])]);
-          setSenders([...new Set([...(p.inferredDomains || []), ...(p.preferredDomains || [])])]);
+          setKeywords([...new Set([...(p.includeKeywords || [])])]);
+          setSenders([...new Set([...(p.preferredDomains || [])])]);
           setLabelChips([...new Set([...(p.inferredLabels || [])])]);
           if (p.userPrompt && p.userPrompt.length > 0) {
             setIntentBoxes(p.userPrompt);
@@ -684,4 +683,3 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     </div>
   );
 }
-

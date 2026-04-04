@@ -96,6 +96,20 @@ const parseSenderDisplay = (rawFrom: string): string => {
   return trimmed;
 };
 
+const hexToRgba = (hex: string, alpha: number): string | null => {
+  const clean = hex.replace('#', '').trim();
+  if (![3, 6].includes(clean.length)) return null;
+  const full = clean.length === 3
+    ? clean.split('').map((ch) => ch + ch).join('')
+    : clean;
+  const value = Number.parseInt(full, 16);
+  if (Number.isNaN(value)) return null;
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 const normalizeDateValue = (raw: any): Date | null => {
   if (!raw) return null;
   if (raw instanceof Date) return Number.isNaN(raw.getTime()) ? null : raw;
@@ -364,6 +378,28 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
           && item.extractedFeatures.some((feature) => normalizeLabelKey(feature) === selectedLabelKey)
       )
     : lowPriorityItems;
+  const agendaLabelColorMap = React.useMemo(
+    () => new Map(sidebarLabels.map((label) => [normalizeLabelKey(label.name), label.color])),
+    [sidebarLabels]
+  );
+  const getAgendaLabelStyle = (labelName: string): React.CSSProperties => {
+    const labelColor = agendaLabelColorMap.get(normalizeLabelKey(labelName));
+    if (!labelColor) {
+      return {};
+    }
+    if (labelColor.startsWith('#')) {
+      return {
+        color: labelColor,
+        borderColor: hexToRgba(labelColor, 0.45) || labelColor,
+        background: hexToRgba(labelColor, 0.12) || 'var(--surface-2)',
+      };
+    }
+    return {
+      color: labelColor,
+      borderColor: labelColor,
+      background: 'var(--surface-2)',
+    };
+  };
 
   const selectedEmail = allItems.find((item) => item.insightId === selectedInsightId) || null;
   const selectedDomain = selectedEmail
@@ -865,6 +901,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
           <div className="agenda-head">
             <span className="agenda-ttl">{selectedLabel ? `Label: ${selectedLabel}` : 'All items'}</span>
             <span className="agenda-meta">{selectedLabel ? 'matching emails' : 'sorted by priority'}</span>
+            <span className="agenda-section-tag">All Items</span>
             <span className="agenda-meta-num">{loading ? '...' : filteredItems.length}</span>
           </div>
 
@@ -875,39 +912,26 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               <div className="empty-fallback">No emails found for this label.</div>
             )}
             
-            {/* We are sorting the Agenda items arbitrarily into Critical / High Priority tags for UI styling sake simply based on their index */}
-            {!loading && filteredItems.map((item, index) => {
-              const severity = index < 2 ? 'crit' : 'high';
-              const color = index < 2 ? 'var(--red)' : 'var(--amber)';
-              const prefix = index < 2 ? 'Critical' : 'Priority';
-
-              return (
-                <React.Fragment key={item.insightId}>
-                  <div className={`pri-hd ${severity}`}>
-                    <div className={`pri-bar pr-${severity}`}></div>
-                    <span className="pri-lbl" style={{ color }}>{prefix}</span>
+            {!loading && filteredItems.map((item) => (
+              <div
+                className={`arow ${selectedInsightId === item.insightId ? 'sel' : ''}`}
+                key={item.insightId}
+                onClick={() => selectEmail(item)}
+              >
+                <div className="ar-body">
+                  <div className="ar-from">{item.from.name || item.from.email}</div>
+                  <div className="ar-snip">{item.summary.shortSnippet}</div>
+                  <div className="ar-tags">
+                    {item.matchedLabels.slice(0, 3).map((lbl) => (
+                      <span className="ar-label-chip" key={lbl} style={getAgendaLabelStyle(lbl)}>{lbl}</span>
+                    ))}
                   </div>
-
-                  <div
-                    className={`arow ${selectedInsightId === item.insightId ? 'sel' : ''}`}
-                    onClick={() => selectEmail(item)}
-                  >
-                    <div className="ar-body">
-                      <div className="ar-from">{item.from.name || item.from.email}</div>
-                      <div className="ar-snip">{item.summary.shortSnippet}</div>
-                      <div className="ar-tags">
-                        {item.matchedLabels.slice(0, 2).map(lbl => (
-                          <span className="tag" key={lbl}>{lbl}</span>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="ar-time">
-                       {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
-                    </div>
-                  </div>
-                </React.Fragment>
-                );
-              })}
+                </div>
+                <div className="ar-time">
+                   {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
+                </div>
+              </div>
+            ))}
 
             {!loading && (
               <div className="low-priority-wrap">

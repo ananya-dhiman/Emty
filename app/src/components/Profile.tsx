@@ -224,8 +224,8 @@ function PreferencesPanel({ accountId }: { accountId: string }) {
       if (data.success && data.profile) {
         const p = data.profile;
         setForm({
-          keywords: mergeUnique(p.inferredKeywords || [], p.includeKeywords || []),
-          senders: mergeUnique(p.inferredDomains || [], p.preferredDomains || []),
+          keywords: mergeUnique(p.includeKeywords || []),
+          senders: mergeUnique(p.preferredDomains || []),
           labelChips: mergeUnique(p.inferredLabels || []),
           intentBoxes:
             Array.isArray(p.userPrompt) && p.userPrompt.length > 0
