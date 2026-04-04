@@ -23,9 +23,10 @@ interface AiSettingsForm {
   geminiApiKey: string;
   openaiApiKey: string;
   preferredProvider: 'gemini' | 'openai';
-  preferredModel: string;
   hasGeminiKey: boolean;
   hasOpenaiKey: boolean;
+  geminiKeyMasked: string;
+  openaiKeyMasked: string;
   dailyQuotaLimit: number;
   dailyQuotaUsed: number;
   dailyQuotaRemaining: number;
@@ -481,14 +482,18 @@ function AISettingsPanel() {
     geminiApiKey: '',
     openaiApiKey: '',
     preferredProvider: 'gemini',
-    preferredModel: '',
     hasGeminiKey: false,
     hasOpenaiKey: false,
+    geminiKeyMasked: '',
+    openaiKeyMasked: '',
     dailyQuotaLimit: 0,
     dailyQuotaUsed: 0,
     dailyQuotaRemaining: 0,
     quotaDateUtc: null,
   });
+  const [sectionOpen, setSectionOpen] = useState(false);
+  const [expandedProvider, setExpandedProvider] = useState<'gemini' | 'openai' | null>(null);
+  const [editingProvider, setEditingProvider] = useState<'gemini' | 'openai' | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<SaveState>('idle');
 
@@ -505,9 +510,10 @@ function AISettingsPanel() {
         setForm((prev) => ({
           ...prev,
           preferredProvider: data.ai.preferredProvider || 'gemini',
-          preferredModel: data.ai.preferredModel || '',
           hasGeminiKey: !!data.ai.hasGeminiKey,
           hasOpenaiKey: !!data.ai.hasOpenaiKey,
+          geminiKeyMasked: data.ai.geminiKeyMasked || '',
+          openaiKeyMasked: data.ai.openaiKeyMasked || '',
           dailyQuotaLimit: data.ai.dailyQuotaLimit || 0,
           dailyQuotaUsed: data.ai.dailyQuotaUsed || 0,
           dailyQuotaRemaining: data.ai.dailyQuotaRemaining || 0,
@@ -529,12 +535,21 @@ function AISettingsPanel() {
     if (!token) return;
     setSaveState('saving');
     try {
-      const payload = {
-        geminiApiKey: form.geminiApiKey.trim() || undefined,
-        openaiApiKey: form.openaiApiKey.trim() || undefined,
+      const payload: {
+        geminiApiKey?: string;
+        openaiApiKey?: string;
+        preferredProvider: 'gemini' | 'openai';
+      } = {
         preferredProvider: form.preferredProvider,
-        preferredModel: form.preferredModel.trim() || undefined,
       };
+
+      if ((editingProvider === 'gemini' && form.geminiApiKey.trim()) || (!form.hasGeminiKey && form.geminiApiKey.trim())) {
+        payload.geminiApiKey = form.geminiApiKey.trim();
+      }
+      if ((editingProvider === 'openai' && form.openaiApiKey.trim()) || (!form.hasOpenaiKey && form.openaiApiKey.trim())) {
+        payload.openaiApiKey = form.openaiApiKey.trim();
+      }
+
       const { data } = await axios.put(`${API_URL}/api/auth/ai-settings`, payload, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -545,13 +560,15 @@ function AISettingsPanel() {
           openaiApiKey: '',
           hasGeminiKey: !!data.ai.hasGeminiKey,
           hasOpenaiKey: !!data.ai.hasOpenaiKey,
+          geminiKeyMasked: data.ai.geminiKeyMasked || '',
+          openaiKeyMasked: data.ai.openaiKeyMasked || '',
           preferredProvider: data.ai.preferredProvider || prev.preferredProvider,
-          preferredModel: data.ai.preferredModel || '',
           dailyQuotaLimit: data.ai.dailyQuotaLimit || 0,
           dailyQuotaUsed: data.ai.dailyQuotaUsed || 0,
           dailyQuotaRemaining: data.ai.dailyQuotaRemaining || 0,
           quotaDateUtc: data.ai.quotaDateUtc || null,
         }));
+        setEditingProvider(null);
         setSaveState('saved');
       } else {
         setSaveState('error');
@@ -563,59 +580,247 @@ function AISettingsPanel() {
     }
   };
 
+  const openProvider = (provider: 'gemini' | 'openai') => {
+    const providerHasKey = provider === 'gemini' ? form.hasGeminiKey : form.hasOpenaiKey;
+    setExpandedProvider((prev) => {
+      const next = prev === provider ? null : provider;
+      setEditingProvider(next && !providerHasKey ? provider : null);
+      return next;
+    });
+  };
+
+  const startEdit = (provider: 'gemini' | 'openai') => {
+    setExpandedProvider(provider);
+    setEditingProvider(provider);
+  };
+
+  const providerHasKey = (provider: 'gemini' | 'openai') =>
+    provider === 'gemini' ? form.hasGeminiKey : form.hasOpenaiKey;
+
+  const providerMasked = (provider: 'gemini' | 'openai') =>
+    provider === 'gemini' ? form.geminiKeyMasked : form.openaiKeyMasked;
+
+  const providerInput = (provider: 'gemini' | 'openai') =>
+    provider === 'gemini' ? form.geminiApiKey : form.openaiApiKey;
+
+  const setProviderInput = (provider: 'gemini' | 'openai', value: string) => {
+    if (provider === 'gemini') {
+      setForm((p) => ({ ...p, geminiApiKey: value }));
+      return;
+    }
+    setForm((p) => ({ ...p, openaiApiKey: value }));
+  };
+
   return (
     <div style={{ marginBottom: '12px', background: 'var(--surface)', border: '1px solid var(--border)' }}>
-      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border-lt)', background: 'var(--panel)' }}>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-2)' }}>
-          AI API Settings
-        </span>
-      </div>
-      <div style={{ padding: '16px 20px', display: 'grid', gap: '10px' }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-3)' }}>
-          Daily usage: {form.dailyQuotaUsed}/{form.dailyQuotaLimit} used, {form.dailyQuotaRemaining} remaining{form.quotaDateUtc ? ` (UTC ${form.quotaDateUtc})` : ''}.
-        </div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)' }}>
-          Gemini key: {form.hasGeminiKey ? 'Saved' : 'Not set'} | OpenAI key: {form.hasOpenaiKey ? 'Saved' : 'Not set'}
-        </div>
-        <input
-          type="password"
-          value={form.geminiApiKey}
-          onChange={(e) => setForm((p) => ({ ...p, geminiApiKey: e.target.value }))}
-          placeholder="Paste Gemini API key (optional)"
-          style={{ background: 'var(--bg)', border: '1px solid var(--border)', padding: '10px 12px', color: 'var(--text-1)', fontFamily: 'var(--font-ui)', fontSize: '13px' }}
-        />
-        <input
-          type="password"
-          value={form.openaiApiKey}
-          onChange={(e) => setForm((p) => ({ ...p, openaiApiKey: e.target.value }))}
-          placeholder="Paste OpenAI API key (optional)"
-          style={{ background: 'var(--bg)', border: '1px solid var(--border)', padding: '10px 12px', color: 'var(--text-1)', fontFamily: 'var(--font-ui)', fontSize: '13px' }}
-        />
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <select
-            value={form.preferredProvider}
-            onChange={(e) => setForm((p) => ({ ...p, preferredProvider: e.target.value === 'openai' ? 'openai' : 'gemini' }))}
-            style={{ background: 'var(--bg)', border: '1px solid var(--border)', padding: '8px 10px', color: 'var(--text-1)', fontFamily: 'var(--font-ui)', fontSize: '12px' }}
-          >
-            <option value="gemini">Gemini first</option>
-            <option value="openai">OpenAI first</option>
-          </select>
-          <input
-            type="text"
-            value={form.preferredModel}
-            onChange={(e) => setForm((p) => ({ ...p, preferredModel: e.target.value }))}
-            placeholder="Preferred model (optional)"
-            style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', padding: '8px 10px', color: 'var(--text-1)', fontFamily: 'var(--font-ui)', fontSize: '12px' }}
-          />
-        </div>
-        <button
-          onClick={() => void onSave()}
-          disabled={loading || saveState === 'saving'}
-          style={{ padding: '9px 16px', width: 'fit-content', border: '1px solid var(--text-1)', background: 'var(--text-1)', color: 'var(--bg)', fontFamily: 'var(--font-ui)', fontSize: '12px', fontWeight: 600, cursor: 'pointer', opacity: saveState === 'saving' ? 0.7 : 1 }}
+      <div
+        style={{
+          padding: '12px 20px',
+          borderBottom: sectionOpen ? '1px solid var(--border-lt)' : 'none',
+          background: 'var(--panel)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+        }}
+        onClick={() => setSectionOpen((prev) => !prev)}
+      >
+        <span
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '10px',
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.07em',
+            color: 'var(--text-2)',
+          }}
         >
-          {saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Save failed' : 'Save AI Settings'}
-        </button>
+          AI API
+        </span>
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 16 16"
+          fill="none"
+          style={{ transform: sectionOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', color: 'var(--text-3)' }}
+        >
+          <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </div>
+
+      {sectionOpen && (
+        <div style={{ padding: '18px 20px', display: 'grid', gap: '14px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
+            <div style={{ border: '1px solid var(--border)', background: 'var(--surface-2)', padding: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 8v4l2.5 2.5" />
+                  <circle cx="12" cy="12" r="8" />
+                </svg>
+                Usage Today
+              </div>
+              <div style={{ marginTop: '8px', fontSize: '18px', fontWeight: 700, color: 'var(--text-1)', fontFamily: 'var(--font-ui)' }}>
+                {form.dailyQuotaUsed}/{form.dailyQuotaLimit}
+              </div>
+              <div style={{ marginTop: '2px', fontSize: '12px', color: 'var(--text-3)', fontFamily: 'var(--font-ui)' }}>
+                {form.dailyQuotaRemaining} remaining
+              </div>
+            </div>
+
+            <div style={{ border: '1px solid var(--border)', background: 'var(--surface-2)', padding: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="11" width="18" height="10" rx="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                Gemini Key
+              </div>
+              <div style={{ marginTop: '8px', fontSize: '15px', fontWeight: 700, color: form.hasGeminiKey ? 'var(--green)' : 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>
+                {form.hasGeminiKey ? 'Saved' : 'Not set'}
+              </div>
+            </div>
+
+            <div style={{ border: '1px solid var(--border)', background: 'var(--surface-2)', padding: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="11" width="18" height="10" rx="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                OpenAI Key
+              </div>
+              <div style={{ marginTop: '8px', fontSize: '15px', fontWeight: 700, color: form.hasOpenaiKey ? 'var(--green)' : 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>
+                {form.hasOpenaiKey ? 'Saved' : 'Not set'}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)' }}>
+            {form.quotaDateUtc ? `Quota date (UTC): ${form.quotaDateUtc}` : 'Quota date unavailable'}
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setForm((p) => ({ ...p, preferredProvider: 'gemini' }))}
+              style={{
+                padding: '8px 12px',
+                fontSize: '12px',
+                fontWeight: 600,
+                fontFamily: 'var(--font-ui)',
+                border: `1px solid ${form.preferredProvider === 'gemini' ? 'var(--accent)' : 'var(--border)'}`,
+                color: form.preferredProvider === 'gemini' ? 'var(--accent-inv)' : 'var(--text-2)',
+                background: form.preferredProvider === 'gemini' ? 'var(--accent)' : 'var(--surface)',
+                cursor: 'pointer',
+              }}
+            >
+              Gemini first
+            </button>
+            <button
+              onClick={() => setForm((p) => ({ ...p, preferredProvider: 'openai' }))}
+              style={{
+                padding: '8px 12px',
+                fontSize: '12px',
+                fontWeight: 600,
+                fontFamily: 'var(--font-ui)',
+                border: `1px solid ${form.preferredProvider === 'openai' ? 'var(--accent)' : 'var(--border)'}`,
+                color: form.preferredProvider === 'openai' ? 'var(--accent-inv)' : 'var(--text-2)',
+                background: form.preferredProvider === 'openai' ? 'var(--accent)' : 'var(--surface)',
+                cursor: 'pointer',
+              }}
+            >
+              OpenAI first
+            </button>
+          </div>
+
+          {(['gemini', 'openai'] as const).map((provider) => {
+            const isOpen = expandedProvider === provider;
+            const hasKey = providerHasKey(provider);
+            const isEditing = editingProvider === provider;
+            return (
+              <div key={provider} style={{ border: '1px solid var(--border)' }}>
+                <button
+                  onClick={() => openProvider(provider)}
+                  style={{
+                    width: '100%',
+                    border: 'none',
+                    borderBottom: isOpen ? '1px solid var(--border-lt)' : 'none',
+                    background: 'var(--panel)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '10px',
+                    padding: '12px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', fontWeight: 600, color: 'var(--text-1)', textTransform: provider === 'openai' ? 'none' : 'capitalize' }}>
+                    {provider === 'openai' ? 'OpenAI' : 'Gemini'}
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: hasKey ? 'var(--green)' : 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      {hasKey ? 'Saved' : 'Not set'}
+                    </span>
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', color: 'var(--text-3)' }}>
+                      <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                </button>
+                {isOpen && (
+                  <div style={{ padding: '12px', display: 'grid', gap: '10px', background: 'var(--surface)' }}>
+                    {hasKey && !isEditing ? (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-2)' }}>
+                          {providerMasked(provider) || '********'}
+                        </span>
+                        <button
+                          onClick={() => startEdit(provider)}
+                          style={{ border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-2)', fontFamily: 'var(--font-ui)', fontSize: '12px', fontWeight: 600, padding: '6px 10px', cursor: 'pointer' }}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    ) : (
+                      <input
+                        type="password"
+                        value={providerInput(provider)}
+                        onChange={(e) => setProviderInput(provider, e.target.value)}
+                        placeholder={`Paste ${provider === 'openai' ? 'OpenAI' : 'Gemini'} API key`}
+                        style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', padding: '10px 12px', color: 'var(--text-1)', fontFamily: 'var(--font-ui)', fontSize: '13px' }}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: saveState === 'error' ? 'var(--red)' : saveState === 'saved' ? 'var(--green)' : 'var(--text-3)' }}>
+              {saveState === 'error'
+                ? 'Save failed. Check key and try again.'
+                : saveState === 'saved'
+                ? 'AI settings saved.'
+                : 'Set provider order and API keys as needed.'}
+            </span>
+            <button
+              onClick={() => void onSave()}
+              disabled={loading || saveState === 'saving'}
+              style={{
+                padding: '9px 16px',
+                border: '1px solid var(--text-1)',
+                background: 'var(--text-1)',
+                color: 'var(--bg)',
+                fontFamily: 'var(--font-ui)',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                opacity: saveState === 'saving' ? 0.7 : 1,
+              }}
+            >
+              {saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : 'Save AI Settings'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -701,8 +906,6 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
           <p style={{ color: 'var(--text-3)', fontSize: '13px', marginBottom: '32px' }}>
             Manage your connected accounts and customize how the AI prioritizes your inbox.
           </p>
-
-          <AISettingsPanel />
 
           <div
             style={{
@@ -874,6 +1077,8 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
               </div>
             )}
           </div>
+
+          <AISettingsPanel />
         </div>
       </div>
     </div>
