@@ -114,21 +114,15 @@ export const resolveAIContextForUser = async (userId: string): Promise<AIResolve
     addAttempt("gemini", "user", userGeminiKey, settings.preferredModel);
   }
 
-  // Shared fallbacks: first preferred provider then alternate.
+  // Shared fallbacks: first preferred provider then alternate, and OpenRouter always last.
   if (preferredProvider === "gemini") {
     addAttempt("gemini", "shared", SHARED_GEMINI_KEY, DEFAULT_GEMINI_MODEL);
-    if (SHARED_OPENAI_KEY) {
-      addAttempt("openai", "shared", SHARED_OPENAI_KEY, DEFAULT_OPENAI_MODEL, "openai");
-    } else if (SHARED_OPENROUTER_KEY) {
-      addAttempt("openai", "shared", SHARED_OPENROUTER_KEY, "openrouter/auto", "openrouter");
-    }
+    addAttempt("openai", "shared", SHARED_OPENAI_KEY, DEFAULT_OPENAI_MODEL, "openai");
+    addAttempt("openai", "shared", SHARED_OPENROUTER_KEY, "openrouter/auto", "openrouter");
   } else {
-    if (SHARED_OPENAI_KEY) {
-      addAttempt("openai", "shared", SHARED_OPENAI_KEY, DEFAULT_OPENAI_MODEL, "openai");
-    } else if (SHARED_OPENROUTER_KEY) {
-      addAttempt("openai", "shared", SHARED_OPENROUTER_KEY, "openrouter/auto", "openrouter");
-    }
+    addAttempt("openai", "shared", SHARED_OPENAI_KEY, DEFAULT_OPENAI_MODEL, "openai");
     addAttempt("gemini", "shared", SHARED_GEMINI_KEY, DEFAULT_GEMINI_MODEL);
+    addAttempt("openai", "shared", SHARED_OPENROUTER_KEY, "openrouter/auto", "openrouter");
   }
 
   return {

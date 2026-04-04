@@ -4,6 +4,7 @@ import { GmailAccountModel } from '../model/GmailAccount';
 import { EmailMessageModel } from '../model/EmailMessage';
 import { InsightModel } from '../model/Insight';
 import { LabelModel } from '../model/Label';
+import { UserIntentProfileModel } from '../model/UserIntentProfile';
 import { google } from 'googleapis';
 import { createOAuthClient } from '../utils/createOAuth';
 import { refreshAccessToken } from '../services/gmailAuth';
@@ -657,8 +658,15 @@ export const syncEmails = async (req: AuthRequest, res: Response): Promise<void>
           // Trigger incremental sync (fetches new candidates into EmailMessage staging DB)
           const result = await incrementalSyncService.sync(accountId);
 
-          // Start scoring + AI workers asynchronously after staging is done.
-          if (result.success && result.processed >= 0) {
+          // Start scoring + AI workers only after onboarding is completed.
+          const intentProfile = await UserIntentProfileModel.findOne({ userId: uid }).select('onboardingCompleted').lean();
+          const canRunAiPipeline = intentProfile?.onboardingCompleted === true;
+
+          if (!canRunAiPipeline) {
+              console.log(`[SYNC] Onboarding not completed for user ${uid}. Staging only, AI workers deferred.`);
+          }
+
+          if (result.success && result.processed >= 0 && canRunAiPipeline) {
               (async () => {
                   try {
                       await runScoringWorker(uid, accountId);
@@ -673,10 +681,13 @@ export const syncEmails = async (req: AuthRequest, res: Response): Promise<void>
             success: result.success,
             processed: result.processed,
             succeeded: result.succeeded,
-            failed: result.failed,
-            errors: result.errors.length > 0 ? result.errors : undefined,
-            message: result.message || 'Sync completed',
-        });
+              failed: result.failed,
+              errors: result.errors.length > 0 ? result.errors : undefined,
+              onboardingCompleted: canRunAiPipeline,
+              message: canRunAiPipeline
+                  ? (result.message || 'Sync completed')
+                  : ((result.message || 'Sync completed') + ' (AI processing deferred until onboarding is completed)'),
+          });
     } catch (error: any) {
         console.error('Error in sync endpoint:', error.message);
         res.status(500).json({
