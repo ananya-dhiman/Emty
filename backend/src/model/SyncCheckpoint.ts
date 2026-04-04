@@ -14,6 +14,7 @@ export type SyncProgressStage =
   | "auth_setup"
   | "fetch_candidates"
   | "metadata_filtering"
+  | "scoring_emails"
   | "processing_emails"
   | "finalizing"
   | "completed"
@@ -35,6 +36,13 @@ export interface ISyncCheckpoint extends Document {
   totalCandidates: number;
   processedCandidates: number;
   lastProgressAt?: Date;
+  aiFallbackCount?: number;
+  aiFallbackMessage?: string;
+  aiFallbackAt?: Date;
+  quotaDateUtc?: string;
+  dailyQuotaLimit?: number;
+  dailyQuotaUsed?: number;
+  dailyQuotaRemaining?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -67,6 +75,7 @@ const SyncCheckpointSchema = new Schema<ISyncCheckpoint>(
         "auth_setup",
         "fetch_candidates",
         "metadata_filtering",
+        "scoring_emails",
         "processing_emails",
         "finalizing",
         "completed",
@@ -78,6 +87,13 @@ const SyncCheckpointSchema = new Schema<ISyncCheckpoint>(
     totalCandidates: { type: Number, default: 0 },
     processedCandidates: { type: Number, default: 0 },
     lastProgressAt: { type: Date, default: null },
+    aiFallbackCount: { type: Number, default: 0 },
+    aiFallbackMessage: { type: String, default: null },
+    aiFallbackAt: { type: Date, default: null },
+    quotaDateUtc: { type: String, default: null },
+    dailyQuotaLimit: { type: Number, default: 0 },
+    dailyQuotaUsed: { type: Number, default: 0 },
+    dailyQuotaRemaining: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

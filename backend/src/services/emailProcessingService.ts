@@ -6,6 +6,7 @@
 import { google } from 'googleapis';
 import { htmlToText } from 'html-to-text';
 import { extractInsightsFromEmail, AIInsightExtraction, AIParsingError } from './aiService';
+import { AIResolvedContext } from './aiProviderService';
 
 export interface ProcessedEmailInsight {
     messageId: string;
@@ -152,7 +153,19 @@ export const processEmailDeep = async (
     threadId: string,
     internalDate: string,
     metadata: { from: string; subject: string; snippet: string },
-    relevantLabels: Array<{ name: string; description?: string }> = []
+    relevantLabels: Array<{ name: string; description?: string }> = [],
+    options: {
+        userId?: string;
+        aiContext?: AIResolvedContext;
+        onFallback?: (notice: {
+            usedSharedFallback: boolean;
+            reason: string;
+            fromProvider?: string;
+            fromModel?: string;
+            toProvider?: string;
+            toModel?: string;
+        }) => Promise<void> | void;
+    } = {}
 ): Promise<ProcessedEmailInsight> => {
     try {
         // Fetch full message
@@ -179,6 +192,10 @@ export const processEmailDeep = async (
             body,
             internalDate,
             relevantLabels,
+        }, {
+            userId: options.userId,
+            context: options.aiContext,
+            onFallback: options.onFallback,
         });
 
         return {

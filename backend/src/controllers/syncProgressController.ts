@@ -40,24 +40,38 @@ export const getSyncProgress = async (
         progressMessage: "Waiting to start sync...",
         totalCandidates: 0,
         processedCandidates: 0,
+        aiFallbackCount: 0,
+        aiFallbackMessage: "",
+        aiFallbackAt: null,
+        quotaDateUtc: null,
+        dailyQuotaLimit: 0,
+        dailyQuotaUsed: 0,
+        dailyQuotaRemaining: 0,
         updatedAt: new Date().toISOString(),
       });
       return;
     }
 
-    res.status(200).json({
-      success: true,
-      syncState: checkpoint.syncState,
-      progressPercent: checkpoint.progressPercent ?? 0,
-      progressStage: checkpoint.progressStage ?? "initializing",
-      progressMessage: checkpoint.progressMessage ?? "",
-      totalCandidates: checkpoint.totalCandidates ?? 0,
-      processedCandidates: checkpoint.processedCandidates ?? 0,
-      updatedAt: (
-        checkpoint.lastProgressAt ||
-        checkpoint.updatedAt ||
-        new Date()
-      ).toISOString(),
+      res.status(200).json({
+        success: true,
+        syncState: checkpoint.syncState,
+        progressPercent: checkpoint.progressPercent ?? 0,
+        progressStage: checkpoint.progressStage ?? "initializing",
+        progressMessage: checkpoint.progressMessage ?? "",
+        totalCandidates: checkpoint.totalCandidates ?? 0,
+        processedCandidates: checkpoint.processedCandidates ?? 0,
+        aiFallbackCount: checkpoint.aiFallbackCount ?? 0,
+        aiFallbackMessage: checkpoint.aiFallbackMessage ?? "",
+        aiFallbackAt: checkpoint.aiFallbackAt ? checkpoint.aiFallbackAt.toISOString() : null,
+        quotaDateUtc: checkpoint.quotaDateUtc ?? null,
+        dailyQuotaLimit: checkpoint.dailyQuotaLimit ?? 0,
+        dailyQuotaUsed: checkpoint.dailyQuotaUsed ?? 0,
+        dailyQuotaRemaining: checkpoint.dailyQuotaRemaining ?? 0,
+        updatedAt: (
+          checkpoint.lastProgressAt ||
+          checkpoint.updatedAt ||
+          new Date()
+        ).toISOString(),
     });
   } catch (error: any) {
     console.error("Error fetching sync progress:", error.message);

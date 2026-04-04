@@ -17,6 +17,8 @@ import {
     AI_LABEL_SUGGESTION_MIN_MATCHES 
 } from "./labelLifecycleService";
 import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
+import { getDailyQuotaLimit, getDailyUsageStatus, consumeDailyQuota } from "./aiUsageService";
+import { resolveAIContextForUser } from "./aiProviderService";
 
 /**
  * AI Processing Worker Service
@@ -28,6 +30,7 @@ import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService
 const BATCH_SIZE = 1; // Process 1 email at a time to stay under API limits
 const MAX_RETRIES = process.env.MAX_RETRIES ? parseInt(process.env.MAX_RETRIES) : 5;
 const MAX_EMAILS_PER_THREAD = 50;
+const MIN_AI_SCORE = 0.4;
 
 const safeParseDate = (val: any): Date | null => {
   if (!val && val !== 0) return null;
@@ -80,13 +83,55 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
 
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
-    // Ensure we process both 'top' emails that haven't been processed
-    // and also respect retry limits for emails that previously failed here.
+    const aiContext = await resolveAIContextForUser(userId);
+    const dailyQuotaLimit = getDailyQuotaLimit(aiContext.hasByokKey);
+    let usageSnapshot = await getDailyUsageStatus(userId, dailyQuotaLimit);
+    console.log(
+        `[AI WORKER] AI context resolved | byok=${aiContext.hasByokKey} | dailyQuota=${dailyQuotaLimit} | remaining=${usageSnapshot.dailyQuotaRemaining}`
+    );
+    console.log(
+        `[AI WORKER] Provider attempts: ${aiContext.attempts.map(a => `${a.provider}:${a.model}:${a.source}`).join(" -> ")}`
+    );
+
+    await SyncCheckpointModel.updateOne(
+        { accountId: objectIdAccountId },
+        {
+            $set: {
+                aiFallbackCount: 0,
+                aiFallbackMessage: null,
+                aiFallbackAt: null,
+                quotaDateUtc: usageSnapshot.quotaDateUtc,
+                dailyQuotaLimit: usageSnapshot.dailyQuotaLimit,
+                dailyQuotaUsed: usageSnapshot.dailyQuotaUsed,
+                dailyQuotaRemaining: usageSnapshot.dailyQuotaRemaining,
+            }
+        }
+    );
+
+    if (usageSnapshot.dailyQuotaRemaining <= 0) {
+        await SyncCheckpointModel.updateOne(
+            { accountId: objectIdAccountId },
+            {
+                $set: {
+                    progressMessage: `Daily AI quota reached (${usageSnapshot.dailyQuotaUsed}/${usageSnapshot.dailyQuotaLimit})`,
+                    lastProgressAt: new Date(),
+                }
+            }
+        );
+        await updateProgressComplete(objectIdAccountId);
+        return;
+    }
+
+    // Ensure we process only high-priority emails that are score-qualified.
     const candidates = await EmailMessageModel.find({
         accountId: objectIdAccountId,
         priorityState: 'top',
-        aiProcessed: false
-    });
+        aiProcessed: false,
+        score: { $gte: MIN_AI_SCORE },
+    }).sort({ score: -1, internalDate: -1 });
+    console.log(
+        `[AI WORKER] Candidate query applied | priority=top | aiProcessed=false | minScore=${MIN_AI_SCORE}`
+    );
     
     if (candidates.length === 0) {
         console.log(`[AI WORKER] No top emails to process for account ${accountId}`);
@@ -119,7 +164,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
             {
                 $set: {
                     progressPercent: 60 + Math.floor(ratio * 39), // from 60 to 99
-                    progressStage: "ai_processing",
+                    progressStage: "processing_emails",
                     progressMessage: `Running AI insights on prioritized emails (${processedCount}/${totalCount})`,
                     lastProgressAt: new Date()
                 }
@@ -129,6 +174,33 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         const promises = batch.map(async (email) => {
             const messageId = email.messageId;
             try {
+                const consumed = await consumeDailyQuota(userId, dailyQuotaLimit);
+                if (!consumed) {
+                    console.log(`[AI WORKER] Daily quota exhausted while processing account ${accountId}`);
+                    usageSnapshot = {
+                        ...usageSnapshot,
+                        dailyQuotaRemaining: 0,
+                    };
+                    return;
+                }
+                usageSnapshot = consumed;
+                console.log(
+                    `[AI WORKER] Quota consumed for ${messageId} | used=${usageSnapshot.dailyQuotaUsed}/${usageSnapshot.dailyQuotaLimit} | remaining=${usageSnapshot.dailyQuotaRemaining}`
+                );
+
+                await SyncCheckpointModel.updateOne(
+                    { accountId: objectIdAccountId },
+                    {
+                        $set: {
+                            quotaDateUtc: usageSnapshot.quotaDateUtc,
+                            dailyQuotaLimit: usageSnapshot.dailyQuotaLimit,
+                            dailyQuotaUsed: usageSnapshot.dailyQuotaUsed,
+                            dailyQuotaRemaining: usageSnapshot.dailyQuotaRemaining,
+                            lastProgressAt: new Date(),
+                        }
+                    }
+                );
+
                 // Determine relevant labels based on features (rules engine fallback)
                 const relevantLabelsStringList = email.extractedFeatures || [];
                 const relevantLabels = labelCandidates.filter(l => relevantLabelsStringList.includes(l.name));
@@ -146,7 +218,27 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                         subject: email.subject,
                         snippet: email.snippet,
                     },
-                    relevantLabels.length ? relevantLabels : rulesEngine.getRelevantLabels(`${email.subject}\n${email.snippet}`, labelCandidates)
+                    relevantLabels.length ? relevantLabels : rulesEngine.getRelevantLabels(`${email.subject}\n${email.snippet}`, labelCandidates),
+                    {
+                        userId,
+                        aiContext,
+                        onFallback: async (notice) => {
+                            console.warn(
+                                `[AI WORKER] Fallback notice for ${messageId}: ${notice.fromProvider || "user-model"} -> ${notice.toProvider || "shared-model"}`
+                            );
+                            await SyncCheckpointModel.updateOne(
+                                { accountId: objectIdAccountId },
+                                {
+                                    $inc: { aiFallbackCount: 1 },
+                                    $set: {
+                                        aiFallbackMessage: `Fallback used: ${notice.fromProvider || "user-model"} -> ${notice.toProvider || "shared-model"}`,
+                                        aiFallbackAt: new Date(),
+                                        lastProgressAt: new Date(),
+                                    }
+                                }
+                            );
+                        }
+                    }
                 );
 
                 // Upsert Insight
@@ -429,6 +521,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                     // Update EmailMessage flag
                     email.aiProcessed = true;
                     await email.save();
+                    console.log(`[AI WORKER] Email processed successfully ${messageId}`);
 
                     // Clear any previous error states from ProcessedEmailLog (used for history)
                     await ProcessedEmailLogModel.findOneAndUpdate(
@@ -475,6 +568,20 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
             await p;
         }
         processedCount += batch.length;
+
+        if (usageSnapshot.dailyQuotaRemaining <= 0) {
+            console.log(`[AI WORKER] Daily quota reached for user ${userId}`);
+            await SyncCheckpointModel.updateOne(
+                { accountId: objectIdAccountId },
+                {
+                    $set: {
+                        progressMessage: `Daily AI quota reached (${usageSnapshot.dailyQuotaUsed}/${usageSnapshot.dailyQuotaLimit})`,
+                        lastProgressAt: new Date(),
+                    }
+                }
+            );
+            break;
+        }
 
         // RATE LIMIT BUFFER: OpenRouter free models limit to 20 requests/min.
         // If there are more batches left to process, wait 4 seconds to avoid 429s.

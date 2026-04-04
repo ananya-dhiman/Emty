@@ -19,6 +19,19 @@ interface PreferencesForm {
   intentBoxes: string[];
 }
 
+interface AiSettingsForm {
+  geminiApiKey: string;
+  openaiApiKey: string;
+  preferredProvider: 'gemini' | 'openai';
+  preferredModel: string;
+  hasGeminiKey: boolean;
+  hasOpenaiKey: boolean;
+  dailyQuotaLimit: number;
+  dailyQuotaUsed: number;
+  dailyQuotaRemaining: number;
+  quotaDateUtc: string | null;
+}
+
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 const mergeUnique = (...lists: string[][]): string[] => {
@@ -463,6 +476,150 @@ function PreferencesPanel({ accountId }: { accountId: string }) {
   );
 }
 
+function AISettingsPanel() {
+  const [form, setForm] = useState<AiSettingsForm>({
+    geminiApiKey: '',
+    openaiApiKey: '',
+    preferredProvider: 'gemini',
+    preferredModel: '',
+    hasGeminiKey: false,
+    hasOpenaiKey: false,
+    dailyQuotaLimit: 0,
+    dailyQuotaUsed: 0,
+    dailyQuotaRemaining: 0,
+    quotaDateUtc: null,
+  });
+  const [loading, setLoading] = useState(true);
+  const [saveState, setSaveState] = useState<SaveState>('idle');
+
+  const token = localStorage.getItem('firebaseToken');
+
+  const load = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const { data } = await axios.get(`${API_URL}/api/auth/ai-settings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (data?.success && data?.ai) {
+        setForm((prev) => ({
+          ...prev,
+          preferredProvider: data.ai.preferredProvider || 'gemini',
+          preferredModel: data.ai.preferredModel || '',
+          hasGeminiKey: !!data.ai.hasGeminiKey,
+          hasOpenaiKey: !!data.ai.hasOpenaiKey,
+          dailyQuotaLimit: data.ai.dailyQuotaLimit || 0,
+          dailyQuotaUsed: data.ai.dailyQuotaUsed || 0,
+          dailyQuotaRemaining: data.ai.dailyQuotaRemaining || 0,
+          quotaDateUtc: data.ai.quotaDateUtc || null,
+        }));
+      }
+    } catch {
+      // non-blocking
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const onSave = async () => {
+    if (!token) return;
+    setSaveState('saving');
+    try {
+      const payload = {
+        geminiApiKey: form.geminiApiKey.trim() || undefined,
+        openaiApiKey: form.openaiApiKey.trim() || undefined,
+        preferredProvider: form.preferredProvider,
+        preferredModel: form.preferredModel.trim() || undefined,
+      };
+      const { data } = await axios.put(`${API_URL}/api/auth/ai-settings`, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (data?.success && data?.ai) {
+        setForm((prev) => ({
+          ...prev,
+          geminiApiKey: '',
+          openaiApiKey: '',
+          hasGeminiKey: !!data.ai.hasGeminiKey,
+          hasOpenaiKey: !!data.ai.hasOpenaiKey,
+          preferredProvider: data.ai.preferredProvider || prev.preferredProvider,
+          preferredModel: data.ai.preferredModel || '',
+          dailyQuotaLimit: data.ai.dailyQuotaLimit || 0,
+          dailyQuotaUsed: data.ai.dailyQuotaUsed || 0,
+          dailyQuotaRemaining: data.ai.dailyQuotaRemaining || 0,
+          quotaDateUtc: data.ai.quotaDateUtc || null,
+        }));
+        setSaveState('saved');
+      } else {
+        setSaveState('error');
+      }
+    } catch {
+      setSaveState('error');
+    } finally {
+      setTimeout(() => setSaveState('idle'), 2500);
+    }
+  };
+
+  return (
+    <div style={{ marginBottom: '12px', background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border-lt)', background: 'var(--panel)' }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-2)' }}>
+          AI API Settings
+        </span>
+      </div>
+      <div style={{ padding: '16px 20px', display: 'grid', gap: '10px' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-3)' }}>
+          Daily usage: {form.dailyQuotaUsed}/{form.dailyQuotaLimit} used, {form.dailyQuotaRemaining} remaining{form.quotaDateUtc ? ` (UTC ${form.quotaDateUtc})` : ''}.
+        </div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)' }}>
+          Gemini key: {form.hasGeminiKey ? 'Saved' : 'Not set'} | OpenAI key: {form.hasOpenaiKey ? 'Saved' : 'Not set'}
+        </div>
+        <input
+          type="password"
+          value={form.geminiApiKey}
+          onChange={(e) => setForm((p) => ({ ...p, geminiApiKey: e.target.value }))}
+          placeholder="Paste Gemini API key (optional)"
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', padding: '10px 12px', color: 'var(--text-1)', fontFamily: 'var(--font-ui)', fontSize: '13px' }}
+        />
+        <input
+          type="password"
+          value={form.openaiApiKey}
+          onChange={(e) => setForm((p) => ({ ...p, openaiApiKey: e.target.value }))}
+          placeholder="Paste OpenAI API key (optional)"
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', padding: '10px 12px', color: 'var(--text-1)', fontFamily: 'var(--font-ui)', fontSize: '13px' }}
+        />
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <select
+            value={form.preferredProvider}
+            onChange={(e) => setForm((p) => ({ ...p, preferredProvider: e.target.value === 'openai' ? 'openai' : 'gemini' }))}
+            style={{ background: 'var(--bg)', border: '1px solid var(--border)', padding: '8px 10px', color: 'var(--text-1)', fontFamily: 'var(--font-ui)', fontSize: '12px' }}
+          >
+            <option value="gemini">Gemini first</option>
+            <option value="openai">OpenAI first</option>
+          </select>
+          <input
+            type="text"
+            value={form.preferredModel}
+            onChange={(e) => setForm((p) => ({ ...p, preferredModel: e.target.value }))}
+            placeholder="Preferred model (optional)"
+            style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', padding: '8px 10px', color: 'var(--text-1)', fontFamily: 'var(--font-ui)', fontSize: '12px' }}
+          />
+        </div>
+        <button
+          onClick={() => void onSave()}
+          disabled={loading || saveState === 'saving'}
+          style={{ padding: '9px 16px', width: 'fit-content', border: '1px solid var(--text-1)', background: 'var(--text-1)', color: 'var(--bg)', fontFamily: 'var(--font-ui)', fontSize: '12px', fontWeight: 600, cursor: 'pointer', opacity: saveState === 'saving' ? 0.7 : 1 }}
+        >
+          {saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Save failed' : 'Save AI Settings'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function Profile({ user, theme, setTheme, onNavigate, onLogout }: ProfileProps) {
   const [openPrefPanel, setOpenPrefPanel] = useState<string | null>(null);
 
@@ -544,6 +701,8 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
           <p style={{ color: 'var(--text-3)', fontSize: '13px', marginBottom: '32px' }}>
             Manage your connected accounts and customize how the AI prioritizes your inbox.
           </p>
+
+          <AISettingsPanel />
 
           <div
             style={{

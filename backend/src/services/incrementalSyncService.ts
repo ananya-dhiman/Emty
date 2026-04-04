@@ -34,8 +34,8 @@ import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService
 
 const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT  ? parseInt(process.env.SYNC_LOCK_TIMEOUT): 3 * 60 * 1000;
 const TEST_MODE = true; // Set to false for production
-const MAX_EMAILS_TEST_MODE = 5;
-const MAX_FETCH_TEST_MODE = 20; // cap fetched candidate messages in test mode
+const MAX_EMAILS_TEST_MODE = 20;
+const MAX_FETCH_TEST_MODE = 50; // cap fetched candidate messages in test mode
 const MAX_RETRIES = process.env.MAX_RETRIES ? parseInt(process.env.MAX_RETRIES) : 5;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -362,6 +362,9 @@ export class IncrementalSyncService {
           progressMessage: "Initializing sync...",
           totalCandidates: 0,
           processedCandidates: 0,
+          aiFallbackCount: 0,
+          aiFallbackMessage: null,
+          aiFallbackAt: null,
           lastProgressAt: new Date(),
         },
       }

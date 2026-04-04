@@ -289,21 +289,29 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     const checkBackgroundProgress = async () => {
       if (isCurrentlyPolling) return;
       isCurrentlyPolling = true;
-      try {
-        const { data } = await axios.get(
-          `http://localhost:5000/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        try {
+          const { data } = await axios.get(
+            `http://localhost:5000/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
         
-        if (data?.success && data.progressStage && data.progressStage !== 'completed') {
-          // If a background sync is happening, fetch latest inbox items silently
-          setIsSyncing(true);
-          await fetchInsights(true);
-        } else if (data?.success && data.progressStage === 'completed') {
-           setIsSyncing(false);
-           clearInterval(pollInterval);
-        }
-      } catch (err) {
+          if (data?.success && data.progressStage && data.progressStage !== 'completed') {
+            // If a background sync is happening, fetch latest inbox items silently
+            setIsSyncing(true);
+            await fetchInsights(true);
+          } else if (data?.success && data.progressStage === 'completed') {
+             setIsSyncing(false);
+             if (data.aiFallbackCount > 0) {
+               setNotification({
+                 show: true,
+                 type: 'info',
+                 message: 'AI fallback used',
+                 detail: data.aiFallbackMessage || 'Some emails used shared AI key due to key/model errors.',
+               });
+             }
+             clearInterval(pollInterval);
+          }
+        } catch (err) {
         console.warn('[Dashboard] Background progress poll failed', err);
       } finally {
         isCurrentlyPolling = false;
@@ -533,12 +541,27 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       await fetchInsights(true);
 
       const counts = manualSyncCountsRef.current;
+      let extraDetail = '';
+      try {
+        const { data: progress } = await axios.get(
+          `${API_URL}/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (progress?.aiFallbackCount > 0) {
+          extraDetail = ` | Fallbacks: ${progress.aiFallbackCount}`;
+        }
+        if (typeof progress?.dailyQuotaUsed === 'number' && typeof progress?.dailyQuotaLimit === 'number') {
+          extraDetail += ` | Daily AI: ${progress.dailyQuotaUsed}/${progress.dailyQuotaLimit}`;
+        }
+      } catch {
+        // non-blocking
+      }
       setNotification({
         show: true,
         type: 'success',
         message: 'Sync completed',
         detail: counts
-          ? `Processed: ${counts.processed} | Success: ${counts.succeeded} | Failed: ${counts.failed}`
+          ? `Processed: ${counts.processed} | Success: ${counts.succeeded} | Failed: ${counts.failed}${extraDetail}`
           : 'Inbox is up to date.',
       });
     } catch (err: any) {

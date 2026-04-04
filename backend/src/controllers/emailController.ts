@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { GmailAccountModel } from '../model/GmailAccount';
+import { EmailMessageModel } from '../model/EmailMessage';
 import { InsightModel } from '../model/Insight';
 import { LabelModel } from '../model/Label';
 import { google } from 'googleapis';
@@ -9,6 +10,8 @@ import { refreshAccessToken } from '../services/gmailAuth';
 import { processEmailDeep } from '../services/emailProcessingService';
 import rulesEngine from '../services/rulesEngine';
 import incrementalSyncService from '../services/incrementalSyncService';
+import { runScoringWorker } from '../services/scoringWorkerService';
+import { runAiProcessingWorker } from '../services/aiProcessingWorkerService';
 import {
     AI_LABEL_SUGGESTION_MIN_MATCHES,
     getAssignableLabels,
@@ -31,6 +34,7 @@ const metadataCache: Map<string, any[]> = new Map();
 //!TODO: Figure out better solution     
 // Rate limiting: delay between API calls
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const MIN_AI_SCORE = 0.4;
 
 export const scanMetadata = async (req: AuthRequest, res: Response): Promise<void> => {
     const uid = req.user?.uid;
@@ -369,25 +373,37 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
         const processedInsights: any[] = [];
         const errors: any[] = [];
 
-        for (const metadata of filteredMetadata) {
-            try {
-                const relevantLabels = rulesEngine.getRelevantLabels(
-                    `${metadata.subject}\n${metadata.snippet}`,
-                    labelCandidates
-                );
+          for (const metadata of filteredMetadata) {
+              try {
+                  const staged = await EmailMessageModel.findOne({
+                      accountId: gmailAccount._id,
+                      messageId: metadata.messageId,
+                  }).select('score');
+                  const stagedScore = typeof staged?.score === 'number' ? staged.score : null;
+                  if (stagedScore !== null && stagedScore < MIN_AI_SCORE) {
+                      continue;
+                  }
+
+                  const relevantLabels = rulesEngine.getRelevantLabels(
+                      `${metadata.subject}\n${metadata.snippet}`,
+                      labelCandidates
+                  );
 
                 const processed = await processEmailDeep(
                     gmail,
                     metadata.messageId,
                     metadata.threadId,
                     metadata.internalDate,
-                    {
-                        from: metadata.from,
-                        subject: metadata.subject,
-                        snippet: metadata.snippet,
-                    },
-                    relevantLabels
-                );
+                      {
+                          from: metadata.from,
+                          subject: metadata.subject,
+                          snippet: metadata.snippet,
+                      },
+                      relevantLabels,
+                      {
+                          userId: uid,
+                      }
+                  );
 
                 const normalizedLabels = normalizeAIClassification(
                     processed.insights.labels,
@@ -638,10 +654,22 @@ export const syncEmails = async (req: AuthRequest, res: Response): Promise<void>
             return;
         }
 
-        // Trigger incremental sync (fetches new candidates into EmailMessage staging DB)
-        const result = await incrementalSyncService.sync(accountId);
+          // Trigger incremental sync (fetches new candidates into EmailMessage staging DB)
+          const result = await incrementalSyncService.sync(accountId);
 
-        res.status(result.success ? 200 : 400).json({
+          // Start scoring + AI workers asynchronously after staging is done.
+          if (result.success && result.processed >= 0) {
+              (async () => {
+                  try {
+                      await runScoringWorker(uid, accountId);
+                      await runAiProcessingWorker(uid, accountId);
+                  } catch (err: any) {
+                      console.error('[BACKGROUND SEQUENCE FAIL from Sync]', err.message || err);
+                  }
+              })();
+          }
+
+          res.status(result.success ? 200 : 400).json({
             success: result.success,
             processed: result.processed,
             succeeded: result.succeeded,
