@@ -826,6 +826,7 @@ export const getPriorityRankingInsights = async (req: AuthRequest, res: Response
             actionRequired: result.actionRequired,
             topPriority: result.topPriority,
             others: result.others,
+            lowPriorityEmails: result.lowPriorityEmails,
         });
     } catch (error: any) {
         if (error?.message === 'Invalid accountId') {

@@ -412,6 +412,16 @@ export interface PriorityRankingItem {
   checklist?: string[];
 }
 
+export interface LowPriorityEmailItem {
+  messageId: string;
+  threadId: string;
+  from: string;
+  subject: string;
+  internalDate: Date;
+  score: number;
+  extractedFeatures: string[];
+}
+
 const buildPriorityScoringContext = (
   priorityList: Array<{ labelId: Types.ObjectId; labelNameSnapshot: string; rank: number }>
 ): PriorityScoringContext => ({
@@ -571,6 +581,7 @@ export const getPriorityRanking = async (params: {
   actionRequired: PriorityRankingItem[];
   topPriority: PriorityRankingItem[];
   others: PriorityRankingItem[];
+  lowPriorityEmails: LowPriorityEmailItem[];
   config: ILabelPriorityConfig;
 }> => {
   const config = await ensureLabelPriorityConfig(params.userId, params.accountId);
@@ -846,11 +857,32 @@ export const getPriorityRanking = async (params: {
   const topPriority = remaining.slice(0, topPriorityCount);
   const topPrioritySet = new Set(topPriority.map((item) => item.insightId));
   const others = remaining.filter((item) => !topPrioritySet.has(item.insightId));
+  const lowPriorityEmails = await EmailMessageModel.find({
+    userId: params.userId,
+    accountId: accountObjectId,
+    score: { $ne: null, $lt: 0.4 },
+    aiProcessed: false,
+  })
+    .select("messageId threadId from subject internalDate score extractedFeatures")
+    .sort({ internalDate: -1 })
+    .lean()
+    .exec();
 
   return {
     actionRequired,
     topPriority,
     others,
+    lowPriorityEmails: lowPriorityEmails.map((email) => ({
+      messageId: email.messageId,
+      threadId: email.threadId,
+      from: typeof email.from === "string" ? email.from : "",
+      subject: typeof email.subject === "string" ? email.subject : "",
+      internalDate: new Date(email.internalDate),
+      score: typeof email.score === "number" ? email.score : 0,
+      extractedFeatures: Array.isArray(email.extractedFeatures)
+        ? email.extractedFeatures.filter((item: any): item is string => typeof item === "string")
+        : [],
+    })),
     config,
   };
 };

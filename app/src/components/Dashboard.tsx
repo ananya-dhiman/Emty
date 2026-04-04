@@ -72,6 +72,30 @@ export interface PriorityRankingItem {
   checklist?: string[];
 }
 
+interface LowPriorityEmailItem {
+  messageId: string;
+  threadId: string;
+  from: string;
+  subject: string;
+  internalDate?: Date | string;
+  score: number;
+  extractedFeatures: string[];
+}
+
+const normalizeLabelKey = (value: string): string =>
+  value.trim().toLowerCase().replace(/\s+/g, ' ');
+
+const parseSenderDisplay = (rawFrom: string): string => {
+  const trimmed = (rawFrom || '').trim();
+  if (!trimmed) return 'Unknown sender';
+  const match = trimmed.match(/^(.*)<(.+)>$/);
+  if (match) {
+    const name = match[1]?.trim().replace(/^["']|["']$/g, '');
+    return name || match[2].trim();
+  }
+  return trimmed;
+};
+
 const normalizeDateValue = (raw: any): Date | null => {
   if (!raw) return null;
   if (raw instanceof Date) return Number.isNaN(raw.getTime()) ? null : raw;
@@ -163,6 +187,8 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [focusItems, setFocusItems] = useState<PriorityRankingItem[]>([]);
   const [actionItems, setActionItems] = useState<PriorityRankingItem[]>([]);
   const [agendaItems, setAgendaItems] = useState<PriorityRankingItem[]>([]);
+  const [lowPriorityItems, setLowPriorityItems] = useState<LowPriorityEmailItem[]>([]);
+  const [isLowPriorityOpen, setIsLowPriorityOpen] = useState(false);
   const [sidebarLabels, setSidebarLabels] = useState<{id: string, name: string, color: string, rank: number, count: number}[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [notification, setNotification] = useState<{show: boolean, message: string, detail?: string, type: 'success' | 'error' | 'info'} | null>(null);
@@ -227,9 +253,11 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         console.log("Setting Focus Items:", response.data.topPriority);
         console.log("Setting Action Items:", response.data.actionRequired);
         console.log("Setting Agenda Items:", response.data.others);
+        console.log("Setting Low Priority Items:", response.data.lowPriorityEmails);
         setFocusItems(response.data.topPriority || []);
         setActionItems(response.data.actionRequired || []);
         setAgendaItems(response.data.others || []);
+        setLowPriorityItems(response.data.lowPriorityEmails || []);
       } else {
         console.error("API returned success: false", response.data);
         setError(response.data.message);
@@ -329,6 +357,13 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const filteredItems = selectedLabel 
     ? allItems.filter(item => item.matchedLabels.includes(selectedLabel))
     : agendaItems;
+  const selectedLabelKey = selectedLabel ? normalizeLabelKey(selectedLabel) : null;
+  const filteredLowPriorityItems = selectedLabelKey
+    ? lowPriorityItems.filter((item) =>
+        Array.isArray(item.extractedFeatures)
+          && item.extractedFeatures.some((feature) => normalizeLabelKey(feature) === selectedLabelKey)
+      )
+    : lowPriorityItems;
 
   const selectedEmail = allItems.find((item) => item.insightId === selectedInsightId) || null;
   const selectedDomain = selectedEmail
@@ -871,8 +906,51 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                     </div>
                   </div>
                 </React.Fragment>
-              );
-            })}
+                );
+              })}
+
+            {!loading && (
+              <div className="low-priority-wrap">
+                <button
+                  className="low-priority-head"
+                  type="button"
+                  onClick={() => setIsLowPriorityOpen((prev) => !prev)}
+                >
+                  <span className="low-priority-title">
+                    {filteredLowPriorityItems.length}+ low priority emails
+                  </span>
+                  <span className="low-priority-desc">
+                    below score 0.4, not processed by AI
+                  </span>
+                  <span className={`low-priority-toggle ${isLowPriorityOpen ? 'open' : ''}`}>
+                    <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </span>
+                </button>
+
+                {isLowPriorityOpen && (
+                  <div className="low-priority-list">
+                    {filteredLowPriorityItems.length === 0 && (
+                      <div className="low-priority-empty">No low-priority emails for this filter.</div>
+                    )}
+                    {filteredLowPriorityItems.map((item) => (
+                      <div className="low-priority-row" key={item.messageId}>
+                        <div className="low-priority-body">
+                          <div className="low-priority-from">{parseSenderDisplay(item.from)}</div>
+                          <div className="low-priority-subject">{item.subject || 'No subject'}</div>
+                        </div>
+                        <div className="low-priority-time">
+                          {item.internalDate
+                            ? new Date(item.internalDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                            : 'Recently'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
