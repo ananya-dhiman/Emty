@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import '../styles/LandingPage.css';
 
 interface LandingPageProps {
+  theme: 'light' | 'dark';
+  setTheme: React.Dispatch<React.SetStateAction<'light' | 'dark'>>;
   onSignInClick?: () => void;
 }
 
@@ -145,29 +147,29 @@ function useTypewriter(startDelay = 2000): string {
   const phraseIdx         = useRef(0);
   const charIdx           = useRef(4);   // start after 'emty'
   const deleting          = useRef(false);
-  const timer             = useRef<ReturnType<typeof setTimeout>>();
+  const timer             = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const tick = useCallback(() => {
+  const tick = useCallback(function tickFn() {
     const phrase = PHRASES[phraseIdx.current];
     if (!deleting.current) {
       charIdx.current++;
       setText(phrase.slice(0, charIdx.current));
       if (charIdx.current === phrase.length) {
         deleting.current = true;
-        timer.current = setTimeout(tick, 2400);
+        timer.current = setTimeout(tickFn, 2400);
         return;
       }
-      timer.current = setTimeout(tick, 100);
+      timer.current = setTimeout(tickFn, 100);
     } else {
       charIdx.current--;
       setText(phrase.slice(0, charIdx.current));
       if (charIdx.current === 0) {
         deleting.current = false;
         phraseIdx.current = (phraseIdx.current + 1) % PHRASES.length;
-        timer.current = setTimeout(tick, 400);
+        timer.current = setTimeout(tickFn, 400);
         return;
       }
-      timer.current = setTimeout(tick, 50);
+      timer.current = setTimeout(tickFn, 50);
     }
   }, []);
 
@@ -217,7 +219,7 @@ function useCountUp(target: number, isFloat = false) {
 }
 
 /* Reads current data-mode from <html> */
-function useAppTheme() {
+export function useAppTheme() {
   const getMode = () =>
     (document.documentElement.getAttribute('data-mode') as 'dark' | 'light') ?? 'dark';
 
@@ -258,14 +260,15 @@ const Tape: React.FC<{ reversed?: boolean }> = ({ reversed = false }) => (
 /* ════════════════════════════════════════════════
    MAIN COMPONENT
 ════════════════════════════════════════════════ */
-const LandingPage: React.FC<LandingPageProps> = ({ onSignInClick }) => {
-  const { mode, toggle } = useAppTheme();
+const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme, onSignInClick }) => {
+  const mode = theme;
+  const toggle = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const twText = useTypewriter(2000);
 
-  const stat1 = useCountUp(2847);
-  const stat2 = useCountUp(12);
-  const stat3 = useCountUp(6.4, true);
+  const { val: val1, ref: ref1 } = useCountUp(2847);
+  const { val: val2, ref: ref2 } = useCountUp(12);
+  const { val: val3, ref: ref3 } = useCountUp(6.4, true);
 
   const toggleFaq = (i: number) =>
     setOpenFaq(prev => (prev === i ? null : i));
@@ -375,27 +378,27 @@ const LandingPage: React.FC<LandingPageProps> = ({ onSignInClick }) => {
             <div className="lp-stat-lbl">EMAILS READ</div>
             <div
               className="lp-stat-num"
-              ref={stat1.ref as React.RefObject<HTMLDivElement>}
+              ref={ref1 as React.RefObject<HTMLDivElement>}
             >
-              {stat1.val}
+              {val1}
             </div>
           </div>
           <div className="lp-stat-cell">
             <div className="lp-stat-lbl">SURFACED</div>
             <div
               className="lp-stat-num lp-o"
-              ref={stat2.ref as React.RefObject<HTMLDivElement>}
+              ref={ref2 as React.RefObject<HTMLDivElement>}
             >
-              {stat2.val}
+              {val2}
             </div>
           </div>
           <div className="lp-stat-cell">
             <div className="lp-stat-lbl">HOURS SAVED</div>
             <div
               className="lp-stat-num"
-              ref={stat3.ref as React.RefObject<HTMLDivElement>}
+              ref={ref3 as React.RefObject<HTMLDivElement>}
             >
-              {stat3.val}
+              {val3}
             </div>
           </div>
           <div className="lp-stat-cell">

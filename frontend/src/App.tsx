@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from 'react'
 import './App.css'
 import { signInWithGoogle, signOutUser, auth } from './utils/firebase'

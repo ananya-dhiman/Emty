@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
@@ -106,6 +107,7 @@ export function GmailAuthTest({ firebaseToken }: GmailAuthTestProps) {
                 fetchGmailAccounts();
             }, 1000);
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     /**

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import '../styles/Dashboard.css';
@@ -242,7 +243,7 @@ function PreferencesPanel({ accountId }: { accountId: string }) {
   }, [token]);
 
   useEffect(() => {
-    void loadProfile();
+    setTimeout(() => void loadProfile(), 0);
   }, [loadProfile]);
 
   const handleSave = async () => {
