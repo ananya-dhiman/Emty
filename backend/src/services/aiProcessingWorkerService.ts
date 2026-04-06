@@ -19,6 +19,7 @@ import {
 import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
 import { getDailyQuotaLimit, getDailyUsageStatus, consumeDailyQuota } from "./aiUsageService";
 import { resolveAIContextForUser } from "./aiProviderService";
+import logger from '../utils/logger';
 
 /**
  * AI Processing Worker Service
@@ -54,7 +55,7 @@ const safeParseDate = (val: any): Date | null => {
 
 export const runAiProcessingWorker = async (userId: string, accountId: string): Promise<void> => {
     const objectIdAccountId = new Types.ObjectId(accountId);
-    console.log(`[AI WORKER] Started for account ${accountId}`);
+    logger.debug(`[AI WORKER] Started for account ${accountId}`);
 
     // ===== SETUP OAUTH AND GMAIL =====
     const gmailAccount = await GmailAccountModel.findById(accountId);
@@ -86,10 +87,10 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
     const aiContext = await resolveAIContextForUser(userId);
     const dailyQuotaLimit = getDailyQuotaLimit(aiContext.hasByokKey);
     let usageSnapshot = await getDailyUsageStatus(userId, dailyQuotaLimit);
-    console.log(
+    logger.debug(
         `[AI WORKER] AI context resolved | byok=${aiContext.hasByokKey} | dailyQuota=${dailyQuotaLimit} | remaining=${usageSnapshot.dailyQuotaRemaining}`
     );
-    console.log(
+    logger.debug(
         `[AI WORKER] Provider attempts: ${aiContext.attempts.map(a => `${a.provider}:${a.model}:${a.source}`).join(" -> ")}`
     );
 
@@ -129,17 +130,17 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         aiProcessed: false,
         score: { $gte: MIN_AI_SCORE },
     }).sort({ score: -1, internalDate: -1 });
-    console.log(
+    logger.debug(
         `[AI WORKER] Candidate query applied | priority=top | aiProcessed=false | minScore=${MIN_AI_SCORE}`
     );
     
     if (candidates.length === 0) {
-        console.log(`[AI WORKER] No top emails to process for account ${accountId}`);
+        logger.debug(`[AI WORKER] No top emails to process for account ${accountId}`);
         await updateProgressComplete(objectIdAccountId);
         return;
     }
 
-    console.log(`[AI WORKER] Found ${candidates.length} emails to process with AI`);
+    logger.debug(`[AI WORKER] Found ${candidates.length} emails to process with AI`);
 
     // Prepare context models
     const assignableLabels = await getAssignableLabels(gmailAccount.userId, accountId);
@@ -155,7 +156,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
     // Process in batches
     for (let i = 0; i < totalCount; i += BATCH_SIZE) {
         const batch = candidates.slice(i, i + BATCH_SIZE);
-        console.log(`[AI WORKER] Processing batch ${Math.floor(i / BATCH_SIZE) + 1} of ${Math.ceil(totalCount / BATCH_SIZE)}`);
+        logger.debug(`[AI WORKER] Processing batch ${Math.floor(i / BATCH_SIZE) + 1} of ${Math.ceil(totalCount / BATCH_SIZE)}`);
 
         // Update progress
         const ratio = processedCount / totalCount;
@@ -176,7 +177,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
             try {
                 const consumed = await consumeDailyQuota(userId, dailyQuotaLimit);
                 if (!consumed) {
-                    console.log(`[AI WORKER] Daily quota exhausted while processing account ${accountId}`);
+                    logger.debug(`[AI WORKER] Daily quota exhausted while processing account ${accountId}`);
                     usageSnapshot = {
                         ...usageSnapshot,
                         dailyQuotaRemaining: 0,
@@ -184,7 +185,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                     return;
                 }
                 usageSnapshot = consumed;
-                console.log(
+                logger.debug(
                     `[AI WORKER] Quota consumed for ${messageId} | used=${usageSnapshot.dailyQuotaUsed}/${usageSnapshot.dailyQuotaLimit} | remaining=${usageSnapshot.dailyQuotaRemaining}`
                 );
 
@@ -223,7 +224,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                         userId,
                         aiContext,
                         onFallback: async (notice) => {
-                            console.warn(
+                            logger.debug(
                                 `[AI WORKER] Fallback notice for ${messageId}: ${notice.fromProvider || "user-model"} -> ${notice.toProvider || "shared-model"}`
                             );
                             await SyncCheckpointModel.updateOne(
@@ -521,7 +522,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                     // Update EmailMessage flag
                     email.aiProcessed = true;
                     await email.save();
-                    console.log(`[AI WORKER] Email processed successfully ${messageId}`);
+                    logger.debug(`[AI WORKER] Email processed successfully ${messageId}`);
 
                     // Clear any previous error states from ProcessedEmailLog (used for history)
                     await ProcessedEmailLogModel.findOneAndUpdate(
@@ -541,7 +542,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                 }
 
             } catch (err: any) {
-                console.error(`[AI WORKER] Deep processing failed for ${messageId}:`, err.message || err);
+                logger.info(`[AI WORKER] Deep processing failed for ${messageId}:`, err.message || err);
                 
                 // Handle retries
                 const errorType = classifyError(err);
@@ -570,7 +571,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         processedCount += batch.length;
 
         if (usageSnapshot.dailyQuotaRemaining <= 0) {
-            console.log(`[AI WORKER] Daily quota reached for user ${userId}`);
+            logger.debug(`[AI WORKER] Daily quota reached for user ${userId}`);
             await SyncCheckpointModel.updateOne(
                 { accountId: objectIdAccountId },
                 {
@@ -586,14 +587,14 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         // RATE LIMIT BUFFER: OpenRouter free models limit to 20 requests/min.
         // If there are more batches left to process, wait 4 seconds to avoid 429s.
         if (i + BATCH_SIZE < totalCount) {
-          console.log(`[AI WORKER] Email complete. Sleeping 4s to respect rate limits...`);
+          logger.debug(`[AI WORKER] Email complete. Sleeping 4s to respect rate limits...`);
           await new Promise(resolve => setTimeout(resolve, 4000));
         }
     }
 
     // Complete Progress Updates
     await updateProgressComplete(objectIdAccountId);
-    console.log(`[AI WORKER] Completed processing for account ${accountId}`);
+    logger.debug(`[AI WORKER] Completed processing for account ${accountId}`);
 };
 
 async function updateProgressComplete(accountId: Types.ObjectId) {
@@ -611,3 +612,5 @@ async function updateProgressComplete(accountId: Types.ObjectId) {
         }
     );
 }
+
+

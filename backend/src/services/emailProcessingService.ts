@@ -7,6 +7,7 @@ import { google } from 'googleapis';
 import { htmlToText } from 'html-to-text';
 import { extractInsightsFromEmail, AIInsightExtraction, AIParsingError } from './aiService';
 import { AIResolvedContext } from './aiProviderService';
+import logger from '../utils/logger';
 
 export interface ProcessedEmailInsight {
     messageId: string;
@@ -209,10 +210,12 @@ export const processEmailDeep = async (
         };
     } catch (error) {
         if (error instanceof AIParsingError) {
-            console.error(`AI parsing failed for email ${messageId}. Raw response below:`);
-            console.error(error.raw);
+            logger.info(`AI parsing failed for email ${messageId}. Raw response below:`);
+            logger.info(error.raw);
         }
-        console.error(`Error processing email ${messageId}:`, error);
+        logger.info(`Error processing email ${messageId}:`, error);
         throw error;
     }
 };
+
+

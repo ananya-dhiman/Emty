@@ -6,6 +6,7 @@ import admin from '../config/firebase';
 import mongoose from 'mongoose';
 import { getDailyQuotaLimit, getDailyUsageStatus } from '../services/aiUsageService';
 import { maskKey } from '../services/aiProviderService';
+import logger from '../utils/logger';
 
 const buildAiSettingsResponse = async (user: any) => {
     const geminiKey = user?.aiSettings?.geminiApiKey || '';
@@ -112,7 +113,7 @@ export const loginOrRegister = async (req: AuthRequest, res: Response): Promise<
             });
         }
     } catch (error: any) {
-        console.error('Login/Register error:', error.message);
+        logger.info('Login/Register error:', error.message);
         res.status(500).json({
             success: false,
             message: 'Authentication failed. Please try again.'
@@ -132,7 +133,7 @@ export const logout = async (req: AuthRequest, res: Response): Promise<void> => 
             message: 'Logout successful. Please clear token from client.'
         });
     } catch (error: any) {
-        console.error('Logout error:', error.message);
+        logger.info('Logout error:', error.message);
         res.status(500).json({
             success: false,
             message: 'Logout failed'
@@ -185,7 +186,7 @@ export const verifyTokenEndpoint = async (req: AuthRequest, res: Response): Prom
             }
         });
     } catch (error: any) {
-        console.error('Verify token error:', error.message);
+        logger.info('Verify token error:', error.message);
         res.status(500).json({
             success: false,
             message: 'Token verification failed'
@@ -211,7 +212,7 @@ export const getAiSettings = async (req: AuthRequest, res: Response): Promise<vo
             ai: await buildAiSettingsResponse(user),
         });
     } catch (error: any) {
-        console.error('Get AI settings error:', error.message);
+        logger.info('Get AI settings error:', error.message);
         res.status(500).json({ success: false, message: 'Failed to fetch AI settings' });
     }
 };
@@ -261,7 +262,9 @@ export const updateAiSettings = async (req: AuthRequest, res: Response): Promise
             ai: await buildAiSettingsResponse(user),
         });
     } catch (error: any) {
-        console.error('Update AI settings error:', error.message);
+        logger.info('Update AI settings error:', error.message);
         res.status(500).json({ success: false, message: 'Failed to update AI settings' });
     }
 };
+
+

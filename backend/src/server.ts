@@ -4,7 +4,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import authRoutes from "./routes/authRoutes";
 import emailRoutes from "./routes/emailRoutes";
-import intentRoutes from "./routes/intentRoutes";
+import intentRoutes from "./routes/intentRoutes";
+import logger from './utils/logger';
 
 // Load environment variables
 dotenv.config();
@@ -27,7 +28,7 @@ app.get("/health", (req, res) => {
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error('Server error:', err);
+    logger.info('Server error:', err);
     res.status(500).json({
         success: false,
         message: 'Internal server error'
@@ -35,3 +36,5 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 export default app;
+
+

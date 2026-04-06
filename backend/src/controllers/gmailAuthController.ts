@@ -7,7 +7,8 @@ import { client } from '../utils/redis';
 import { createOAuthClient } from '../utils/createOAuth';
 import { generateOAuthUrl, exchangeCodeForTokens, refreshAccessToken, revokeToken } from '../services/gmailAuth';
 import {UserModel} from '../model/User';
-import { htmlToText } from 'html-to-text';
+import { htmlToText } from 'html-to-text';
+import logger from '../utils/logger';
 
 // /auth/google
 // ✔ req.user exists
@@ -46,7 +47,7 @@ export const initiateGoogleOAuth = async (req:AuthRequest, res:Response): Promis
             authorizationUrl: authorizationUrl
         });
     }catch(error){
-        console.log("Not able to initiate gmail auth request"+ error);
+        logger.info("Not able to initiate gmail auth request", error);
         res.status(500).json({
             success: false,
             message: 'Failed to initiate Google OAuth.'
@@ -149,7 +150,7 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         res.redirect('http://localhost:5173/?gmail_success=true');
 
     } catch (error: any) {
-        console.error('Gmail callback error:', error.message);
+        logger.info('Gmail callback error:', error.message);
         res.redirect('http://localhost:5173/?gmail_error=true');
     }
 };
@@ -218,7 +219,7 @@ export const fetchUserEmails = async (req: AuthRequest, res: Response): Promise<
                     }
                 );
             } catch (error) {
-                console.error('Failed to refresh token:', error);
+                logger.info('Failed to refresh token:', error);
                 res.status(401).json({
                     success: false,
                     message: 'Failed to refresh Gmail authorization. Please re-connect your Gmail account.'
@@ -240,7 +241,7 @@ export const fetchUserEmails = async (req: AuthRequest, res: Response): Promise<
         // Limit maxResults to prevent memory issues (max 50 emails at once)
         const maxResultsNum = Math.min(parseInt(maxResults as string) || 10, 50);
 
-        console.log(`📧 Fetching ${maxResultsNum} emails for user ${uid}`);
+        logger.debug(`📧 Fetching ${maxResultsNum} emails for user ${uid}`);
 
         const listResponse = await gmail.users.messages.list({
             userId: 'me',
@@ -354,7 +355,7 @@ export const fetchUserEmails = async (req: AuthRequest, res: Response): Promise<
                         labels: fullMessage.data.labelIds || [] // Include email labels (INBOX, UNREAD, etc.)
                     };
                 } catch (error) {
-                    console.error(`Failed to fetch message ${msg.id}:`, error);
+                    logger.info(`Failed to fetch message ${msg.id}:`, error);
                     return null;
                 }
             })
@@ -371,10 +372,11 @@ export const fetchUserEmails = async (req: AuthRequest, res: Response): Promise<
         });
 
     } catch (error: any) {
-        console.error('Error fetching emails:', error.message);
+        logger.info('Error fetching emails:', error.message);
         res.status(500).json({
             success: false,
             message: 'Failed to fetch emails: ' + error.message
         });
     }
 };
+

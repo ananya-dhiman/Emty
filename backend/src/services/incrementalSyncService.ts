@@ -30,7 +30,8 @@ import {
   normalizeAIClassification,
   recordSuggestedLabel,
 } from "./labelLifecycleService";
-import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
+import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
+import logger from '../utils/logger';
 
 const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT  ? parseInt(process.env.SYNC_LOCK_TIMEOUT): 3 * 60 * 1000;
 const TEST_MODE = true; // Set to false for production
@@ -166,12 +167,12 @@ export class IncrementalSyncService {
         }
       }
 
-      console.log(
+      logger.debug(
         `[SYNC] Fetched ${emails.length} emails via historyId: ${historyId}`
       );
       return { emails, newHistoryId };
     } catch (error: any) {
-      console.warn(
+      logger.debug(
         `[SYNC] historyId fetch failed (${error.message}), will fallback to timestamp`
       );
       throw error;
@@ -197,12 +198,12 @@ export class IncrementalSyncService {
       });
 
       const emails = response.data.messages || [];
-      console.log(
+      logger.debug(
         `[SYNC] Fetched ${emails.length} emails since timestamp: ${lastSyncTimestamp}`
       );
       return emails;
     } catch (error: any) {
-      console.warn(
+      logger.debug(
         `[SYNC] Timestamp fetch failed (${error.message}), will do full scan`
       );
       throw error;
@@ -234,10 +235,10 @@ export class IncrementalSyncService {
         pageToken = response.data.nextPageToken;
       }
 
-      console.log(`[SYNC] Full scan: fetched ${emails.length} emails`);
+      logger.debug(`[SYNC] Full scan: fetched ${emails.length} emails`);
       return emails;
     } catch (error: any) {
-      console.error(`[SYNC] Full scan failed: ${error.message}`);
+      logger.info(`[SYNC] Full scan failed: ${error.message}`);
       throw error;
     }
   }
@@ -278,7 +279,7 @@ export class IncrementalSyncService {
         labels,
       };
     } catch (error: any) {
-      console.error(
+      logger.info(
         `[SYNC] Failed to fetch metadata for ${messageId}: ${error.message}`
       );
       throw error;
@@ -537,7 +538,7 @@ export class IncrementalSyncService {
         progressMessage: "Fetching candidate emails...",
       });
 
-      console.log(`[SYNC] Using strategy: ${emailSource}`);
+      logger.debug(`[SYNC] Using strategy: ${emailSource}`);
 
       try {
         if (emailSource === "historyId") {
@@ -558,7 +559,7 @@ export class IncrementalSyncService {
       } catch (error: any) {
         // Fallback logic: try next strategy
         if (emailSource === "historyId") {
-          console.log("[SYNC] Falling back to timestamp strategy");
+          logger.debug("[SYNC] Falling back to timestamp strategy");
           try {
             if (checkpoint.lastSyncTimestamp) {
               candidates = await this.fetchEmailsSinceTimestamp(
@@ -569,7 +570,7 @@ export class IncrementalSyncService {
               candidates = await this.fetchAllEmails(gmail);
             }
           } catch (fallbackError: any) {
-            console.log("[SYNC] Timestamp fallback failed, trying full scan");
+            logger.debug("[SYNC] Timestamp fallback failed, trying full scan");
             candidates = await this.fetchAllEmails(gmail);
           }
         }
@@ -577,14 +578,14 @@ export class IncrementalSyncService {
 
       // TEST_MODE: limit fetched candidate set to avoid heavy fetches
       if (TEST_MODE && candidates.length > MAX_FETCH_TEST_MODE) {
-        console.log(
+        logger.debug(
           `[SYNC] TEST_MODE fetch cap: limiting fetched candidates ${candidates.length} -> ${MAX_FETCH_TEST_MODE}`
         );
         candidates = candidates.slice(0, MAX_FETCH_TEST_MODE);
       }
 
       if (candidates.length === 0) {
-        console.log("[SYNC] No new emails found");
+        logger.debug("[SYNC] No new emails found");
         await this.releaseSyncLock(
           objectIdAccountId,
           newHistoryId,
@@ -634,7 +635,7 @@ export class IncrementalSyncService {
       });
 
       if (TEST_MODE && emailsToProcess.length > MAX_EMAILS_TEST_MODE) {
-        console.log(
+        logger.debug(
           `[SYNC] TEST_MODE active: limiting to ${MAX_EMAILS_TEST_MODE} emails (${emailsToProcess.length} total available)`
         );
       }
@@ -688,7 +689,7 @@ export class IncrementalSyncService {
            
            succeeded++;
         } catch (error: any) {
-          console.error(`[SYNC] Error saving staging email ${email.messageId}: ${error.message}`);
+          logger.info(`[SYNC] Error saving staging email ${email.messageId}: ${error.message}`);
           failed++;
           errors.push({ messageId: email.messageId, reason: error.message });
         }
@@ -710,7 +711,7 @@ export class IncrementalSyncService {
         { processed, succeeded, failed }
       );
 
-      console.log(
+      logger.debug(
         `[SYNC] Complete: processed=${processed}, succeeded=${succeeded}, failed=${failed}`
       );
 
@@ -724,7 +725,7 @@ export class IncrementalSyncService {
         newHistoryId: newHistoryId || undefined,
       };
     } catch (error: any) {
-      console.error("[SYNC] Fatal error:", error.message);
+      logger.info("[SYNC] Fatal error:", error.message);
       await this.releaseSyncLock(
         objectIdAccountId,
         null,
@@ -732,7 +733,7 @@ export class IncrementalSyncService {
         { processed: 0, succeeded: 0, failed: 0 },
         error.message
       ).catch((e) =>
-        console.error("[SYNC] Failed to release lock:", e.message)
+        logger.info("[SYNC] Failed to release lock:", e.message)
       );
 
       return {
@@ -749,3 +750,5 @@ export class IncrementalSyncService {
 }
 
 export default new IncrementalSyncService();
+
+

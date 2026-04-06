@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { inferActionIntelligence } from "./insightInference";
 import { AIResolvedContext, resolveAIContextForUser } from "./aiProviderService";
+import logger from '../utils/logger';
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -375,10 +376,10 @@ export const extractInsightsFromEmail = async (
     throw new Error("No AI providers configured (neither user key nor shared key available)");
   }
 
-  console.log(
+  logger.debug(
     `[AI] Starting extraction | user=${options.userId || context.userId} | attempts=${context.attempts.length} | promptChars=${prompt.length}`
   );
-  console.log(
+  logger.debug(
     `[AI] Attempt chain: ${context.attempts
       .map((a) => `${a.provider}:${a.model}:${a.source}`)
       .join(" -> ")}`
@@ -389,15 +390,15 @@ export const extractInsightsFromEmail = async (
 
   for (const attempt of context.attempts) {
     try {
-      console.log(
+      logger.debug(
         `[AI] Attempting provider=${attempt.provider} model=${attempt.model} source=${attempt.source} transport=${attempt.transport}`
       );
       const result = await runAttempt(attempt, prompt);
-      console.log(
+      logger.debug(
         `[AI] Attempt success provider=${attempt.provider} model=${attempt.model} source=${attempt.source}`
       );
       if (attempt.source === "shared" && firstFailure && options.onFallback) {
-        console.warn(
+        logger.debug(
           `[AI] Fallback triggered from ${firstFailure.provider}:${firstFailure.model} to ${attempt.provider}:${attempt.model}`
         );
         await options.onFallback({
@@ -410,10 +411,10 @@ export const extractInsightsFromEmail = async (
         });
       }
       const enriched = applyInferenceFallback(result, emailContent);
-      console.log(`[AI] Extraction completed successfully`);
+      logger.debug(`[AI] Extraction completed successfully`);
       return enriched;
     } catch (err: any) {
-      console.warn(
+      logger.debug(
         `[AI] Attempt failed provider=${attempt.provider} model=${attempt.model} source=${attempt.source} reason=${err?.message || err}`
       );
       finalError = err;
@@ -428,6 +429,8 @@ export const extractInsightsFromEmail = async (
     }
   }
 
-  console.error(`[AI] All provider attempts failed`);
+  logger.info(`[AI] All provider attempts failed`);
   throw finalError || new Error("All AI providers failed");
 };
+
+

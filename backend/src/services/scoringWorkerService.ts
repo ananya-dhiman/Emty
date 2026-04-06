@@ -1,7 +1,8 @@
 import { Types } from "mongoose";
 import { EmailMessageModel } from "../model/EmailMessage";
 import { SyncCheckpointModel } from "../model/SyncCheckpoint";
-import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
+import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
+import logger from '../utils/logger';
 
 /**
  * Scoring Worker Service
@@ -12,7 +13,7 @@ import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService
 export const runScoringWorker = async (userId: string, accountId: string): Promise<void> => {
     const objectIdAccountId = new Types.ObjectId(accountId);
 
-    console.log(`[SCORING] Worker started for account ${accountId}`);
+    logger.debug(`[SCORING] Worker started for account ${accountId}`);
     
     // Update progress
     await SyncCheckpointModel.updateOne(
@@ -36,7 +37,7 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
         // Loop through all EmailMessage documents for this account
         const emails = await EmailMessageModel.find({ accountId: objectIdAccountId });
         
-        console.log(`[SCORING] Found ${emails.length} emails to score`);
+        logger.debug(`[SCORING] Found ${emails.length} emails to score`);
 
         let processed = 0;
         for (const email of emails) {
@@ -54,7 +55,7 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
             
             processed++;
             if (processed % 100 === 0) {
-                console.log(`[SCORING] Processed ${processed}/${emails.length}`);
+                logger.debug(`[SCORING] Processed ${processed}/${emails.length}`);
             }
         }
 
@@ -75,10 +76,12 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
             rank++;
         }
 
-        console.log(`[SCORING] Worker completed successfully`);
+        logger.debug(`[SCORING] Worker completed successfully`);
 
     } catch (error: any) {
-        console.error(`[SCORING] Worker failed: ${error.message}`);
+        logger.info(`[SCORING] Worker failed: ${error.message}`);
         throw error;
     }
 };
+
+

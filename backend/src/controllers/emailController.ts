@@ -13,6 +13,7 @@ import rulesEngine from '../services/rulesEngine';
 import incrementalSyncService from '../services/incrementalSyncService';
 import { runScoringWorker } from '../services/scoringWorkerService';
 import { runAiProcessingWorker } from '../services/aiProcessingWorkerService';
+import logger from '../utils/logger';
 import {
     AI_LABEL_SUGGESTION_MIN_MATCHES,
     getAssignableLabels,
@@ -103,7 +104,7 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
         try {
             listResponse = await gmail.users.messages.list(listParams);
         } catch (gmailError: any) {
-            console.error('[ERROR] Gmail API call failed:', gmailError.message);
+            logger.info('[ERROR] Gmail API call failed:', gmailError.message);
             throw gmailError;
         }
 
@@ -137,18 +138,18 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
                     hasAttachments
                 });
             } catch (error) {
-                console.error(`Failed to fetch metadata for ${msg.id}:`, error);
+                logger.info(`Failed to fetch metadata for ${msg.id}:`, error);
             }
         }
 
         // Apply filtering using RulesEngine
         const filteredMetadata = rulesEngine.applyRulesAndRelevance(metadataList);
 
-        console.log(`[FILTER] Total emails fetched (raw): ${messages.length}. Metadata list size: ${metadataList.length}. After filter: ${filteredMetadata.length}`);
+        logger.debug(`[FILTER] Total emails fetched (raw): ${messages.length}. Metadata list size: ${metadataList.length}. After filter: ${filteredMetadata.length}`);
         if (metadataList.length > 0 && filteredMetadata.length === 0) {
       
             metadataList.slice(0, 3).forEach(email => {
-                console.log(`  - From: ${email.from}, Subject: ${email.subject}, Has attachments: ${email.hasAttachments}`);
+                logger.debug(`  - From: ${email.from}, Subject: ${email.subject}, Has attachments: ${email.hasAttachments}`);
             });
         }
 
@@ -163,7 +164,7 @@ export const scanMetadata = async (req: AuthRequest, res: Response): Promise<voi
         });
 
     } catch (error: any) {
-        console.error('Error scanning metadata:', error.message);
+        logger.info('Error scanning metadata:', error.message);
         res.status(500).json({ success: false, message: 'Failed to scan metadata: ' + error.message });
     }
 };
@@ -227,7 +228,7 @@ export const createLabel = async (req: AuthRequest, res: Response): Promise<void
             res.status(409).json({ success: false, message: 'Label already exists' });
             return;
         }
-        console.error('Error creating label:', error.message);
+        logger.info('Error creating label:', error.message);
         res.status(500).json({ success: false, message: 'Failed to create label: ' + error.message });
     }
 };
@@ -252,7 +253,7 @@ export const listLabels = async (req: AuthRequest, res: Response): Promise<void>
         const labels = await getVisibleLabels(uid, accountId, status);
         res.status(200).json({ success: true, labels });
     } catch (error: any) {
-        console.error('Error listing labels:', error.message);
+        logger.info('Error listing labels:', error.message);
         res.status(500).json({ success: false, message: 'Failed to list labels: ' + error.message });
     }
 };
@@ -280,7 +281,7 @@ export const acceptSuggestedLabel = async (req: AuthRequest, res: Response): Pro
 
         res.status(200).json({ success: true, label });
     } catch (error: any) {
-        console.error('Error accepting suggested label:', error.message);
+        logger.info('Error accepting suggested label:', error.message);
         res.status(500).json({ success: false, message: 'Failed to accept label: ' + error.message });
     }
 };
@@ -306,7 +307,7 @@ export const rejectSuggestedLabel = async (req: AuthRequest, res: Response): Pro
 
         res.status(200).json({ success: true, label });
     } catch (error: any) {
-        console.error('Error rejecting suggested label:', error.message);
+        logger.info('Error rejecting suggested label:', error.message);
         res.status(500).json({ success: false, message: 'Failed to reject label: ' + error.message });
     }
 };
@@ -602,7 +603,7 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
                     insightId: insight._id,
                 });
             } catch (error: any) {
-                console.error(`Error processing email ${metadata.messageId}:`, error);
+                logger.info(`Error processing email ${metadata.messageId}:`, error);
                 errors.push({
                     messageId: metadata.messageId,
                     error: error.message,
@@ -618,7 +619,7 @@ export const deepProcessEmails = async (req: AuthRequest, res: Response): Promis
             errors: errors.length > 0 ? errors : undefined,
         });
     } catch (error: any) {
-        console.error('Error in deep processing:', error.message);
+        logger.info('Error in deep processing:', error.message);
         res.status(500).json({
             success: false,
             message: 'Failed to process emails: ' + error.message,
@@ -663,7 +664,7 @@ export const syncEmails = async (req: AuthRequest, res: Response): Promise<void>
           const canRunAiPipeline = intentProfile?.onboardingCompleted === true;
 
           if (!canRunAiPipeline) {
-              console.log(`[SYNC] Onboarding not completed for user ${uid}. Staging only, AI workers deferred.`);
+              logger.debug(`[SYNC] Onboarding not completed for user ${uid}. Staging only, AI workers deferred.`);
           }
 
           if (result.success && result.processed >= 0 && canRunAiPipeline) {
@@ -672,7 +673,7 @@ export const syncEmails = async (req: AuthRequest, res: Response): Promise<void>
                       await runScoringWorker(uid, accountId);
                       await runAiProcessingWorker(uid, accountId);
                   } catch (err: any) {
-                      console.error('[BACKGROUND SEQUENCE FAIL from Sync]', err.message || err);
+                      logger.info('[BACKGROUND SEQUENCE FAIL from Sync]', err.message || err);
                   }
               })();
           }
@@ -689,7 +690,7 @@ export const syncEmails = async (req: AuthRequest, res: Response): Promise<void>
                   : ((result.message || 'Sync completed') + ' (AI processing deferred until onboarding is completed)'),
           });
     } catch (error: any) {
-        console.error('Error in sync endpoint:', error.message);
+        logger.info('Error in sync endpoint:', error.message);
         res.status(500).json({
             success: false,
             message: 'Failed to sync emails: ' + error.message,
@@ -724,7 +725,7 @@ export const getLabelPriorityOrder = async (req: AuthRequest, res: Response): Pr
             lastEditedAt: config.lastEditedAt,
         });
     } catch (error: any) {
-        console.error('Error getting label priorities:', error.message);
+        logger.info('Error getting label priorities:', error.message);
         res.status(500).json({ success: false, message: 'Failed to get label priorities: ' + error.message });
     }
 };
@@ -763,7 +764,7 @@ export const updateLabelPriorityOrder = async (req: AuthRequest, res: Response):
             res.status(400).json({ success: false, message: error.message });
             return;
         }
-        console.error('Error updating label priorities:', error.message);
+        logger.info('Error updating label priorities:', error.message);
         res.status(500).json({ success: false, message: 'Failed to update label priorities: ' + error.message });
     }
 };
@@ -792,7 +793,7 @@ export const reviewLabelPriorityOrder = async (req: AuthRequest, res: Response):
             lastEditedAt: config.lastEditedAt,
         });
     } catch (error: any) {
-        console.error('Error marking label priorities reviewed:', error.message);
+        logger.info('Error marking label priorities reviewed:', error.message);
         res.status(500).json({ success: false, message: 'Failed to mark label priorities reviewed: ' + error.message });
     }
 };
@@ -833,7 +834,9 @@ export const getPriorityRankingInsights = async (req: AuthRequest, res: Response
             res.status(400).json({ success: false, message: 'Invalid accountId' });
             return;
         }
-        console.error('Error getting priority ranking insights:', error.message);
+        logger.info('Error getting priority ranking insights:', error.message);
         res.status(500).json({ success: false, message: 'Failed to get priority ranking insights: ' + error.message });
     }
 };
+
+

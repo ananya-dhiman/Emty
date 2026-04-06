@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import admin from '../config/firebase';
+import admin from '../config/firebase';
+import logger from '../utils/logger';
 
 /**
  * Authentication Middleware
@@ -53,10 +54,12 @@ export const verifyToken = async (
 
         next();
     } catch (error: any) {
-        console.error('Token verification error:', error.message);
+        logger.info('Token verification error:', error.message);
         res.status(401).json({
             success: false,
             message: 'Invalid or expired token. Please login again.'
         });
     }
 };
+
+

@@ -5,6 +5,7 @@ import { GmailAccountModel } from "../model/GmailAccount";
 import { runAndPersistColdStart } from "../services/coldStartService";
 import { runScoringWorker } from "../services/scoringWorkerService";
 import { runAiProcessingWorker } from "../services/aiProcessingWorkerService";
+import logger from '../utils/logger';
 
 // ─── GET /api/intent/profile ─────────────────────────────────────────────────
 // Returns the current UserIntentProfile for the authenticated user.
@@ -29,7 +30,7 @@ export const getIntentProfile = async (
 
     res.status(200).json({ success: true, profile });
   } catch (err: any) {
-    console.error("[Intent] Error fetching profile:", err.message);
+    logger.info("[Intent] Error fetching profile:", err.message);
     res
       .status(500)
       .json({ success: false, message: "Failed to fetch profile" });
@@ -89,7 +90,7 @@ export const upsertIntentProfile = async (
 
     // Trigger background sequence only when onboarding transitions false -> true.
     if (onboardingCompleted === true && !wasOnboardingCompleted) {
-      console.log(`[ONBOARDING] Completed, starting background async sequence for user ${userId}`);
+      logger.debug(`[ONBOARDING] Completed, starting background async sequence for user ${userId}`);
       (async () => {
         try {
           const account = await GmailAccountModel.findOne({ userId });
@@ -98,14 +99,14 @@ export const upsertIntentProfile = async (
             await runAiProcessingWorker(userId, account._id.toString());
           }
         } catch (err: any) {
-          console.error('[BACKGROUND SEQUENCE FAIL]', err.message);
+          logger.info('[BACKGROUND SEQUENCE FAIL]', err.message);
         }
       })();
     }
 
     res.status(200).json({ success: true, profile });
   } catch (err: any) {
-    console.error("[Intent] Error upserting profile:", err.message);
+    logger.info("[Intent] Error upserting profile:", err.message);
     res
       .status(500)
       .json({ success: false, message: "Failed to save profile" });
@@ -158,7 +159,7 @@ export const recordFeedback = async (
 
     res.status(200).json({ success: true, signal, insightId, profile });
   } catch (err: any) {
-    console.error("[Intent] Error recording feedback:", err.message);
+    logger.info("[Intent] Error recording feedback:", err.message);
     res
       .status(500)
       .json({ success: false, message: "Failed to record feedback" });
@@ -211,7 +212,7 @@ export const triggerColdStart = async (
       inferredLabels: result.inferredLabels,
     });
   } catch (err: any) {
-    console.error("[Intent] Cold start failed:", err.message);
+    logger.info("[Intent] Cold start failed:", err.message);
     // Non-blocking: still return OK so the sync loader can continue
     res.status(200).json({
       success: false,
@@ -222,3 +223,5 @@ export const triggerColdStart = async (
     });
   }
 };
+
+

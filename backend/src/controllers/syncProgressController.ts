@@ -1,7 +1,8 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/authMiddleware";
 import { GmailAccountModel } from "../model/GmailAccount";
-import { SyncCheckpointModel } from "../model/SyncCheckpoint";
+import { SyncCheckpointModel } from "../model/SyncCheckpoint";
+import logger from '../utils/logger';
 
 export const getSyncProgress = async (
   req: AuthRequest,
@@ -74,11 +75,13 @@ export const getSyncProgress = async (
         ).toISOString(),
     });
   } catch (error: any) {
-    console.error("Error fetching sync progress:", error.message);
+    logger.info("Error fetching sync progress:", error.message);
     res.status(500).json({
       success: false,
       message: "Failed to fetch sync progress: " + error.message,
     });
   }
 };
+
+
 
