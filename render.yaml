@@ -1,0 +1,10 @@
+# render.yaml
+services:
+  - type: web
+    name: emty-backend
+    runtime: node
+    repo: https://github.com/ananya-dhiman/Emty
+    branch: main
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start

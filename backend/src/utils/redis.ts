@@ -4,8 +4,8 @@ import logger from "./logger";
 // Create Redis client with new redis v4+ API
 export const client = createClient({
   socket: {
-    host: process.env.REDIS_HOST || "127.0.0.1",
-    port: parseInt(process.env.REDIS_PORT || "6379"),
+    host: process.env.UPSTASH_REDIS_REST_URL || "127.0.0.1",
+    port: 6379
   },
 });
 
