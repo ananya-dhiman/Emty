@@ -7,7 +7,8 @@ import { client } from '../utils/redis';
 import { createOAuthClient } from '../utils/createOAuth';
 import { generateOAuthUrl, exchangeCodeForTokens, refreshAccessToken, revokeToken } from '../services/gmailAuth';
 import {UserModel} from '../model/User';
-import { htmlToText } from 'html-to-text';
+import { htmlToText } from 'html-to-text';
+
 import logger from '../utils/logger';
 
 // /auth/google
@@ -147,11 +148,11 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         // State is one-time use. Delete it to prevent reuse.
         await client.del(`oauth:state:${state}`);
 
-        res.redirect('http://localhost:5173/?gmail_success=true');
+        res.redirect(process.env.FRONTEND_URL + '/?gmail_success=true');
 
     } catch (error: any) {
         logger.info('Gmail callback error:', error.message);
-        res.redirect('http://localhost:5173/?gmail_error=true');
+        res.redirect(process.env.FRONTEND_URL + '/?gmail_error=true');
     }
 };
 
