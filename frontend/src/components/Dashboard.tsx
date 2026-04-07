@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import '../styles/Dashboard.css';
 import { CalendarSidebar } from './CalendarSidebar';
+import { API_BASE_URL } from '../utils/api';
 
 interface PriorityRankingScoreBreakdown {
   baseScore: number;
@@ -218,7 +219,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'boost' | 'suppress' | null>>({});
 
   const sendFeedback = useCallback(async (insightId: string, signal: 'boost' | 'suppress') => {
-    const API_URL = 'http://localhost:5000';
+    const API_URL = API_BASE_URL;
     const token = localStorage.getItem('firebaseToken');
     // Toggle off if same signal clicked again
     const current = feedbackMap[insightId];
@@ -237,7 +238,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   }, [feedbackMap]);
 
   const fetchInsights = async (isBackground = false) => {
-    const API_URL = 'http://localhost:5000';
+    const API_URL = API_BASE_URL;
     const token = localStorage.getItem('firebaseToken');
       
       console.log("Dashboard mount check:", { hasGmailAccountId: !!user?.gmailAccountId, hasToken: !!token, user });
@@ -344,7 +345,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       isCurrentlyPolling = true;
         try {
           const { data } = await axios.get(
-            `http://localhost:5000/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
+            `${API_BASE_URL}/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
         
@@ -554,7 +555,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const handleSync = async () => {
     if (!user?.gmailAccountId) return;
 
-    const API_URL = 'http://localhost:5000';
+    const API_URL = API_BASE_URL;
     const token = localStorage.getItem('firebaseToken');
 
     setIsSyncing(true);
@@ -1235,4 +1236,5 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     </div>
   );
 }
+
 

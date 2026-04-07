@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import '../styles/Dashboard.css';
+import { API_BASE_URL } from '../utils/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -193,7 +194,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
 
-  const API_URL = 'http://localhost:5000';
+  const API_URL = API_BASE_URL;
   const token = localStorage.getItem('firebaseToken');
   const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
 

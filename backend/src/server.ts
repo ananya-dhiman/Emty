@@ -4,7 +4,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import authRoutes from "./routes/authRoutes";
 import emailRoutes from "./routes/emailRoutes";
-import intentRoutes from "./routes/intentRoutes";
+import intentRoutes from "./routes/intentRoutes";
+
 import logger from './utils/logger';
 
 // Load environment variables
@@ -13,7 +14,14 @@ dotenv.config();
 const app = express();
 
 // Middleware
-app.use(cors()); // Enable CORS for frontend
+app.use(cors({
+  origin: [
+    "https://emty-vert.vercel.app/",
+    "http://localhost:5173"
+
+  ],
+  credentials: true
+}));
 app.use(express.json()); // Parse JSON bodies
 
 // Routes

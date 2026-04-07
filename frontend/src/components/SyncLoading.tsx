@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { auth } from '../utils/firebase';
+import { API_BASE_URL } from '../utils/api';
 import '../index.css';
 
 interface SyncLoadingProps {
@@ -17,7 +18,7 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
   const [stageLabel, setStageLabel] = useState('Initializing sync');
   const [statusDetail, setStatusDetail] = useState('We are securely fetching and organizing your emails into your new priority stack.');
   const [typedDetail, setTypedDetail] = useState('');
-  const API_URL = 'http://localhost:5000';
+  const API_URL = API_BASE_URL;
 
   // Keep a ref to always read the latest user prop inside the effect closure
   const userRef = useRef(user);

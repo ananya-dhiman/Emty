@@ -10,9 +10,9 @@ import { Profile } from './components/Profile'
 import { Onboarding } from './components/Onboarding'
 import { SyncLoading } from './components/SyncLoading'
 import  LandingPage  from './components/LandingPage'
+import { API_BASE_URL } from './utils/api'
 
-// Backend API URL - update this to your backend URL
-const API_URL = 'http://localhost:5000';
+const API_URL = API_BASE_URL;
 
 // Global Axios Interceptor to automatically append the freshest Firebase token
 axios.interceptors.request.use(async (config) => {

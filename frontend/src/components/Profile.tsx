@@ -2,8 +2,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import '../styles/Dashboard.css';
+import { API_BASE_URL } from '../utils/api';
 
-const API_URL = 'http://localhost:5000';
+const API_URL = API_BASE_URL;
 
 interface ProfileProps {
   user: any;
