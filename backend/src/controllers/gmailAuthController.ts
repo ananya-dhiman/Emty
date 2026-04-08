@@ -157,7 +157,7 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
 };
 
 // ========== FETCH USER EMAILS ==========
-// Fetches emails from user's Gmail account
+// Fetches emails from user's Gmail account 
 // Query params:
 //   - accountId: Gmail account ID to fetch emails from
 //   - query: Gmail search query (optional, e.g., "from:someone@example.com")

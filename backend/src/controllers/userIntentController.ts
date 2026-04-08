@@ -2,6 +2,9 @@ import { Response } from "express";
 import { AuthRequest } from "../middleware/authMiddleware";
 import { UserIntentProfileModel } from "../model/UserIntentProfile";
 import { GmailAccountModel } from "../model/GmailAccount";
+import { InsightModel } from "../model/Insight";
+import { EmailMessageModel } from "../model/EmailMessage";
+import { RankingFeedbackLogModel } from "../model/RankingFeedbackLog";
 import { runAndPersistColdStart } from "../services/coldStartService";
 import { runScoringWorker } from "../services/scoringWorkerService";
 import { runAiProcessingWorker } from "../services/aiProcessingWorkerService";
@@ -115,7 +118,7 @@ export const upsertIntentProfile = async (
 
 // ─── PUT /api/intent/feedback ─────────────────────────────────────────────────
 // Records a thumbs-up (boost) or thumbs-down (suppress) signal for one email.
-// Body: { insightId: string, signal: "boost" | "suppress" }
+// Body: { insightId?: string, messageId?: string, signal: "boost" | "suppress" | "none" }
 export const recordFeedback = async (
   req: AuthRequest,
   res: Response
@@ -127,27 +130,33 @@ export const recordFeedback = async (
     return;
   }
 
-  const { insightId, signal } = req.body;
+  const { insightId, messageId, signal } = req.body;
 
-  if (!insightId || !["boost", "suppress"].includes(signal)) {
+  if ((!insightId && !messageId) || !["boost", "suppress", "none"].includes(signal)) {
     res
       .status(400)
-      .json({ success: false, message: "insightId and signal (boost|suppress) are required" });
+      .json({ success: false, message: "insightId or messageId, and valid signal (boost|suppress|none) are required" });
     return;
   }
+
+  const targetId = insightId || messageId;
 
   try {
     let update: Record<string, any>;
 
     if (signal === "boost") {
       update = {
-        $addToSet: { boostedEmailIds: insightId },
-        $pull: { suppressedEmailIds: insightId },
+        $addToSet: { boostedEmailIds: targetId },
+        $pull: { suppressedEmailIds: targetId },
+      };
+    } else if (signal === "suppress") {
+      update = {
+        $addToSet: { suppressedEmailIds: targetId },
+        $pull: { boostedEmailIds: targetId },
       };
     } else {
       update = {
-        $addToSet: { suppressedEmailIds: insightId },
-        $pull: { boostedEmailIds: insightId },
+        $pull: { boostedEmailIds: targetId, suppressedEmailIds: targetId },
       };
     }
 
@@ -157,7 +166,40 @@ export const recordFeedback = async (
       { upsert: true, new: true }
     );
 
-    res.status(200).json({ success: true, signal, insightId, profile });
+    // Telemetry logging
+    try {
+      let predictedScore = 0;
+      let source: "ai_insight" | "pre_filter" = "ai_insight";
+
+      if (insightId) {
+        const insight = await InsightModel.findById(insightId).select("baseScore importanceScore").lean();
+        if (insight) {
+          predictedScore = typeof (insight as any).baseScore === "number" ? (insight as any).baseScore : (insight.importanceScore || 0);
+        }
+      } else if (messageId) {
+        const msg = await EmailMessageModel.findOne({ messageId, userId }).select("score").lean();
+        if (msg) {
+          predictedScore = typeof msg.score === "number" ? msg.score : 0;
+          source = "pre_filter";
+        }
+      }
+
+      await RankingFeedbackLogModel.findOneAndUpdate(
+        { userId, ...(insightId ? { insightId } : { messageId }) },
+        { 
+          $set: { 
+            signal, 
+            predictedScore, 
+            source 
+          } 
+        },
+        { upsert: true }
+      );
+    } catch (logErr: any) {
+      logger.info("[Intent] Error logging ranking feedback telemetry:", logErr.message);
+    }
+
+    res.status(200).json({ success: true, signal, insightId, messageId, profile });
   } catch (err: any) {
     logger.info("[Intent] Error recording feedback:", err.message);
     res

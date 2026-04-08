@@ -216,19 +216,25 @@ export const ensureLabelPriorityConfig = async (
 ): Promise<ILabelPriorityConfig> => {
   await ensureSystemLabels(userId, accountId);
   const activeLabels = await getActivePriorityLabels(userId, accountId);
-  let config = await LabelPriorityConfigModel.findOne({ userId, accountId }).exec();
+  const priorities = await buildDefaultPriorities(userId, accountId, activeLabels);
+  const now = new Date();
+  const config = await LabelPriorityConfigModel.findOneAndUpdate(
+    { userId, accountId },
+    {
+      $setOnInsert: {
+        userId,
+        accountId,
+        priorities,
+        isReviewedByUser: false,
+        initializedAt: now,
+        lastComputedAt: now,
+      },
+    },
+    { upsert: true, new: true }
+  ).exec();
 
   if (!config) {
-    const priorities = await buildDefaultPriorities(userId, accountId, activeLabels);
-    config = await LabelPriorityConfigModel.create({
-      userId,
-      accountId,
-      priorities,
-      isReviewedByUser: false,
-      initializedAt: new Date(),
-      lastComputedAt: new Date(),
-    });
-    return config;
+    throw new Error("Failed to initialize label priority config");
   }
 
   return syncPriorityConfigWithActiveLabels(config, activeLabels);

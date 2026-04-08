@@ -916,7 +916,8 @@
 }
 
 /* Show when parent agenda row is hovered */
-.arow:hover .feedback-row {
+.arow:hover .feedback-row,
+.low-priority-row:hover .feedback-row {
   opacity: 1;
   pointer-events: auto;
   max-height: 40px;

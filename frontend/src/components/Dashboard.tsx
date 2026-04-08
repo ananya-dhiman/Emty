@@ -17,6 +17,7 @@ interface PriorityRankingScoreBreakdown {
 
 export interface PriorityRankingItem {
   insightId: string;
+  messageId?: string;
   gmailThreadId: string;
   summary: {
     shortSnippet: string;
@@ -199,6 +200,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [calendarCol, setCalendarCol] = useState(false);
   const [rightCol, setRightCol] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState<string | null>(null);
+  const [selectedLowPriorityMessageId, setSelectedLowPriorityMessageId] = useState<string | null>(null);
   const [selectedSourceMessageId, setSelectedSourceMessageId] = useState<string | null>(null);
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
 
@@ -218,18 +220,19 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   // feedbackMap: insightId -> 'boost' | 'suppress' | null
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'boost' | 'suppress' | null>>({});
 
-  const sendFeedback = useCallback(async (insightId: string, signal: 'boost' | 'suppress') => {
+  const sendFeedback = useCallback(async (targetId: string, signal: 'boost' | 'suppress', type: 'insight' | 'message') => {
     const API_URL = API_BASE_URL;
     const token = localStorage.getItem('firebaseToken');
     // Toggle off if same signal clicked again
-    const current = feedbackMap[insightId];
+    const current = feedbackMap[targetId];
     const next = current === signal ? null : signal;
-    setFeedbackMap((prev) => ({ ...prev, [insightId]: next }));
+    setFeedbackMap((prev) => ({ ...prev, [targetId]: next }));
     if (!token) return;
     try {
+      const payload = type === 'insight' ? { insightId: targetId, signal: next ?? 'none' } : { messageId: targetId, signal: next ?? 'none' };
       await axios.put(
         `${API_URL}/api/intent/feedback`,
-        { insightId, signal: next ?? 'none' },
+        payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );
     } catch (err) {
@@ -413,7 +416,43 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     };
   };
 
-  const selectedEmail = allItems.find((item) => item.insightId === selectedInsightId) || null;
+  let selectedEmail = allItems.find((item) => item.insightId === selectedInsightId) || null;
+  const selectedLowPriorityItem = lowPriorityItems.find((item) => item.messageId === selectedLowPriorityMessageId) || null;
+
+  if (!selectedEmail && selectedLowPriorityItem) {
+    selectedEmail = {
+      insightId: '', // null insight
+      messageId: selectedLowPriorityItem.messageId,
+      gmailThreadId: selectedLowPriorityItem.threadId,
+      summary: {
+        shortSnippet: selectedLowPriorityItem.subject || 'No summary available (filtered)',
+        intent: 'noise',
+      },
+      from: {
+        email: selectedLowPriorityItem.from,
+      },
+      matchedLabels: ['Low Priority'],
+      isActionRequired: false,
+      score: {
+        baseScore: selectedLowPriorityItem.score,
+        dynamicScore: 0,
+        totalScore: selectedLowPriorityItem.score,
+        importanceNorm: 0,
+        labelNorm: 0,
+        recencyNorm: 0,
+        deadlineBoost: 0,
+        matchedLabelRank: 99,
+      },
+      timestamps: {
+        createdAt: new Date(selectedLowPriorityItem.internalDate || Date.now()),
+        updatedAt: new Date(selectedLowPriorityItem.internalDate || Date.now()),
+      },
+      dates: [],
+      attachments: [],
+      checklistItems: [],
+      importantLinksByEmail: {}
+    };
+  }
   const selectedDomain = selectedEmail
     ? (selectedEmail.from.domain || selectedEmail.from.email.split('@')[1] || '')
     : '';
@@ -482,6 +521,14 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
   const selectEmail = (item: PriorityRankingItem) => {
     setSelectedInsightId(item.insightId);
+    setSelectedLowPriorityMessageId(null);
+    setSelectedSourceMessageId(null);
+    setRightCol(true);
+  };
+
+  const selectLowPriorityEmail = (item: LowPriorityEmailItem) => {
+    setSelectedInsightId(null);
+    setSelectedLowPriorityMessageId(item.messageId);
     setSelectedSourceMessageId(null);
     setRightCol(true);
   };
@@ -493,8 +540,9 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
   // Inline component rendered per-email to show thumbs feedback.
   // Visible on hover in list rows, always visible in detail panel.
-  const FeedbackButtons = ({ insightId, alwaysVisible = false }: { insightId: string; alwaysVisible?: boolean }) => {
-    const fb = feedbackMap[insightId] ?? null;
+  const FeedbackButtons = ({ insightId, messageId, alwaysVisible = false }: { insightId?: string, messageId?: string, alwaysVisible?: boolean }) => {
+    const targetId = insightId || messageId || '';
+    const fb = feedbackMap[targetId] ?? null;
     return (
       <div
         className={alwaysVisible ? 'feedback-row visible' : 'feedback-row'}
@@ -502,7 +550,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       >
         <button
           title="Mark as relevant"
-          onClick={(e) => { e.stopPropagation(); void sendFeedback(insightId, 'boost'); }}
+          onClick={(e) => { e.stopPropagation(); void sendFeedback(targetId, 'boost', insightId ? 'insight' : 'message'); }}
           style={{
             background: 'none',
             border: `1px solid ${fb === 'boost' ? 'var(--accent)' : 'var(--border)'}`,
@@ -526,7 +574,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         </button>
         <button
           title="Mark as not relevant"
-          onClick={(e) => { e.stopPropagation(); void sendFeedback(insightId, 'suppress'); }}
+          onClick={(e) => { e.stopPropagation(); void sendFeedback(targetId, 'suppress', insightId ? 'insight' : 'message'); }}
           style={{
             background: 'none',
             border: `1px solid ${fb === 'suppress' ? 'var(--red, #c0351a)' : 'var(--border)'}`,
@@ -979,10 +1027,11 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                       <div className="low-priority-empty">No low-priority emails for this filter.</div>
                     )}
                     {filteredLowPriorityItems.map((item) => (
-                      <div className="low-priority-row" key={item.messageId}>
+                      <div className={`low-priority-row ${selectedLowPriorityMessageId === item.messageId ? 'sel' : ''}`} key={item.messageId} onClick={() => selectLowPriorityEmail(item)}>
                         <div className="low-priority-body">
                           <div className="low-priority-from">{parseSenderDisplay(item.from)}</div>
                           <div className="low-priority-subject">{item.subject || 'No subject'}</div>
+                          <FeedbackButtons messageId={item.messageId} />
                         </div>
                         <div className="low-priority-time">
                           {item.internalDate
@@ -1222,7 +1271,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                 <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)', margin: '0 0 8px' }}>
                   Tell us if this email is relevant to you.
                 </p>
-                <FeedbackButtons insightId={selectedEmail.insightId} alwaysVisible />
+                <FeedbackButtons insightId={selectedEmail.insightId} messageId={selectedEmail.messageId} alwaysVisible />
               </div>
             )}
           </div>
