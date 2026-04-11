@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { MetricsService, MetricsResult, AggregateMetrics } from "../services/metricsService";
-import { logger } from "../utils/logger";
+import logger  from "../utils/logger";
 
 export class MetricsController {
   /**
@@ -34,7 +34,7 @@ export class MetricsController {
         data: metrics,
       });
     } catch (error) {
-      logger.error("Error in getUserMetrics", { error });
+      logger.debug("Error in getUserMetrics", { error });
       res.status(500).json({ error: "Failed to fetch metrics" });
     }
   }
@@ -61,7 +61,7 @@ export class MetricsController {
         data: metrics,
       });
     } catch (error) {
-      logger.error("Error in getAggregateMetrics", { error });
+      logger.debug("Error in getAggregateMetrics", { error });
       res.status(500).json({ error: "Failed to fetch aggregate metrics" });
     }
   }
@@ -101,7 +101,7 @@ export class MetricsController {
         data: trend,
       });
     } catch (error) {
-      logger.error("Error in getMetricsTrend", { error });
+      logger.debug("Error in getMetricsTrend", { error });
       res.status(500).json({ error: "Failed to fetch metrics trend" });
     }
   }
@@ -149,7 +149,7 @@ export class MetricsController {
         data: info,
       });
     } catch (error) {
-      logger.error("Error in getMetricsInfo", { error });
+      logger.debug("Error in getMetricsInfo", { error });
       res.status(500).json({ error: "Failed to fetch metrics info" });
     }
   }
