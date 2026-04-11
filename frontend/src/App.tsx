@@ -11,6 +11,7 @@ import { Onboarding } from './components/Onboarding'
 import { SyncLoading } from './components/SyncLoading'
 import  LandingPage  from './components/LandingPage'
 import { API_BASE_URL } from './utils/api'
+import MetricsDashboard from './pages/MetricsDashboard';
 
 const API_URL = API_BASE_URL;
 
