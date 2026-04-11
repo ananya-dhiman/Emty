@@ -12,7 +12,7 @@ import {
   Legend,
 } from 'chart.js';
 import { Line, Bar, Pie } from 'react-chartjs-2';
-import { MetricsResult, AggregateMetrics } from '../utils/metricsTypes';
+import type { MetricsResult, AggregateMetrics } from '../utils/metricsTypes';
 import '../styles/MetricsCharts.css';
 
 ChartJS.register(

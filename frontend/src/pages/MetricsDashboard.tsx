@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import MetricsCharts from '../components/MetricsCharts';
-import { MetricsResult, AggregateMetrics, MetricsInfo } from '../utils/metricsTypes';
+import type { MetricsResult, AggregateMetrics, MetricsInfo } from '../utils/metricsTypes';
 import '../styles/MetricsDashboard.css';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
 export const MetricsDashboard: React.FC = () => {
   const [metrics, setMetrics] = useState<MetricsResult | null>(null);
@@ -36,13 +36,13 @@ export const MetricsDashboard: React.FC = () => {
       if (source) params.source = source;
 
       const [metricsRes, aggregateRes, trendRes, infoRes] = await Promise.all([
-        axios.get(`${API_BASE_URL}/metrics/ranking-feedback`, { headers, params }),
-        axios.get(`${API_BASE_URL}/metrics/ranking-feedback/aggregate`, { params }),
-        axios.get(`${API_BASE_URL}/metrics/ranking-feedback/trend`, {
+        axios.get(`${API_BASE_URL}/api/metrics/ranking-feedback`, { headers, params }),
+        axios.get(`${API_BASE_URL}/api/metrics/ranking-feedback/aggregate`, { params }),
+        axios.get(`${API_BASE_URL}/api/metrics/ranking-feedback/trend`, {
           headers,
           params: { ...params, granularity },
         }),
-        axios.get(`${API_BASE_URL}/metrics/ranking-feedback/info`),
+        axios.get(`${API_BASE_URL}/api/metrics/ranking-feedback/info`),
       ]);
 
       setMetrics(metricsRes.data.data);
