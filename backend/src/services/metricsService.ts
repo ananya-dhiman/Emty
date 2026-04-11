@@ -1,5 +1,5 @@
 import { RankingFeedbackLogModel, IRankingFeedbackLog } from "../model/RankingFeedbackLog";
-import { logger } from "../utils/logger";
+import logger from "../utils/logger";
 
 export interface MetricsResult {
   userId: string;
@@ -90,7 +90,7 @@ export class MetricsService {
         },
       };
     } catch (error) {
-      logger.error("Error calculating user metrics", { userId, error });
+      logger.debug("Error calculating user metrics", { userId, error });
       throw error;
     }
   }
@@ -159,7 +159,7 @@ export class MetricsService {
         },
       };
     } catch (error) {
-      logger.error("Error calculating aggregate metrics", { error });
+      logger.debug("Error calculating aggregate metrics", { error });
       throw error;
     }
   }
@@ -196,7 +196,7 @@ export class MetricsService {
 
       return trend;
     } catch (error) {
-      logger.error("Error calculating metrics trend", { userId, error });
+      logger.debug("Error calculating metrics trend", { userId, error });
       throw error;
     }
   }
