@@ -11,6 +11,7 @@ import { Onboarding } from './components/Onboarding'
 import { SyncLoading } from './components/SyncLoading'
 import  LandingPage  from './components/LandingPage'
 import { API_BASE_URL } from './utils/api'
+import MetricsDashboard from './pages/MetricsDashboard';
 
 const API_URL = API_BASE_URL;
 
@@ -39,7 +40,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
-  const [route, setRoute] = useState<'dashboard' | 'profile' | 'onboarding' | 'syncing'>('dashboard');
+  const [route, setRoute] = useState<'dashboard' | 'profile' | 'onboarding' | 'syncing' | 'metrics'>('dashboard');
   const [loggedOutView, setLoggedOutView] = useState<'landing' | 'signin'>('landing');
   
   // NEW: track if user has connected gmail in frontend flow
@@ -208,6 +209,9 @@ function App() {
   };
 
   if (user && isGmailConnected) {
+    if (route === 'metrics') {
+      return <MetricsDashboard />;
+    }
     if (route === 'profile') {
       return <Profile user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} onLogout={handleLogout} />;
     }

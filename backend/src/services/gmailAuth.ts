@@ -56,9 +56,9 @@ export async function exchangeCodeForTokens(code:string,oauth2Client:any):Promis
    
 }
 
-export async function refreshAccessToken(emailAddress:String,oauth2Client:any):Promise<any>{
-    try{
-        const dets=await GmailAccountModel.findOne({emailAddress:emailAddress});
+export async function refreshAccessToken(emailAddress: string, oauth2Client: any): Promise<any> {
+    try {
+        const dets = await GmailAccountModel.findOne({ emailAddress });
         if(!dets){
             throw new Error('No Gmail account found for the provided email address');
         }

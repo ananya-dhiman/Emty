@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import authRoutes from "./routes/authRoutes";
 import emailRoutes from "./routes/emailRoutes";
 import intentRoutes from "./routes/intentRoutes";
+import metricsRoutes from "./routes/metricsRoutes";
 
 import logger from './utils/logger';
 
@@ -28,6 +29,7 @@ app.use(express.json()); // Parse JSON bodies
 app.use("/api/auth", authRoutes);
 app.use("/api/emails", emailRoutes);
 app.use("/api/intent", intentRoutes);
+app.use("/api/metrics", metricsRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => {

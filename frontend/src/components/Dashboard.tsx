@@ -192,7 +192,7 @@ interface DashboardProps {
   user: any;
   theme: 'light' | 'dark';
   setTheme: (t: 'light' | 'dark') => void;
-  onNavigate: (route: 'profile' | 'onboarding') => void;
+  onNavigate: (route: 'profile' | 'onboarding' | 'metrics') => void;
 }
 
 export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps) {
@@ -818,6 +818,10 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               <div className="sb-row">
                 <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="5" stroke="currentColor" strokeWidth="1.6"/><path d="M8 12h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg></div>
                 <span className="sb-txt">Track</span><span className="sb-ct g">2</span>
+              </div>
+              <div className="sb-row" onClick={() => onNavigate('metrics')}>
+                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M3 3v18h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M7 11l3-3 3 3 4-4 2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
+                <span className="sb-txt">Metrics</span>
               </div>
               <div className="sb-row">
                 <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 5l14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M19 5L5 19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></div>

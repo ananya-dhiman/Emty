@@ -8,6 +8,7 @@ import { createOAuthClient } from '../utils/createOAuth';
 import { generateOAuthUrl, exchangeCodeForTokens, refreshAccessToken, revokeToken } from '../services/gmailAuth';
 import {UserModel} from '../model/User';
 import { htmlToText } from 'html-to-text';
+import { Types } from 'mongoose';
 
 import logger from '../utils/logger';
 
@@ -211,7 +212,7 @@ export const fetchUserEmails = async (req: AuthRequest, res: Response): Promise<
 
                 // Update tokens in database
                 await GmailAccountModel.updateOne(
-                    { _id: accountId },
+                    { _id: new Types.ObjectId(accountId as string) },
                     {
                         $set: {
                             accessToken: tokens.access_token,
