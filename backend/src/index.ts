@@ -4,16 +4,28 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import mongoose from "mongoose";
-import app from "./server";
+import app from "./server";
+
 import logger from "./utils/logger";
+import { initializeDatabase, closeDatabase } from "./db/sqlite";
 
 /**
  * Main server entry point
- * Connects to MongoDB and starts Express server
+ * Connects to databases and starts Express server
  */
 
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/emty";
+
+/**
+ * Initialize SQLite first (local database for email content)
+ */
+try {
+    initializeDatabase();
+} catch (error) {
+    logger.info("Failed to initialize SQLite database:", error);
+    process.exit(1);
+}
 
 // Connect to MongoDB
 mongoose
@@ -36,8 +48,9 @@ mongoose
 // Handle graceful shutdown
 process.on("SIGINT", async () => {
     logger.info("Shutting down gracefully...");
+    closeDatabase();
     await mongoose.connection.close();
-    logger.info("MongoDB connection closed");
+    logger.info("All database connections closed");
     process.exit(0);
 });
 
