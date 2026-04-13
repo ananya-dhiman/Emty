@@ -39,6 +39,24 @@ export function runMigrations(db: Database.Database): void {
  */
 function migration_v1(db: Database.Database): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      created_at INTEGER DEFAULT (unixepoch('now') * 1000),
+      updated_at INTEGER DEFAULT (unixepoch('now') * 1000)
+    );
+
+    CREATE TABLE IF NOT EXISTS accounts (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      email_address TEXT NOT NULL,
+      config_json TEXT DEFAULT '{}',
+      created_at INTEGER DEFAULT (unixepoch('now') * 1000),
+      updated_at INTEGER DEFAULT (unixepoch('now') * 1000),
+      UNIQUE(email_address)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
+
     CREATE TABLE IF NOT EXISTS email_messages (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

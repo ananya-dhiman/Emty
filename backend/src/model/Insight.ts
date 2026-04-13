@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
+import { getDb } from "../db/sqlite";
 
 // ================================
 // Insight Model (Context-level understanding)
@@ -409,3 +410,90 @@ const InsightSchema = new Schema<IInsight>(
 InsightSchema.index({ accountId: 1, gmailThreadId: 1 });
 
 export const InsightModel = mongoose.model<IInsight>("Insight", InsightSchema);
+
+const parseJson = <T>(raw: string | null | undefined, fallback: T): T => {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+};
+
+const toDateOrUndefined = (val: number | null | undefined): Date | undefined => {
+  if (typeof val !== "number") return undefined;
+  const d = new Date(val);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+};
+
+const toInsightShape = (row: any) => {
+  const labels = parseJson<any[]>(row.labels, []);
+  const dates = parseJson<any[]>(row.dates, []).map((d: any) => ({
+    ...d,
+    date: d?.date ? new Date(d.date) : undefined,
+  }));
+  const checklist = parseJson<any[]>(row.checklist, []).map((c: any) => ({
+    ...c,
+    dueDate: c?.dueDate ? new Date(c.dueDate) : undefined,
+  }));
+  const emails = parseJson<any[]>(row.emails, []).map((email: any) => ({
+    ...email,
+    internalDate: email?.internalDate ? new Date(email.internalDate) : undefined,
+  }));
+
+  return {
+    id: row.id,
+    _id: row.id,
+    userId: row.user_id,
+    accountId: row.account_id,
+    gmailThreadId: row.gmail_thread_id,
+    from: {
+      email: row.from_email || "",
+      name: row.from_name || undefined,
+      domain: row.from_domain || undefined,
+    },
+    labels,
+    summary: {
+      shortSnippet: row.summary_snippet || "",
+      intent: row.summary_intent || "information",
+    },
+    importanceScore: typeof row.importance_score === "number" ? row.importance_score : undefined,
+    baseScore: typeof row.base_score === "number" ? row.base_score : undefined,
+    baseScoreBreakdown: parseJson(row.base_score_breakdown, null),
+    state: {
+      relevance: row.state_relevance || undefined,
+      firstSeenAt: toDateOrUndefined(row.state_first_seen_at),
+      lastSignalAt: toDateOrUndefined(row.state_last_signal_at),
+      lastVerifiedAt: toDateOrUndefined(row.state_last_verified_at),
+    },
+    dates,
+    attachments: parseJson<any[]>(row.attachments, []),
+    checklist,
+    emails,
+    createdAt: toDateOrUndefined(row.created_at),
+    updatedAt: toDateOrUndefined(row.updated_at),
+  };
+};
+
+export const Insight = {
+  async findMany(args: { where?: Record<string, any>; select?: Record<string, boolean> } = {}) {
+    const db = getDb();
+    const where = args.where || {};
+    const filters: string[] = [];
+    const values: any[] = [];
+    if (where.userId) {
+      filters.push("user_id = ?");
+      values.push(where.userId);
+    }
+    if (where.accountId) {
+      filters.push("account_id = ?");
+      values.push(String(where.accountId));
+    }
+    if (Array.isArray(where.OR) && where.OR.length > 0) {
+      filters.push("(state_relevance = 'active' OR state_relevance IS NULL OR state_relevance = '')");
+    }
+    const whereClause = filters.length ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = db.prepare(`SELECT * FROM insights${whereClause}`).all(...values);
+    return rows.map(toInsightShape);
+  },
+};

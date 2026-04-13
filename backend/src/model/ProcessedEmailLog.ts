@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
+import { getDb } from "../db/sqlite";
 
 /**
  * ProcessedEmailLog Model
@@ -63,3 +64,23 @@ export const ProcessedEmailLogModel = mongoose.model<IProcessedEmailLog>(
   "ProcessedEmailLog",
   ProcessedEmailLogSchema
 );
+
+export const ProcessedEmailLog = {
+  async findUnique(args: { where: { accountId_messageId: { accountId: string; messageId: string } } }) {
+    const db = getDb();
+    const where = args.where.accountId_messageId;
+    const row = db
+      .prepare("SELECT * FROM processed_email_log WHERE account_id = ? AND message_id = ? LIMIT 1")
+      .get(String(where.accountId), where.messageId) as any;
+    if (!row) return null;
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      messageId: row.message_id,
+      previousStateHash: row.previous_state_hash,
+      retryCount: row.retry_count,
+      lastErrorMessage: row.last_error_message,
+      errorType: row.error_type,
+    };
+  },
+};

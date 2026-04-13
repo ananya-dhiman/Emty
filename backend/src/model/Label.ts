@@ -49,3 +49,95 @@ LabelSchema.pre("validate", function () {
 LabelSchema.index({ userId: 1, accountId: 1, nameNormalized: 1 }, { unique: true });
 
 export const LabelModel = mongoose.model<ILabel>("Label", LabelSchema);
+
+const mapSort = (orderBy?: Array<Record<string, "asc" | "desc">>): Record<string, 1 | -1> => {
+    const sort: Record<string, 1 | -1> = {};
+    for (const item of orderBy || []) {
+        for (const [key, value] of Object.entries(item)) {
+            sort[key] = value === "asc" ? 1 : -1;
+        }
+    }
+    return sort;
+};
+
+const mapWhere = (where: Record<string, any> = {}): Record<string, any> => {
+    const query: Record<string, any> = {};
+    for (const [key, value] of Object.entries(where)) {
+        if (key === "OR" && Array.isArray(value)) {
+            query.$or = value.map((item) => mapWhere(item));
+            continue;
+        }
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+            if ("in" in value) {
+                query[key] = { $in: value.in };
+                continue;
+            }
+            if ("gte" in value) {
+                query[key] = { $gte: value.gte };
+                continue;
+            }
+        }
+        query[key] = value;
+    }
+    return query;
+};
+
+export const Label = {
+    async findMany(args: { where?: Record<string, any>; orderBy?: Array<Record<string, "asc" | "desc">> } = {}) {
+        const query = mapWhere(args.where || {});
+        const sort = mapSort(args.orderBy);
+        return LabelModel.find(query).sort(sort).lean<ILabel[]>();
+    },
+    async findUnique(args: {
+        where: {
+            id?: string;
+            userId_accountId_nameNormalized?: { userId: string; accountId: string; nameNormalized: string };
+        };
+    }) {
+        const where = args.where || {};
+        if (where.id) {
+            return LabelModel.findById(where.id);
+        }
+        if (where.userId_accountId_nameNormalized) {
+            const composite = where.userId_accountId_nameNormalized;
+            return LabelModel.findOne({
+                userId: composite.userId,
+                accountId: composite.accountId,
+                nameNormalized: composite.nameNormalized,
+            });
+        }
+        return null;
+    },
+    async upsert(args: {
+        where: { userId_accountId_nameNormalized: { userId: string; accountId: string; nameNormalized: string } };
+        create: Record<string, any>;
+        update: Record<string, any>;
+    }) {
+        const composite = args.where.userId_accountId_nameNormalized;
+        const existing = await LabelModel.findOne({
+            userId: composite.userId,
+            accountId: composite.accountId,
+            nameNormalized: composite.nameNormalized,
+        });
+        if (!existing) {
+            return LabelModel.create(args.create);
+        }
+
+        const updatePayload: Record<string, any> = {};
+        for (const [key, value] of Object.entries(args.update || {})) {
+            if (value && typeof value === "object" && "increment" in value) {
+                updatePayload[key] = (existing as any)[key] + Number((value as any).increment || 0);
+                continue;
+            }
+            if (value && typeof value === "object" && "push" in value) {
+                const current = Array.isArray((existing as any)[key]) ? (existing as any)[key] : [];
+                updatePayload[key] = [...current, (value as any).push];
+                continue;
+            }
+            updatePayload[key] = value;
+        }
+        Object.assign(existing, updatePayload);
+        await existing.save();
+        return existing;
+    },
+};

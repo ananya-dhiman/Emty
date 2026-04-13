@@ -1,5 +1,6 @@
 import * as feedbackRepository from "../db/repositories/feedbackRepository";
 import logger from "../utils/logger";
+import { FeedbackRow } from "../db/repositories/feedbackRepository";
 
 export interface MetricsResult {
   userId: string;
@@ -69,7 +70,7 @@ export class MetricsService {
       // In future, add direct SQLite filtering for performance
       const allFeedback = await feedbackRepository.findNotUsedInTraining(userId, 10000);
       
-      let feedbackLogs = allFeedback.filter((f) => {
+      const feedbackLogs = allFeedback.filter((f: FeedbackRow) => {
         const created = new Date(f.created_at);
         if (startDate && created < startDate) return false;
         if (endDate && created > endDate) return false;
@@ -103,8 +104,8 @@ export class MetricsService {
     try {
       // Phase 1: Fetch all feedback from SQLite and filter in memory
       // In future, add direct SQLite filtering for performance
-      const allLogs = await feedbackRepository.findNotUsedInTraining(userId, 10000);
-      const filteredLogs = allLogs.filter((log) => {
+      const allLogs = await feedbackRepository.findNotUsedInTraining(undefined, 10000);
+      const filteredLogs = allLogs.filter((log: FeedbackRow) => {
         const created = new Date(log.created_at);
         if (startDate && created < startDate) return false;
         if (endDate && created > endDate) return false;
@@ -115,14 +116,14 @@ export class MetricsService {
       const overallMetrics = this.calculateMetricsFromLogs(filteredLogs as any);
 
       // Metrics by source
-      const aiLogs = filteredLogs.filter((log) => log.source === "ai_insight");
-      const preLogs = filteredLogs.filter((log) => log.source === "pre_filter");
+      const aiLogs = filteredLogs.filter((log: FeedbackRow) => log.source === "ai_insight");
+      const preLogs = filteredLogs.filter((log: FeedbackRow) => log.source === "pre_filter");
 
       const aiMetrics = this.calculateMetricsFromLogs(aiLogs);
       const preMetrics = this.calculateMetricsFromLogs(preLogs);
 
       // Unique users
-      const uniqueUsers = new Set(filteredLogs.map((log) => log.user_id)).size;
+      const uniqueUsers = new Set(filteredLogs.map((log: FeedbackRow) => log.user_id)).size;
 
       return {
         globalPrecision: overallMetrics.precision,
@@ -174,7 +175,7 @@ export class MetricsService {
     try {
       // Phase 1: Fetch all feedback for user from SQLite
       const allFeedback = await feedbackRepository.findNotUsedInTraining(userId, 10000);
-      const feedbackLogs = allFeedback.filter((log) => {
+      const feedbackLogs = allFeedback.filter((log: FeedbackRow) => {
         const created = new Date(log.created_at);
         if (startDate && created < startDate) return false;
         if (endDate && created > endDate) return false;
@@ -200,7 +201,7 @@ export class MetricsService {
    * Private: Calculate metrics from a list of feedback logs
    */
   private static calculateMetricsFromLogs(
-    logs: IRankingFeedbackLog[]
+    logs: FeedbackRow[]
   ): Omit<MetricsResult, "userId" | "period"> {
     const boostCount = logs.filter((log) => log.signal === "boost").length;
     const suppressCount = logs.filter((log) => log.signal === "suppress").length;
@@ -227,8 +228,6 @@ export class MetricsService {
 
     const tp = logs.filter((log) => log.signal === "suppress").length; // System boost was correct
     const fp = logs.filter((log) => log.signal === "boost").length; // System boost but user rejected
-    const fn = 0; // Cannot determine negatives from this data structure
-
     const precision = tp + fp > 0 ? tp / (tp + fp) : null;
     const recall = tp > 0 ? tp / (tp + 1) : null; // Simplified: based on available data
     const f1Score =
@@ -254,7 +253,7 @@ export class MetricsService {
    */
   private static createMetricsResult(
     userId: string,
-    logs: IRankingFeedbackLog[],
+    logs: FeedbackRow[],
     startDate?: Date,
     endDate?: Date
   ): MetricsResult {
@@ -273,13 +272,13 @@ export class MetricsService {
    * Private: Group logs by time granularity
    */
   private static groupLogsByGranularity(
-    logs: IRankingFeedbackLog[],
+    logs: FeedbackRow[],
     granularity: "daily" | "weekly" | "monthly"
-  ): Map<string, IRankingFeedbackLog[]> {
-    const grouped = new Map<string, IRankingFeedbackLog[]>();
+  ): Map<string, FeedbackRow[]> {
+    const grouped = new Map<string, FeedbackRow[]>();
 
     logs.forEach((log) => {
-      const date = new Date(log.createdAt || new Date());
+      const date = new Date(log.created_at || Date.now());
       let key: string;
 
       if (granularity === "daily") {

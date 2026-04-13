@@ -44,3 +44,34 @@ export const LabelPriorityConfigModel = mongoose.model<ILabelPriorityConfig>(
   "LabelPriorityConfig",
   LabelPriorityConfigSchema
 );
+
+export const LabelPriorityConfig = {
+  async upsert(args: {
+    where: { userId_accountId: { userId: string; accountId: string } };
+    create: Record<string, any>;
+    update: Record<string, any>;
+  }) {
+    const composite = args.where.userId_accountId;
+    const existing = await LabelPriorityConfigModel.findOne({
+      userId: composite.userId,
+      accountId: composite.accountId,
+    });
+    if (!existing) {
+      return LabelPriorityConfigModel.create(args.create);
+    }
+    Object.assign(existing, args.update || {});
+    await existing.save();
+    return existing;
+  },
+  async update(args: {
+    where: { userId_accountId: { userId: string; accountId: string } };
+    data: Record<string, any>;
+  }) {
+    const composite = args.where.userId_accountId;
+    return LabelPriorityConfigModel.findOneAndUpdate(
+      { userId: composite.userId, accountId: composite.accountId },
+      { $set: args.data },
+      { new: true }
+    );
+  },
+};

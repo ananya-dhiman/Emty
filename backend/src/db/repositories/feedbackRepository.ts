@@ -117,3 +117,30 @@ export function findById(id: string): FeedbackRow | null {
   `);
   return (stmt.get(id) as FeedbackRow | undefined) || null;
 }
+
+export function findNotUsedInTraining(userId?: string, limit: number = 1000): FeedbackRow[] {
+  const db = getDb();
+  if (userId) {
+    return db
+      .prepare(
+        `
+        SELECT * FROM feedback
+        WHERE user_id = ? AND used_in_training = 0
+        ORDER BY created_at DESC
+        LIMIT ?
+        `
+      )
+      .all(userId, limit) as FeedbackRow[];
+  }
+
+  return db
+    .prepare(
+      `
+      SELECT * FROM feedback
+      WHERE used_in_training = 0
+      ORDER BY created_at DESC
+      LIMIT ?
+      `
+    )
+    .all(limit) as FeedbackRow[];
+}

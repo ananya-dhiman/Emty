@@ -70,3 +70,30 @@ export const UserIntentProfileModel = mongoose.model<IUserIntentProfile>(
   "UserIntentProfile",
   UserIntentProfileSchema
 );
+
+export const UserIntentProfile = {
+  async findUnique(args: { where: { userId: string }; select?: Record<string, boolean> }) {
+    const q = UserIntentProfileModel.findOne({ userId: args.where.userId });
+    if (args.select) {
+      const projection: Record<string, 1> = {};
+      for (const [k, v] of Object.entries(args.select)) {
+        if (v) projection[k] = 1;
+      }
+      q.select(projection);
+    }
+    return q.lean<IUserIntentProfile | null>();
+  },
+  async upsert(args: {
+    where: { userId: string };
+    create: Record<string, any>;
+    update: Record<string, any>;
+  }) {
+    const existing = await UserIntentProfileModel.findOne({ userId: args.where.userId });
+    if (!existing) {
+      return UserIntentProfileModel.create(args.create);
+    }
+    Object.assign(existing, args.update || {});
+    await existing.save();
+    return existing;
+  },
+};

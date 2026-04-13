@@ -10,7 +10,6 @@ import { google } from "googleapis";
 import crypto from "crypto";
 import {
   SyncCheckpoint,
-  ISyncCheckpoint,
   SyncProgressStage,
 } from "../model/SyncCheckpoint";
 import { ProcessedEmailLog } from "../model/ProcessedEmailLog";
@@ -130,7 +129,7 @@ export class IncrementalSyncService {
    * Determine which sync strategy to use
    * Returns: "historyId" | "timestamp" | "fullScan"
    */
-  private determineEmailSource(checkpoint: ISyncCheckpoint | null): EmailSource {
+  private determineEmailSource(checkpoint: any): EmailSource {
     if (checkpoint?.lastHistoryId) {
       return "historyId";
     }
@@ -437,6 +436,9 @@ export class IncrementalSyncService {
             syncState: "idle",
           },
         });
+        if (!checkpoint) {
+          throw new Error("Failed to initialize sync checkpoint");
+        }
       }
 
       // ===== STEP 2: Acquire Lock =====
