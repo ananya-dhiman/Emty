@@ -1,10 +1,10 @@
 import { Types } from "mongoose";
-import { ILabel, LabelModel } from "../model/Label";
-import { InsightModel } from "../model/Insight";
-import { EmailMessageModel } from "../model/EmailMessage";
+import { ILabel, Label } from "../model/Label";
+import { Insight } from "../model/Insight";
+import { EmailMessage } from "../model/EmailMessage";
 import {
   ILabelPriorityConfig,
-  LabelPriorityConfigModel,
+  LabelPriorityConfig,
 } from "../model/LabelPriorityConfig";
 import {
   SYSTEM_LABEL_DEFINITIONS,
@@ -31,14 +31,15 @@ const getActivePriorityLabels = async (
   userId: string,
   accountId: string
 ): Promise<ILabel[]> => {
-  return LabelModel.find({
-    userId,
-    accountId,
-    status: "active",
-    source: { $in: ["system", "user"] },
-  })
-    .sort({ createdAt: 1, name: 1 })
-    .exec();
+  return Label.findMany({
+    where: {
+      userId,
+      accountId,
+      status: "active",
+      source: { in: ["system", "user"] },
+    },
+    orderBy: [{ createdAt: "asc" }, { name: "asc" }],
+  });
 };
 
 const getObservedCounts = async (
@@ -54,7 +55,10 @@ const getObservedCounts = async (
     query.updatedAt = { $gte: cutoff };
   }
 
-  const insights = await InsightModel.find(query).select("labels").lean().exec();
+  const insights = await Insight.findMany({
+    where: query,
+    select: { labels: true },
+  });
   const counts = new Map<string, number>();
 
   for (const insight of insights) {
@@ -218,20 +222,21 @@ export const ensureLabelPriorityConfig = async (
   const activeLabels = await getActivePriorityLabels(userId, accountId);
   const priorities = await buildDefaultPriorities(userId, accountId, activeLabels);
   const now = new Date();
-  const config = await LabelPriorityConfigModel.findOneAndUpdate(
-    { userId, accountId },
-    {
-      $setOnInsert: {
-        userId,
-        accountId,
-        priorities,
-        isReviewedByUser: false,
-        initializedAt: now,
-        lastComputedAt: now,
-      },
+  const config = await LabelPriorityConfig.upsert({
+    where: { userId_accountId: { userId, accountId } },
+    create: {
+      userId,
+      accountId,
+      priorities,
+      isReviewedByUser: false,
+      initializedAt: now,
+      lastComputedAt: now,
     },
-    { upsert: true, new: true }
-  ).exec();
+    update: {
+      priorities,
+      lastComputedAt: now,
+    },
+  });
 
   if (!config) {
     throw new Error("Failed to initialize label priority config");
@@ -253,18 +258,24 @@ export const appendLabelToPriorityConfig = async (
     return;
   }
 
-  const label = await LabelModel.findById(labelId).exec();
+  const label = await Label.findUnique({ where: { id: labelId.toString() } });
   if (!label || label.status !== "active" || !["system", "user"].includes(label.source)) {
     return;
   }
 
   config.priorities.push({
-    labelId: label._id as Types.ObjectId,
+    labelId: label.id as any,
     labelNameSnapshot: label.name,
     rank: config.priorities.length + 1,
   });
   config.lastComputedAt = new Date();
-  await config.save();
+  await LabelPriorityConfig.update({
+    where: { userId_accountId: { userId: config.userId, accountId: config.accountId } },
+    data: {
+      priorities: config.priorities,
+      lastComputedAt: config.lastComputedAt,
+    },
+  });
 };
 
 export const getLabelPriorities = async (
@@ -600,20 +611,33 @@ export const getPriorityRanking = async (params: {
 
   const now = new Date();
   const accountObjectId = asObjectId(params.accountId);
-  const insights = await InsightModel.find({
-    userId: params.userId,
-    accountId: accountObjectId,
-    $or: [
-      { "state.relevance": "active" },
-      { state: null },
-      { "state.relevance": { $exists: false } },
-    ],
-  })
-    .select(
-      "gmailThreadId summary from labels importanceScore baseScore baseScoreBreakdown state createdAt updatedAt dates attachments checklist emails"
-    )
-    .lean()
-    .exec();
+  const insights = await Insight.findMany({
+    where: {
+      userId: params.userId,
+      accountId: accountObjectId.toString(),
+      OR: [
+        { "state.relevance": "active" },
+        { state: null },
+        { "state.relevance": { exists: false } },
+      ],
+    },
+    select: {
+      gmailThreadId: true,
+      summary: true,
+      from: true,
+      labels: true,
+      importanceScore: true,
+      baseScore: true,
+      baseScoreBreakdown: true,
+      state: true,
+      createdAt: true,
+      updatedAt: true,
+      dates: true,
+      attachments: true,
+      checklist: true,
+      emails: true,
+    },
+  });
 
   const scoredItems: PriorityRankingItem[] = [];
 
@@ -706,13 +730,18 @@ export const getPriorityRanking = async (params: {
     );
 
     if (missingSourceIds.length > 0) {
-      const fallbackEmails = await EmailMessageModel.find({
-        accountId: accountObjectId,
-        messageId: { $in: missingSourceIds },
-      })
-        .select("messageId from subject internalDate")
-        .lean()
-        .exec();
+      const fallbackEmails = await EmailMessage.findMany({
+        where: {
+          accountId: accountObjectId,
+          messageId: { in: missingSourceIds },
+        },
+        select: {
+          messageId: true,
+          from: true,
+          subject: true,
+          internalDate: true,
+        },
+      });
 
       for (const fallbackEmail of fallbackEmails) {
         const rawFrom = typeof fallbackEmail.from === "string" ? fallbackEmail.from : "";
@@ -863,16 +892,24 @@ export const getPriorityRanking = async (params: {
   const topPriority = remaining.slice(0, topPriorityCount);
   const topPrioritySet = new Set(topPriority.map((item) => item.insightId));
   const others = remaining.filter((item) => !topPrioritySet.has(item.insightId));
-  const lowPriorityEmails = await EmailMessageModel.find({
-    userId: params.userId,
-    accountId: accountObjectId,
-    score: { $ne: null, $lt: 0.4 },
-    aiProcessed: false,
-  })
-    .select("messageId threadId from subject internalDate score extractedFeatures")
-    .sort({ internalDate: -1 })
-    .lean()
-    .exec();
+  const lowPriorityEmails = await EmailMessage.findMany({
+    where: {
+      userId: params.userId,
+      accountId: accountObjectId,
+      score: { not: null, lt: 0.4 },
+      aiProcessed: false,
+    },
+    select: {
+      messageId: true,
+      threadId: true,
+      from: true,
+      subject: true,
+      internalDate: true,
+      score: true,
+      extractedFeatures: true,
+    },
+    orderBy: { internalDate: "desc" },
+  });
 
   return {
     actionRequired,

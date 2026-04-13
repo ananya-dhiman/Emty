@@ -1,4 +1,4 @@
-import { RankingFeedbackLogModel, IRankingFeedbackLog } from "../model/RankingFeedbackLog";
+import * as feedbackRepository from "../db/repositories/feedbackRepository";
 import logger from "../utils/logger";
 
 export interface MetricsResult {
@@ -65,21 +65,19 @@ export class MetricsService {
     source?: "ai_insight" | "pre_filter"
   ): Promise<MetricsResult> {
     try {
-      const query: any = { userId };
+      // Phase 1: Fetch all feedback for user from SQLite and filter in memory
+      // In future, add direct SQLite filtering for performance
+      const allFeedback = await feedbackRepository.findNotUsedInTraining(userId, 10000);
+      
+      let feedbackLogs = allFeedback.filter((f) => {
+        const created = new Date(f.created_at);
+        if (startDate && created < startDate) return false;
+        if (endDate && created > endDate) return false;
+        if (source && f.source !== source) return false;
+        return true;
+      });
 
-      // Add date range filter
-      if (startDate || endDate) {
-        query.createdAt = {};
-        if (startDate) query.createdAt.$gte = startDate;
-        if (endDate) query.createdAt.$lte = endDate;
-      }
-
-      // Add source filter
-      if (source) query.source = source;
-
-      const feedbackLogs = await RankingFeedbackLogModel.find(query).lean();
-
-      const metrics = this.calculateMetricsFromLogs(feedbackLogs);
+      const metrics = this.calculateMetricsFromLogs(feedbackLogs as any);
 
       return {
         userId,
@@ -103,28 +101,28 @@ export class MetricsService {
     endDate?: Date
   ): Promise<AggregateMetrics> {
     try {
-      const query: any = {};
-
-      if (startDate || endDate) {
-        query.createdAt = {};
-        if (startDate) query.createdAt.$gte = startDate;
-        if (endDate) query.createdAt.$lte = endDate;
-      }
-
-      const allLogs = await RankingFeedbackLogModel.find(query).lean();
+      // Phase 1: Fetch all feedback from SQLite and filter in memory
+      // In future, add direct SQLite filtering for performance
+      const allLogs = await feedbackRepository.findNotUsedInTraining(userId, 10000);
+      const filteredLogs = allLogs.filter((log) => {
+        const created = new Date(log.created_at);
+        if (startDate && created < startDate) return false;
+        if (endDate && created > endDate) return false;
+        return true;
+      });
 
       // Overall metrics
-      const overallMetrics = this.calculateMetricsFromLogs(allLogs);
+      const overallMetrics = this.calculateMetricsFromLogs(filteredLogs as any);
 
       // Metrics by source
-      const aiLogs = allLogs.filter((log) => log.source === "ai_insight");
-      const preLogs = allLogs.filter((log) => log.source === "pre_filter");
+      const aiLogs = filteredLogs.filter((log) => log.source === "ai_insight");
+      const preLogs = filteredLogs.filter((log) => log.source === "pre_filter");
 
       const aiMetrics = this.calculateMetricsFromLogs(aiLogs);
       const preMetrics = this.calculateMetricsFromLogs(preLogs);
 
       // Unique users
-      const uniqueUsers = new Set(allLogs.map((log) => log.userId)).size;
+      const uniqueUsers = new Set(filteredLogs.map((log) => log.user_id)).size;
 
       return {
         globalPrecision: overallMetrics.precision,
@@ -174,19 +172,16 @@ export class MetricsService {
     endDate?: Date
   ): Promise<Array<{ date: string; metrics: MetricsResult }>> {
     try {
-      const query: any = { userId };
+      // Phase 1: Fetch all feedback for user from SQLite
+      const allFeedback = await feedbackRepository.findNotUsedInTraining(userId, 10000);
+      const feedbackLogs = allFeedback.filter((log) => {
+        const created = new Date(log.created_at);
+        if (startDate && created < startDate) return false;
+        if (endDate && created > endDate) return false;
+        return true;
+      });
 
-      if (startDate || endDate) {
-        query.createdAt = {};
-        if (startDate) query.createdAt.$gte = startDate;
-        if (endDate) query.createdAt.$lte = endDate;
-      }
-
-      const feedbackLogs = await RankingFeedbackLogModel.find(query)
-        .sort({ createdAt: 1 })
-        .lean();
-
-      const groupedByDate = this.groupLogsByGranularity(feedbackLogs, granularity);
+      const groupedByDate = this.groupLogsByGranularity(feedbackLogs as any, granularity);
       const trend = Array.from(groupedByDate.entries()).map(
         ([dateKey, logs]) => ({
           date: dateKey,

@@ -15,6 +15,8 @@
   "type": "commonjs",
   "dependencies": {
     "@google/genai": "^1.42.0",
+    "@prisma/client": "^7.7.0",
+    "@prisma/migrate": "^7.7.0",
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.8.0",
     "cors": "^2.8.5",

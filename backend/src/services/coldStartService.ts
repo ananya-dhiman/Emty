@@ -1,5 +1,5 @@
-import { UserIntentProfileModel } from "../model/UserIntentProfile";
-import { EmailMessageModel } from "../model/EmailMessage";
+import { UserIntentProfile } from "../model/UserIntentProfile";
+import { EmailMessage } from "../model/EmailMessage";
 
 // Configurable limits — change here without a redeploy
 export const COLD_START_LIMIT_TEST = 10;
@@ -83,12 +83,13 @@ export async function extractColdStartFeatures(
   accountId: string,
   limit: number = COLD_START_LIMIT_TEST
 ): Promise<ColdStartResult> {
-  // Use EmailMessageModel instead of InsightModel since AI Insights aren't generated
+  // Use EmailMessage instead of InsightModel since AI Insights aren't generated
   // until AFTER onboarding in the new decoupled async pipeline.
-  const emails = await EmailMessageModel.find({ accountId })
-    .sort({ internalDate: -1 })
-    .limit(limit)
-    .lean();
+  const emails = await EmailMessage.findMany({
+    where: { accountId },
+    orderBy: { internalDate: "desc" },
+    take: limit,
+  });
 
   const allTokens: string[] = [];
   const domainFreq = new Map<string, number>();
@@ -138,9 +139,10 @@ export async function runAndPersistColdStart(
   limit: number = COLD_START_LIMIT_TEST
 ): Promise<ColdStartResult> {
   const result = await extractColdStartFeatures(userId, accountId, limit);
-  const existingProfile = await UserIntentProfileModel.findOne({ userId })
-    .select("includeKeywords preferredDomains")
-    .lean();
+  const existingProfile = await UserIntentProfile.findUnique({
+    where: { userId },
+    select: { includeKeywords: true, preferredDomains: true },
+  });
 
   const setPayload: Record<string, any> = {
     inferredLabels: result.inferredLabels,
@@ -154,13 +156,16 @@ export async function runAndPersistColdStart(
     setPayload.preferredDomains = result.inferredDomains;
   }
 
-  await UserIntentProfileModel.findOneAndUpdate(
-    { userId },
-    {
-      $set: setPayload,
+  await UserIntentProfile.upsert({
+    where: { userId },
+    create: {
+      userId,
+      ...setPayload,
     },
-    { upsert: true, new: true }
-  );
+    update: {
+      ...setPayload,
+    },
+  });
 
   return result;
 }

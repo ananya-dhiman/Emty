@@ -1,11 +1,11 @@
 import { Types } from "mongoose";
 import { google } from "googleapis";
-import { EmailMessageModel } from "../model/EmailMessage";
-import { SyncCheckpointModel } from "../model/SyncCheckpoint";
-import { GmailAccountModel } from "../model/GmailAccount";
-import { InsightModel } from "../model/Insight";
-import { ProcessedEmailLogModel } from "../model/ProcessedEmailLog";
+import { GmailAccount } from "../model/GmailAccount";
 import { createOAuthClient } from "../utils/createOAuth";
+import * as emailMessageRepository from "../db/repositories/emailMessageRepository";
+import * as insightRepository from "../db/repositories/insightRepository";
+import * as processedEmailLogRepository from "../db/repositories/processedEmailLogRepository";
+import * as syncCheckpointRepository from "../db/repositories/syncCheckpointRepository";
 import { refreshAccessToken } from "./gmailAuth";
 import { processEmailDeep } from "./emailProcessingService";
 import rulesEngine from "./rulesEngine";
@@ -58,7 +58,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
     logger.debug(`[AI WORKER] Started for account ${accountId}`);
 
     // ===== SETUP OAUTH AND GMAIL =====
-    const gmailAccount = await GmailAccountModel.findById(accountId);
+    const gmailAccount = await GmailAccount.findUnique({ where: { id: accountId } });
     if (!gmailAccount) {
         throw new Error("Gmail account not found");
     }
@@ -70,10 +70,10 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
     if (isExpired && gmailAccount.refreshToken) {
         const tokens = await refreshAccessToken(gmailAccount.emailAddress, oauth2Client);
         oauth2Client.setCredentials(tokens);
-        await GmailAccountModel.updateOne(
-            { _id: gmailAccount._id },
-            { $set: { accessToken: tokens.access_token, tokenExpiry: tokens.expiry_date } }
-        );
+        await GmailAccount.update({
+            where: { id: gmailAccount.id },
+            data: { accessToken: tokens.access_token, tokenExpiry: tokens.expiry_date }
+        });
     } else {
         oauth2Client.setCredentials({
             access_token: gmailAccount.accessToken,
@@ -94,49 +94,26 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         `[AI WORKER] Provider attempts: ${aiContext.attempts.map(a => `${a.provider}:${a.model}:${a.source}`).join(" -> ")}`
     );
 
-    await SyncCheckpointModel.updateOne(
-        { accountId: objectIdAccountId },
-        {
-            $set: {
-                aiFallbackCount: 0,
-                aiFallbackMessage: null,
-                aiFallbackAt: null,
-                quotaDateUtc: usageSnapshot.quotaDateUtc,
-                dailyQuotaLimit: usageSnapshot.dailyQuotaLimit,
-                dailyQuotaUsed: usageSnapshot.dailyQuotaUsed,
-                dailyQuotaRemaining: usageSnapshot.dailyQuotaRemaining,
-            }
-        }
-    );
+    // Initialize sync checkpoint if needed  
+    const syncCheckpoint = syncCheckpointRepository.findOrCreate(accountId);
 
     if (usageSnapshot.dailyQuotaRemaining <= 0) {
-        await SyncCheckpointModel.updateOne(
-            { accountId: objectIdAccountId },
-            {
-                $set: {
-                    progressMessage: `Daily AI quota reached (${usageSnapshot.dailyQuotaUsed}/${usageSnapshot.dailyQuotaLimit})`,
-                    lastProgressAt: new Date(),
-                }
-            }
-        );
-        await updateProgressComplete(objectIdAccountId);
+        await syncCheckpointRepository.updateProgress(accountId, {
+            progress_message: `Daily AI quota reached (${usageSnapshot.dailyQuotaUsed}/${usageSnapshot.dailyQuotaLimit})`,
+        });
+        await updateProgressComplete(accountId);
         return;
     }
 
     // Ensure we process only high-priority emails that are score-qualified.
-    const candidates = await EmailMessageModel.find({
-        accountId: objectIdAccountId,
-        priorityState: 'top',
-        aiProcessed: false,
-        score: { $gte: MIN_AI_SCORE },
-    }).sort({ score: -1, internalDate: -1 });
+    const candidates = await emailMessageRepository.findUnprocessed(accountId);
     logger.debug(
         `[AI WORKER] Candidate query applied | priority=top | aiProcessed=false | minScore=${MIN_AI_SCORE}`
     );
     
     if (candidates.length === 0) {
         logger.debug(`[AI WORKER] No top emails to process for account ${accountId}`);
-        await updateProgressComplete(objectIdAccountId);
+        await updateProgressComplete(accountId);
         return;
     }
 
@@ -160,20 +137,14 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
 
         // Update progress
         const ratio = processedCount / totalCount;
-        await SyncCheckpointModel.updateOne(
-            { accountId: objectIdAccountId },
-            {
-                $set: {
-                    progressPercent: 60 + Math.floor(ratio * 39), // from 60 to 99
-                    progressStage: "processing_emails",
-                    progressMessage: `Running AI insights on prioritized emails (${processedCount}/${totalCount})`,
-                    lastProgressAt: new Date()
-                }
-            }
-        );
+        await syncCheckpointRepository.updateProgress(accountId, {
+            progress_percent: 60 + Math.floor(ratio * 39), // from 60 to 99
+            progress_stage: "processing_emails",
+            progress_message: `Running AI insights on prioritized emails (${processedCount}/${totalCount})`,
+        });
 
         const promises = batch.map(async (email) => {
-            const messageId = email.messageId;
+            const messageId = email.message_id;
             try {
                 const consumed = await consumeDailyQuota(userId, dailyQuotaLimit);
                 if (!consumed) {
@@ -189,30 +160,22 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                     `[AI WORKER] Quota consumed for ${messageId} | used=${usageSnapshot.dailyQuotaUsed}/${usageSnapshot.dailyQuotaLimit} | remaining=${usageSnapshot.dailyQuotaRemaining}`
                 );
 
-                await SyncCheckpointModel.updateOne(
-                    { accountId: objectIdAccountId },
-                    {
-                        $set: {
-                            quotaDateUtc: usageSnapshot.quotaDateUtc,
-                            dailyQuotaLimit: usageSnapshot.dailyQuotaLimit,
-                            dailyQuotaUsed: usageSnapshot.dailyQuotaUsed,
-                            dailyQuotaRemaining: usageSnapshot.dailyQuotaRemaining,
-                            lastProgressAt: new Date(),
-                        }
-                    }
-                );
-
                 // Determine relevant labels based on features (rules engine fallback)
-                const relevantLabelsStringList = email.extractedFeatures || [];
+                let relevantLabelsStringList: string[] = [];
+                try {
+                    relevantLabelsStringList = JSON.parse(email.extracted_features || '[]');
+                } catch (e) {
+                    relevantLabelsStringList = [];
+                }
                 const relevantLabels = labelCandidates.filter(l => relevantLabelsStringList.includes(l.name));
                 
                 // Fetch full internal date string or default to unix epoch string
-                const internalDateStr = email.internalDate ? email.internalDate.getTime().toString() : Date.now().toString();
+                const internalDateStr = email.internal_date ? email.internal_date.toString() : Date.now().toString();
 
                 const deepResult = await processEmailDeep(
                     gmail,
                     messageId,
-                    email.threadId,
+                    email.thread_id,
                     internalDateStr,
                     {
                         from: email.from,
@@ -226,17 +189,6 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                         onFallback: async (notice) => {
                             logger.debug(
                                 `[AI WORKER] Fallback notice for ${messageId}: ${notice.fromProvider || "user-model"} -> ${notice.toProvider || "shared-model"}`
-                            );
-                            await SyncCheckpointModel.updateOne(
-                                { accountId: objectIdAccountId },
-                                {
-                                    $inc: { aiFallbackCount: 1 },
-                                    $set: {
-                                        aiFallbackMessage: `Fallback used: ${notice.fromProvider || "user-model"} -> ${notice.toProvider || "shared-model"}`,
-                                        aiFallbackAt: new Date(),
-                                        lastProgressAt: new Date(),
-                                    }
-                                }
                             );
                         }
                     }
@@ -252,7 +204,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                     userId,
                     accountId,
                     suggestionName: normalizedLabels.suggestedLabelName,
-                    threadId: email.threadId,
+                    threadId: email.thread_id,
                 });
 
                 const parsedImportanceScore = (deepResult.insights as any)?.importanceScore;
@@ -293,8 +245,8 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
 
                 const emailEntry: any = {
                     messageId,
-                    internalDate: email.internalDate || new Date(),
-                    from: deepResult.from,
+                    internalDate: new Date(email.internal_date),
+                    from: typeof deepResult.from === 'string' ? deepResult.from : deepResult.from?.email || 'unknown',
                     subject: deepResult.subject || email.subject,
                     snippet: email.snippet,
                     labels: normalizedLabels.assignedLabels.map((label: any) => ({
@@ -318,11 +270,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                     },
                 };
 
-                let insight = await InsightModel.findOne({
-                    userId,
-                    accountId: objectIdAccountId,
-                    gmailThreadId: email.threadId,
-                });
+                let insight = await insightRepository.findByThreadId(accountId, email.thread_id);
 
                 if (!insight) {
                     const baseScoreResult = computeBaseScore({
@@ -334,21 +282,26 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                         context: priorityScoringContext,
                     });
 
-                    const newInsight = new InsightModel({
-                        userId,
-                        accountId: objectIdAccountId,
-                        docType: "thread_insight",
-                        gmailThreadId: email.threadId,
-                        emailIds: [messageId],
-                        emails: [emailEntry],
-                        from: deepResult.from,
-                        labels: normalizedLabels.assignedLabels.map((label) => ({
+                    const fromEmail = typeof deepResult.from === 'string' ? deepResult.from : deepResult.from?.email || 'unknown';
+                    const fromName = typeof deepResult.from === 'object' ? deepResult.from?.name || null : null;
+                    const fromDomain = typeof deepResult.from === 'object' ? deepResult.from?.domain || null : null;
+                    
+                    const newInsight = await insightRepository.create({
+                        user_id: userId,
+                        account_id: accountId,
+                        gmail_thread_id: email.thread_id,
+                        email_ids: JSON.stringify([messageId]),
+                        emails: JSON.stringify([emailEntry]),
+                        from_email: fromEmail,
+                        from_name: fromName,
+                        from_domain: fromDomain,
+                        labels: JSON.stringify(normalizedLabels.assignedLabels.map((label) => ({
                             labelId: label._id,
                             name: label.name,
                             source: label.source,
                             statusSnapshot: label.status,
-                        })),
-                        labelSuggestions: suggestedLabel
+                        }))),
+                        label_suggestions: JSON.stringify(suggestedLabel
                             ? [
                                 {
                                     labelId: suggestedLabel._id,
@@ -362,120 +315,54 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                                     generatedAt: new Date(),
                                 },
                             ]
-                            : [],
-                        summary: {
-                            shortSnippet: deepResult.insights.shortSnippet,
-                            intent: deepResult.insights.intent,
-                        },
-                        importanceScore: boundedImportanceScore,
-                        dates: parsedDates.map((d: any) => ({
-                            type: d.type,
-                            date: d.date,
-                            sourceEmailId: messageId,
-                        })),
-                        attachments: emailEntry.attachments.map((a: any) => ({
-                            ...a,
-                            sourceEmailId: messageId,
-                        })),
-                        checklist: parsedChecklist.map((item: any) => ({
-                            ...item,
-                            sourceEmailId: messageId,
-                        })),
-                        extractedFacts: deepResult.insights.extractedFacts,
-                        baseScore: baseScoreResult.baseScore,
-                        baseScoreBreakdown: {
+                            : []),
+                        summary_snippet: deepResult.insights.shortSnippet,
+                        summary_intent: deepResult.insights.intent,
+                        importance_score: boundedImportanceScore || null,
+                        base_score: baseScoreResult.baseScore,
+                        base_score_breakdown: JSON.stringify({
                             importanceNorm: baseScoreResult.importanceNorm,
                             labelNorm: baseScoreResult.labelNorm,
                             matchedLabelRank: baseScoreResult.matchedLabelRank,
-                        },
-                        baseScoreComputedAt: new Date(),
-                        state: {
-                            relevance: "active",
-                            firstSeenAt: new Date(),
-                            lastSignalAt: new Date(),
-                            lastVerifiedAt: new Date(),
-                        },
+                        }),
+                        base_score_computed_at: Date.now(),
+                        dates: JSON.stringify(parsedDates.map((d: any) => ({
+                            type: d.type,
+                            date: d.date,
+                            sourceEmailId: messageId,
+                        }))),
+                        attachments: JSON.stringify(emailEntry.attachments.map((a: any) => ({
+                            ...a,
+                            sourceEmailId: messageId,
+                        }))),
+                        checklist: JSON.stringify(parsedChecklist.map((item: any) => ({
+                            ...item,
+                            sourceEmailId: messageId,
+                        }))),
+                        extracted_facts: JSON.stringify(deepResult.insights.extractedFacts),
+                        state_relevance: "active",
+                        state_first_seen_at: Date.now(),
+                        state_last_signal_at: Date.now(),
+                        state_last_verified_at: Date.now(),
+                        embedding: null,
+                        needs_review: 0,
+                        ai_confidence: null,
+                        ai_uncertainty_source: null,
+                        pipeline_stage_reached: "stage2",
                     });
-                    await newInsight.save();
                     insight = newInsight;
                 } else {
-                    const existingEmails = Array.isArray((insight as any).emails) ? [...(insight as any).emails] : [];
-                    const existingIndex = existingEmails.findIndex((e: any) => e?.messageId === messageId);
-                    if (existingIndex >= 0) {
-                        existingEmails[existingIndex] = {
-                            ...existingEmails[existingIndex],
-                            ...emailEntry,
-                        };
-                    } else {
-                        existingEmails.push(emailEntry);
-                    }
-
-                    existingEmails.sort((a: any, b: any) => {
-                        const aTime = new Date(a?.internalDate || 0).getTime();
-                        const bTime = new Date(b?.internalDate || 0).getTime();
-                        return aTime - bTime;
-                    });
-                    const boundedEmails = existingEmails.slice(-MAX_EMAILS_PER_THREAD);
-                    const latestEmail = boundedEmails[boundedEmails.length - 1] || emailEntry;
-
+                    // For Phase 1, we update the existing insight with new labels and thread signal
+                    // Complex email merging will be handled in Phase 2
                     const threadLabels = normalizedLabels.assignedLabels.map((label) => ({
                         labelId: label._id,
                         name: label.name,
                         source: label.source,
                         statusSnapshot: label.status,
                     }));
-                    const baseScoreResult = computeBaseScore({
-                        importanceScore:
-                            typeof latestEmail?.ai?.importanceScore === "number"
-                                ? latestEmail.ai.importanceScore
-                                : boundedImportanceScore,
-                        labels: threadLabels.map((label: any) => ({
-                            labelId: label.labelId,
-                            name: label.name,
-                        })),
-                        context: priorityScoringContext,
-                    });
-
-                    const flattenedDates = boundedEmails.flatMap((entry: any) =>
-                        (Array.isArray(entry?.dates) ? entry.dates : []).map((d: any) => ({
-                            type: d.type,
-                            date: d.date,
-                            sourceEmailId: entry.messageId,
-                        }))
-                    );
-                    const flattenedAttachments = boundedEmails.flatMap((entry: any) =>
-                        (Array.isArray(entry?.attachments) ? entry.attachments : []).map((a: any) => ({
-                            filename: a.filename,
-                            mimeType: a.mimeType,
-                            size: a.size,
-                            sourceEmailId: entry.messageId,
-                        }))
-                    );
-                    const checklistByKey = new Map<string, any>();
-                    for (const entry of boundedEmails) {
-                        const items = Array.isArray(entry?.checklist) ? entry.checklist : [];
-                        for (const item of items) {
-                            const task = typeof item?.task === "string" ? item.task.trim() : "";
-                            if (!task) continue;
-                            const dueDateIso = item?.dueDate ? new Date(item.dueDate).toISOString() : "";
-                            const key = `${task.toLowerCase()}|${dueDateIso}`;
-                            checklistByKey.set(key, {
-                                task,
-                                status: "pending",
-                                dueDate: item?.dueDate ? new Date(item.dueDate) : undefined,
-                                reason: typeof item?.reason === "string" ? item.reason : undefined,
-                                inferred: item?.inferred === true,
-                                sourceEmailId: entry.messageId,
-                            });
-                        }
-                    }
-
-                    insight.docType = "thread_insight";
-                    insight.emailIds = boundedEmails.map((entry: any) => entry.messageId);
-                    (insight as any).emails = boundedEmails;
-                    insight.from = latestEmail.from || insight.from;
-                    insight.labels = threadLabels;
-                    insight.labelSuggestions = suggestedLabel
+                    
+                    const threadLabelsJson = JSON.stringify(threadLabels);
+                    const suggestionsJson = JSON.stringify(suggestedLabel
                         ? [
                             {
                                 labelId: suggestedLabel._id,
@@ -489,56 +376,44 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                                 generatedAt: new Date(),
                             },
                         ]
-                        : [];
-                    insight.summary = {
-                        shortSnippet: latestEmail?.ai?.shortSnippet || insight.summary?.shortSnippet || "",
-                        intent: latestEmail?.ai?.intent || insight.summary?.intent || "information",
-                    };
-                    insight.importanceScore =
-                        typeof latestEmail?.ai?.importanceScore === "number"
-                            ? latestEmail.ai.importanceScore
-                            : insight.importanceScore;
-                    insight.dates = flattenedDates as any;
-                    insight.attachments = flattenedAttachments as any;
-                    insight.checklist = Array.from(checklistByKey.values()) as any;
-                    insight.extractedFacts = latestEmail?.extractedFacts || insight.extractedFacts;
-                    insight.baseScore = baseScoreResult.baseScore;
-                    insight.baseScoreBreakdown = {
-                        importanceNorm: baseScoreResult.importanceNorm,
-                        labelNorm: baseScoreResult.labelNorm,
-                        matchedLabelRank: baseScoreResult.matchedLabelRank,
-                    } as any;
-                    insight.baseScoreComputedAt = new Date();
-                    insight.state = {
-                        relevance: "active",
-                        firstSeenAt: insight.state?.firstSeenAt || new Date(),
-                        lastSignalAt: new Date(),
-                        lastVerifiedAt: new Date(),
-                    };
-                    await insight.save();
+                        : []);
+                    
+                    await insightRepository.updateLabels(
+                        insight.id,
+                        threadLabelsJson,
+                        suggestionsJson
+                    );
+                    
+                    await insightRepository.updateState(
+                        insight.id,
+                        {
+                            state_relevance: "active",
+                            state_last_signal_at: Date.now(),
+                            state_last_verified_at: Date.now(),
+                        }
+                    );
                 }
 
                 if (insight) {
                     // Update EmailMessage flag
-                    email.aiProcessed = true;
-                    await email.save();
+                    await emailMessageRepository.markProcessed(messageId);
                     logger.debug(`[AI WORKER] Email processed successfully ${messageId}`);
 
-                    // Clear any previous error states from ProcessedEmailLog (used for history)
-                    await ProcessedEmailLogModel.findOneAndUpdate(
-                        { accountId: objectIdAccountId, messageId },
-                        {
-                            insightId: insight._id,
-                            threadId: email.threadId,
-                            internalDate: email.internalDate ? email.internalDate.getTime().toString() : Date.now().toString(),
-                            processedAt: new Date(),
-                            retryCount: 0,
-                            lastRetryAt: null,
-                            lastErrorMessage: null,
-                            errorType: 'none',
-                        },
-                        { upsert: true }
-                    );
+                    // Create/update deduplication entry
+                    await processedEmailLogRepository.createOrUpdate({
+                        account_id: accountId,
+                        message_id: messageId,
+                        insight_id: insight.id,
+                        thread_id: email.thread_id,
+                        previous_state_hash: "",
+                        internal_date: email.internal_date || Date.now(),
+                        processed_at: Date.now(),
+                        retry_count: 0,
+                        last_retry_at: null,
+                        last_error_message: null,
+                        error_type: 'none',
+                        previous_labels: JSON.stringify([]),
+                    });
                 }
 
             } catch (err: any) {
@@ -546,20 +421,16 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                 
                 // Handle retries
                 const errorType = classifyError(err);
-                const existing = await ProcessedEmailLogModel.findOne({ accountId: objectIdAccountId, messageId });
-                const newRetryCount = (existing?.retryCount || 0) + 1;
+                const existing = await processedEmailLogRepository.findByMessageId(accountId, messageId);
+                const newRetryCount = (existing?.retry_count || 0) + 1;
                 const isPermanent = errorType === 'permanent' || newRetryCount >= MAX_RETRIES;
                 const finalErrorType = isPermanent ? 'permanent' : errorType;
 
-                await ProcessedEmailLogModel.findOneAndUpdate(
-                    { accountId: objectIdAccountId, messageId },
-                    {
-                        retryCount: newRetryCount,
-                        lastRetryAt: new Date(),
-                        lastErrorMessage: err.message || String(err),
-                        errorType: finalErrorType,
-                    },
-                    { upsert: true }
+                await processedEmailLogRepository.incrementRetry(
+                    accountId,
+                    messageId,
+                    err.message || String(err),
+                    finalErrorType
                 );
             }
         });
@@ -572,15 +443,9 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
 
         if (usageSnapshot.dailyQuotaRemaining <= 0) {
             logger.debug(`[AI WORKER] Daily quota reached for user ${userId}`);
-            await SyncCheckpointModel.updateOne(
-                { accountId: objectIdAccountId },
-                {
-                    $set: {
-                        progressMessage: `Daily AI quota reached (${usageSnapshot.dailyQuotaUsed}/${usageSnapshot.dailyQuotaLimit})`,
-                        lastProgressAt: new Date(),
-                    }
-                }
-            );
+            await syncCheckpointRepository.updateProgress(accountId, {
+                progress_message: `Daily AI quota reached (${usageSnapshot.dailyQuotaUsed}/${usageSnapshot.dailyQuotaLimit})`,
+            });
             break;
         }
 
@@ -593,24 +458,18 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
     }
 
     // Complete Progress Updates
-    await updateProgressComplete(objectIdAccountId);
+    await updateProgressComplete(accountId);
     logger.debug(`[AI WORKER] Completed processing for account ${accountId}`);
 };
 
-async function updateProgressComplete(accountId: Types.ObjectId) {
-    await SyncCheckpointModel.updateOne(
-        { accountId },
-        {
-            $set: {
-                progressPercent: 100,
-                progressStage: "completed",
-                progressMessage: "Sync complete",
-                lastProgressAt: new Date(),
-                syncState: "idle",
-                syncStartedAt: null,
-            }
-        }
-    );
+async function updateProgressComplete(accountId: string) {
+    await syncCheckpointRepository.updateProgress(accountId, {
+        progress_percent: 100,
+        progress_stage: "completed",
+        progress_message: "Sync complete",
+        processed_candidates: 0,
+    });
+    await syncCheckpointRepository.updateSyncState(accountId, "idle");
 }
 
 

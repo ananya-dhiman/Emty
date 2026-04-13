@@ -1,4 +1,4 @@
-import { GmailAccountModel } from "../model/GmailAccount";
+import { GmailAccount } from "../model/GmailAccount";
 
 
   interface Tokens {
@@ -58,7 +58,7 @@ export async function exchangeCodeForTokens(code:string,oauth2Client:any):Promis
 
 export async function refreshAccessToken(emailAddress: string, oauth2Client: any): Promise<any> {
     try {
-        const dets = await GmailAccountModel.findOne({ emailAddress });
+        const dets = await GmailAccount.findUnique({ where: { emailAddress } });
         if(!dets){
             throw new Error('No Gmail account found for the provided email address');
         }
@@ -73,9 +73,13 @@ export async function refreshAccessToken(emailAddress: string, oauth2Client: any
               const { credentials } = await oauth2Client.refreshAccessToken();
 
                 // 4. Persist new token
-                dets.accessToken = credentials.access_token!;
-                dets.tokenExpiry = credentials.expiry_date!;
-                await dets.save();
+                await GmailAccount.update({
+                  where: { id: dets.id },
+                  data: {
+                    accessToken: credentials.access_token!,
+                    tokenExpiry: credentials.expiry_date!,
+                  },
+                });
 
                 // 5. Return ready client
                 oauth2Client.setCredentials(credentials);

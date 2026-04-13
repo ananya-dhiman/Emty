@@ -1,4 +1,4 @@
-import { ILabel, LabelModel } from "../model/Label";
+import { ILabel, Label } from "../model/Label";
 import { Types } from "mongoose";
 import { canonicalizeLabelName } from "../utils/labelNormalization";
 
@@ -54,27 +54,29 @@ export const ensureSystemLabels = async (
 ): Promise<void> => {
   await Promise.all(
     SYSTEM_LABEL_DEFINITIONS.map((label) =>
-      LabelModel.updateOne(
-        {
-          userId,
-          accountId,
-          nameNormalized: normalizeLabelName(label.name),
-        },
-        {
-          $setOnInsert: {
+      Label.upsert({
+        where: {
+          userId_accountId_nameNormalized: {
             userId,
             accountId,
-            name: label.name,
             nameNormalized: normalizeLabelName(label.name),
           },
-          $set: {
-            description: label.description,
-            source: label.source,
-            status: "active",
-          },
         },
-        { upsert: true }
-      )
+        create: {
+          userId,
+          accountId,
+          name: label.name,
+          nameNormalized: normalizeLabelName(label.name),
+          description: label.description,
+          source: label.source,
+          status: "active",
+        },
+        update: {
+          description: label.description,
+          source: label.source,
+          status: "active",
+        },
+      })
     )
   );
 };
@@ -84,11 +86,13 @@ export const getAssignableLabels = async (
   accountId: string
 ): Promise<LabelCandidate[]> => {
   await ensureSystemLabels(userId, accountId);
-  const labels = await LabelModel.find({
-    userId,
-    accountId,
-    status: "active",
-    source: { $in: ["system", "user"] },
+  const labels = await Label.findMany({
+    where: {
+      userId,
+      accountId,
+      status: "active",
+      source: { in: ["system", "user"] },
+    },
   });
 
   return labels.map(toCandidate);
@@ -103,33 +107,39 @@ export const getVisibleLabels = async (
 
   if (status) {
     if (status === "suggested") {
-      return LabelModel.find({
-        userId,
-        accountId,
-        status,
-        source: "ai",
-        suggestionCount: { $gte: AI_LABEL_SUGGESTION_MIN_MATCHES },
-      }).sort({ suggestionCount: -1, updatedAt: -1 });
+      return Label.findMany({
+        where: {
+          userId,
+          accountId,
+          status,
+          source: "ai",
+          suggestionCount: { gte: AI_LABEL_SUGGESTION_MIN_MATCHES },
+        },
+        orderBy: [{ suggestionCount: "desc" }, { updatedAt: "desc" }],
+      });
     }
 
-    return LabelModel.find({ userId, accountId, status }).sort({
-      source: 1,
-      name: 1,
+    return Label.findMany({
+      where: { userId, accountId, status },
+      orderBy: [{ source: "asc" }, { name: "asc" }],
     });
   }
 
-  return LabelModel.find({
-    userId,
-    accountId,
-    $or: [
-      { status: "active" },
-      {
-        status: "suggested",
-        source: "ai",
-        suggestionCount: { $gte: AI_LABEL_SUGGESTION_MIN_MATCHES },
-      },
-    ],
-  }).sort({ status: 1, source: 1, name: 1 });
+  return Label.findMany({
+    where: {
+      userId,
+      accountId,
+      OR: [
+        { status: "active" },
+        {
+          status: "suggested",
+          source: "ai",
+          suggestionCount: { gte: AI_LABEL_SUGGESTION_MIN_MATCHES },
+        },
+      ],
+    },
+    orderBy: [{ status: "asc" }, { source: "asc" }, { name: "asc" }],
+  });
 };
 
 export const normalizeAIClassification = (
@@ -229,10 +239,14 @@ export const recordSuggestedLabel = async (params: {
     return null;
   }
 
-  const existing = await LabelModel.findOne({
-    userId: params.userId,
-    accountId: params.accountId,
-    nameNormalized,
+  const existing = await Label.findUnique({
+    where: {
+      userId_accountId_nameNormalized: {
+        userId: params.userId,
+        accountId: params.accountId,
+        nameNormalized,
+      },
+    },
   });
 
   if (existing?.status === "rejected") {
@@ -252,34 +266,38 @@ export const recordSuggestedLabel = async (params: {
     return existing;
   }
 
-  const update: Record<string, any> = {
-    $setOnInsert: {
-      userId: params.userId,
-      accountId: params.accountId,
-      name: rawName,
-      nameNormalized,
-      description: "",
-    },
-    $inc: { suggestionCount: 1 },
-    $set: {
-      source: "ai",
-      status: "suggested",
-      lastSuggestedAt: new Date(),
-    },
+  const baseData = {
+    userId: params.userId,
+    accountId: params.accountId,
+    name: rawName,
+    nameNormalized,
+    description: "",
+    source: "ai" as const,
+    status: "suggested" as const,
+    lastSuggestedAt: new Date(),
+    sampleThreadIds: params.threadId ? [params.threadId] : [],
   };
 
-  if (params.threadId) {
-    update.$addToSet = { sampleThreadIds: params.threadId };
-  }
-
-  return LabelModel.findOneAndUpdate(
-    {
-      userId: params.userId,
-      accountId: params.accountId,
-      nameNormalized,
-      status: { $ne: "rejected" },
+  return Label.upsert({
+    where: {
+      userId_accountId_nameNormalized: {
+        userId: params.userId,
+        accountId: params.accountId,
+        nameNormalized,
+      },
     },
-    update,
-    { upsert: true, new: true }
-  );
+    create: {
+      ...baseData,
+      suggestionCount: 1,
+    },
+    update: {
+      ...baseData,
+      suggestionCount: { increment: 1 },
+      ...(params.threadId && {
+        sampleThreadIds: {
+          push: params.threadId,
+        },
+      }),
+    },
+  });
 };

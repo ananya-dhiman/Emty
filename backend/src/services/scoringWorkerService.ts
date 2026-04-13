@@ -1,7 +1,8 @@
 import { Types } from "mongoose";
-import { EmailMessageModel } from "../model/EmailMessage";
-import { SyncCheckpointModel } from "../model/SyncCheckpoint";
-import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
+import { EmailMessage } from "../model/EmailMessage";
+import { SyncCheckpoint } from "../model/SyncCheckpoint";
+import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
+
 import logger from '../utils/logger';
 
 /**
@@ -16,15 +17,13 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
     logger.debug(`[SCORING] Worker started for account ${accountId}`);
     
     // Update progress
-    await SyncCheckpointModel.updateOne(
-        { accountId: objectIdAccountId },
+    await SyncCheckpoint.updateMany(
+        { where: { accountId: objectIdAccountId.toString() } },
         {
-            $set: {
-                progressPercent: 60,
-                progressStage: "scoring_emails",
-                progressMessage: "Evaluating priority of emails...",
-                lastProgressAt: new Date(),
-            }
+            progressPercent: 60,
+            progressStage: "scoring_emails",
+            progressMessage: "Evaluating priority of emails...",
+            lastProgressAt: new Date(),
         }
     );
 
@@ -35,7 +34,7 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
         });
 
         // Loop through all EmailMessage documents for this account
-        const emails = await EmailMessageModel.find({ accountId: objectIdAccountId });
+        const emails = await EmailMessage.findMany({ where: { accountId: objectIdAccountId.toString() } });
         
         logger.debug(`[SCORING] Found ${emails.length} emails to score`);
 
@@ -48,10 +47,13 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
                 context: priorityScoringContext,
             });
 
-            email.score = baseScoreResult.baseScore;
-            // Clear prior priority decisions to evaluate fresh
-            email.priorityState = 'pending';
-            await email.save();
+            await EmailMessage.update(
+                { where: { id: email.id } },
+                {
+                    score: baseScoreResult.baseScore,
+                    priorityState: 'pending',
+                }
+            );
             
             processed++;
             if (processed % 100 === 0) {
@@ -61,16 +63,18 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
 
         // Now, we need to pick the Top K (e.g., 50) and mark them as 'top', rest as 'low'
         const TOP_K = 50;
-        const allScored = await EmailMessageModel.find({ accountId: objectIdAccountId })
-            .sort({ score: -1, internalDate: -1 });
+        const allScored = await EmailMessage.findMany({
+            where: { accountId: objectIdAccountId.toString() },
+            orderBy: [{ score: "desc" }, { internalDate: "desc" }],
+        });
 
         let rank = 1;
         for (const item of allScored) {
             const newState = rank <= TOP_K ? 'top' : 'low';
             if (item.priorityState !== newState) {
-                await EmailMessageModel.updateOne(
-                    { _id: item._id },
-                    { $set: { priorityState: newState } }
+                await EmailMessage.update(
+                    { where: { id: item.id } },
+                    { priorityState: newState }
                 );
             }
             rank++;

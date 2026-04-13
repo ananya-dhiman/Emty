@@ -1,4 +1,4 @@
-import { UserModel } from "../model/User";
+import { User } from "../model/User";
 
 export type AIProvider = "gemini" | "openai";
 
@@ -75,7 +75,7 @@ export const maskKey = (raw?: string | null): string | null => {
 };
 
 export const resolveAIContextForUser = async (userId: string): Promise<AIResolvedContext> => {
-  const user = await UserModel.findOne({ firebaseId: userId });
+  const user = await User.findUnique({ where: { firebaseId: userId } });
   const settings = (user?.aiSettings || {}) as AIUserSettings;
   const preferredProvider = normalizeProvider(settings.preferredProvider);
 

@@ -1,4 +1,6 @@
-import { AIUsageDailyModel } from "../model/AIUsageDaily";
+// Phase 1: Quota tracking disabled for local SQLite storage
+// Ollama is local/free, no need to track quotas
+// Future phases will implement quota enforcement via local config if needed
 
 export const SHARED_DAILY_QUOTA = 40;
 export const BYOK_DAILY_QUOTA = 200;
@@ -15,60 +17,37 @@ export interface DailyUsageStatus {
   dailyQuotaRemaining: number;
 }
 
+/**
+ * Phase 1: Stub implementation - always returns unlimited quota
+ * Local Ollama doesn't require quota tracking
+ */
 export const getDailyUsageStatus = async (
   userId: string,
   quotaLimit: number
 ): Promise<DailyUsageStatus> => {
   const dateKey = getUtcDateKey();
-  const usage = await AIUsageDailyModel.findOne({ userId, dateKey });
-  const used = usage?.processedCount || 0;
   return {
     quotaDateUtc: dateKey,
     dailyQuotaLimit: quotaLimit,
-    dailyQuotaUsed: used,
-    dailyQuotaRemaining: Math.max(quotaLimit - used, 0),
+    dailyQuotaUsed: 0,
+    dailyQuotaRemaining: quotaLimit,
   };
 };
 
+/**
+ * Phase 1: Stub implementation - always returns success
+ * Local Ollama doesn't require quota tracking
+ */
 export const consumeDailyQuota = async (
   userId: string,
   quotaLimit: number
-): Promise<DailyUsageStatus | null> => {
+): Promise<DailyUsageStatus> => {
   const dateKey = getUtcDateKey();
-
-  await AIUsageDailyModel.updateOne(
-    { userId, dateKey },
-    {
-      $setOnInsert: {
-        userId,
-        dateKey,
-        processedCount: 0,
-        quotaLimit,
-      },
-    },
-    { upsert: true }
-  );
-
-  const updated = await AIUsageDailyModel.findOneAndUpdate(
-    { userId, dateKey, processedCount: { $lt: quotaLimit } },
-    {
-      $inc: { processedCount: 1 },
-      $set: {
-        quotaLimit,
-        lastUpdatedAt: new Date(),
-      },
-    },
-    { new: true }
-  );
-
-  if (!updated) return null;
-
-  const used = updated.processedCount || 0;
   return {
     quotaDateUtc: dateKey,
     dailyQuotaLimit: quotaLimit,
-    dailyQuotaUsed: used,
-    dailyQuotaRemaining: Math.max(quotaLimit - used, 0),
+    dailyQuotaUsed: 0,
+    dailyQuotaRemaining: quotaLimit,
   };
 };
 

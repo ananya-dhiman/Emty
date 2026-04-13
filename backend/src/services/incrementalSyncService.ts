@@ -9,16 +9,16 @@
 import { google } from "googleapis";
 import crypto from "crypto";
 import {
-  SyncCheckpointModel,
+  SyncCheckpoint,
   ISyncCheckpoint,
   SyncProgressStage,
 } from "../model/SyncCheckpoint";
-import { ProcessedEmailLogModel } from "../model/ProcessedEmailLog";
-import { GmailAccountModel } from "../model/GmailAccount";
-import { InsightModel } from "../model/Insight";
-import { LabelModel } from "../model/Label";
-import { EmailMessageModel } from "../model/EmailMessage";
-import { UserIntentProfileModel } from "../model/UserIntentProfile";
+import { ProcessedEmailLog } from "../model/ProcessedEmailLog";
+import { GmailAccount } from "../model/GmailAccount";
+import { Insight } from "../model/Insight";
+import { Label } from "../model/Label";
+import { EmailMessage } from "../model/EmailMessage";
+import { UserIntentProfile } from "../model/UserIntentProfile";
 import rulesEngine, { EmailMetadata } from "./rulesEngine";
 import { processEmailDeep } from "./emailProcessingService";
 import { refreshAccessToken } from "./gmailAuth";
@@ -30,7 +30,8 @@ import {
   normalizeAIClassification,
   recordSuggestedLabel,
 } from "./labelLifecycleService";
-import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
+import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
+
 import logger from '../utils/logger';
 
 const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT  ? parseInt(process.env.SYNC_LOCK_TIMEOUT): 3 * 60 * 1000;
@@ -104,11 +105,9 @@ export class IncrementalSyncService {
         progressUpdate.progressPercent
       );
     }
-    await SyncCheckpointModel.updateOne(
-      { accountId },
-      {
-        $set: progressUpdate,
-      }
+    await SyncCheckpoint.update(
+      { where: { accountId: String(accountId) } },
+      progressUpdate
     );
   }
 
@@ -295,9 +294,8 @@ export class IncrementalSyncService {
     messageId: string,
     currentStateHash: string
   ): Promise<boolean> {
-    const existing = await ProcessedEmailLogModel.findOne({
-      accountId,
-      messageId,
+    const existing = await ProcessedEmailLog.findUnique({
+      where: { accountId_messageId: { accountId, messageId } },
     });
 
     // New email: always process
@@ -341,37 +339,35 @@ export class IncrementalSyncService {
   private async acquireSyncLock(accountId: string): Promise<boolean> {
     // First, clean up stale locks (older than SYNC_LOCK_TIMEOUT)
     const staleThreshold = new Date(Date.now() - SYNC_LOCK_TIMEOUT);
-    await SyncCheckpointModel.updateMany(
-      {
+    await SyncCheckpoint.updateMany({
+      where: {
         accountId,
         syncState: "syncing",
-        syncStartedAt: { $lt: staleThreshold },
+        syncStartedAt: { lt: staleThreshold },
       },
-      { $set: { syncState: "idle", syncStartedAt: null } }
-    );
+      data: { syncState: "idle", syncStartedAt: null }
+    });
 
     // Attempt atomic update: only succeeds if current state is "idle"
-    const result = await SyncCheckpointModel.updateOne(
-      { accountId, syncState: "idle" },
-      {
-        $set: {
-          syncState: "syncing",
-          syncStartedAt: new Date(),
-          lastSyncError: null,
-          progressPercent: 2,
-          progressStage: "initializing",
-          progressMessage: "Initializing sync...",
-          totalCandidates: 0,
-          processedCandidates: 0,
-          aiFallbackCount: 0,
-          aiFallbackMessage: null,
-          aiFallbackAt: null,
-          lastProgressAt: new Date(),
-        },
-      }
-    );
+    const result = await SyncCheckpoint.updateMany({
+      where: { accountId, syncState: "idle" },
+      data: {
+        syncState: "syncing",
+        syncStartedAt: new Date(),
+        lastSyncError: null,
+        progressPercent: 2,
+        progressStage: "initializing",
+        progressMessage: "Initializing sync...",
+        totalCandidates: 0,
+        processedCandidates: 0,
+        aiFallbackCount: 0,
+        aiFallbackMessage: null,
+        aiFallbackAt: null,
+        lastProgressAt: new Date(),
+      },
+    });
 
-    return result.modifiedCount > 0;
+    return result.count > 0;
   }
 
   /**
@@ -407,11 +403,9 @@ export class IncrementalSyncService {
       setPayload.processedCandidates = stats.processed;
     }
 
-    await SyncCheckpointModel.updateOne(
-      { accountId },
-      {
-        $set: setPayload,
-      }
+    await SyncCheckpoint.update(
+      { where: { accountId } },
+      { data: setPayload }
     );
   }
 
@@ -433,13 +427,15 @@ export class IncrementalSyncService {
       // only created a checkpoint *after* trying to acquire the lock which
       // meant the first sync would always fail with "Another sync is already
       // running" and the document would never be created.
-      let checkpoint = await SyncCheckpointModel.findOne({
-        accountId: objectIdAccountId,
+      let checkpoint = await SyncCheckpoint.findUnique({
+        where: { accountId: String(objectIdAccountId) },
       });
       if (!checkpoint) {
-        checkpoint = await SyncCheckpointModel.create({
-          accountId: objectIdAccountId,
-          syncState: "idle",
+        checkpoint = await SyncCheckpoint.create({
+          data: {
+            accountId: String(objectIdAccountId),
+            syncState: "idle",
+          },
         });
       }
 
@@ -466,7 +462,9 @@ export class IncrementalSyncService {
       });
 
       // ===== STEP 3: Setup OAuth & Gmail API =====
-      const gmailAccount = await GmailAccountModel.findById(accountId);
+      const gmailAccount = await GmailAccount.findUnique({
+        where: { id: accountId },
+      });
       if (!gmailAccount) {
         throw new Error("Gmail account not found");
       }
@@ -487,15 +485,13 @@ export class IncrementalSyncService {
           oauth2Client
         );
         oauth2Client.setCredentials(tokens);
-        await GmailAccountModel.updateOne(
-          { _id: gmailAccount._id },
-          {
-            $set: {
-              accessToken: tokens.access_token,
-              tokenExpiry: tokens.expiry_date,
-            },
-          }
-        );
+        await GmailAccount.update({
+          where: { id: gmailAccount.id },
+          data: {
+            accessToken: tokens.access_token,
+            tokenExpiry: tokens.expiry_date,
+          },
+        });
       } else {
         oauth2Client.setCredentials({
           access_token: gmailAccount.accessToken,
@@ -664,28 +660,35 @@ export class IncrementalSyncService {
               labelCandidates
            );
 
-           await EmailMessageModel.findOneAndUpdate(
-             { accountId: objectIdAccountId, messageId: email.messageId },
-             {
-               $set: {
-                 userId: gmailAccount.userId,
-                 threadId: email.threadId,
-                 from: email.from,
-                 subject: email.subject,
-                 snippet: email.snippet,
-                 internalDate: new Date(parseInt(email.internalDate)),
-                 hasAttachments: email.hasAttachments,
-                 extractedFeatures: relevantLabels.map(l => l.name),
-               },
-               $setOnInsert: {
-                 score: null,
-                 aiProcessed: false,
-                 priorityState: 'pending',
-                 createdAt: new Date(),
-               }
+           await EmailMessage.upsert({
+             where: { accountId_messageId: { accountId: String(objectIdAccountId), messageId: email.messageId } },
+             update: {
+               userId: gmailAccount.userId,
+               threadId: email.threadId,
+               from: email.from,
+               subject: email.subject,
+               snippet: email.snippet,
+               internalDate: new Date(parseInt(email.internalDate)),
+               hasAttachments: email.hasAttachments,
+               extractedFeatures: relevantLabels.map(l => l.name),
              },
-             { upsert: true }
-           );
+             create: {
+               accountId: String(objectIdAccountId),
+               messageId: email.messageId,
+               userId: gmailAccount.userId,
+               threadId: email.threadId,
+               from: email.from,
+               subject: email.subject,
+               snippet: email.snippet,
+               internalDate: new Date(parseInt(email.internalDate)),
+               hasAttachments: email.hasAttachments,
+               extractedFeatures: relevantLabels.map(l => l.name),
+               score: null,
+               aiProcessed: false,
+               priorityState: 'pending',
+               createdAt: new Date(),
+             },
+           });
            
            succeeded++;
         } catch (error: any) {
