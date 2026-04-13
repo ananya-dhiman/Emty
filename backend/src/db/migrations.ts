@@ -27,7 +27,8 @@ export function runMigrations(db: Database.Database): void {
       logger.info("Applied migration v1: Create core tables");
     }
 
-    logger.info(`Database schema version: ${currentVersion + (currentVersion === 0 ? 1 : 0)}`);
+    const finalVersion = Math.max(currentVersion, 1);
+    logger.info(`Database schema version: ${finalVersion}`);
   } catch (error) {
     logger.info("Migration failed:", error);
     throw error;
@@ -141,6 +142,9 @@ function migration_v1(db: Database.Database): void {
       total_candidates INTEGER DEFAULT 0,
       processed_candidates INTEGER DEFAULT 0,
       last_progress_at INTEGER DEFAULT NULL,
+      ai_fallback_count INTEGER DEFAULT 0,
+      ai_fallback_message TEXT DEFAULT NULL,
+      ai_fallback_at INTEGER DEFAULT NULL,
       created_at INTEGER DEFAULT (unixepoch('now') * 1000),
       updated_at INTEGER DEFAULT (unixepoch('now') * 1000)
     );
@@ -228,3 +232,4 @@ function migration_v1(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_label_vectors_label ON label_vectors(label_id);
   `);
 }
+

@@ -1,7 +1,8 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/authMiddleware";
 import { GmailAccountModel } from "../model/GmailAccount";
-import { SyncCheckpointModel } from "../model/SyncCheckpoint";
+import { SyncCheckpointModel } from "../model/SyncCheckpoint";
+
 import logger from '../utils/logger';
 
 export const getSyncProgress = async (
@@ -44,10 +45,6 @@ export const getSyncProgress = async (
         aiFallbackCount: 0,
         aiFallbackMessage: "",
         aiFallbackAt: null,
-        quotaDateUtc: null,
-        dailyQuotaLimit: 0,
-        dailyQuotaUsed: 0,
-        dailyQuotaRemaining: 0,
         updatedAt: new Date().toISOString(),
       });
       return;
@@ -64,10 +61,6 @@ export const getSyncProgress = async (
         aiFallbackCount: checkpoint.aiFallbackCount ?? 0,
         aiFallbackMessage: checkpoint.aiFallbackMessage ?? "",
         aiFallbackAt: checkpoint.aiFallbackAt ? checkpoint.aiFallbackAt.toISOString() : null,
-        quotaDateUtc: checkpoint.quotaDateUtc ?? null,
-        dailyQuotaLimit: checkpoint.dailyQuotaLimit ?? 0,
-        dailyQuotaUsed: checkpoint.dailyQuotaUsed ?? 0,
-        dailyQuotaRemaining: checkpoint.dailyQuotaRemaining ?? 0,
         updatedAt: (
           checkpoint.lastProgressAt ||
           checkpoint.updatedAt ||

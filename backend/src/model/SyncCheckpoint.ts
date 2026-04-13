@@ -40,10 +40,6 @@ export interface ISyncCheckpoint extends Document {
   aiFallbackCount?: number;
   aiFallbackMessage?: string;
   aiFallbackAt?: Date;
-  quotaDateUtc?: string;
-  dailyQuotaLimit?: number;
-  dailyQuotaUsed?: number;
-  dailyQuotaRemaining?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -91,10 +87,6 @@ const SyncCheckpointSchema = new Schema<ISyncCheckpoint>(
     aiFallbackCount: { type: Number, default: 0 },
     aiFallbackMessage: { type: String, default: null },
     aiFallbackAt: { type: Date, default: null },
-    quotaDateUtc: { type: String, default: null },
-    dailyQuotaLimit: { type: Number, default: 0 },
-    dailyQuotaUsed: { type: Number, default: 0 },
-    dailyQuotaRemaining: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
@@ -135,6 +127,9 @@ const toCheckpointShape = (row: any) => ({
   progressMessage: row.progress_message || undefined,
   totalCandidates: row.total_candidates || 0,
   processedCandidates: row.processed_candidates || 0,
+  aiFallbackCount: row.ai_fallback_count || 0,
+  aiFallbackMessage: row.ai_fallback_message || undefined,
+  aiFallbackAt: typeof row.ai_fallback_at === "number" ? new Date(row.ai_fallback_at) : undefined,
   lastProgressAt: typeof row.last_progress_at === "number" ? new Date(row.last_progress_at) : undefined,
 });
 
@@ -156,6 +151,9 @@ const mapDataKeys = (data: Record<string, any>): { keys: string[]; values: any[]
     totalCandidates: "total_candidates",
     processedCandidates: "processed_candidates",
     lastProgressAt: "last_progress_at",
+    aiFallbackCount: "ai_fallback_count",
+    aiFallbackMessage: "ai_fallback_message",
+    aiFallbackAt: "ai_fallback_at",
   };
 
   for (const [k, v] of Object.entries(data || {})) {

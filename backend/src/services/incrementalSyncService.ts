@@ -404,7 +404,7 @@ export class IncrementalSyncService {
 
     await SyncCheckpoint.update(
       { where: { accountId } },
-      { data: setPayload }
+      setPayload
     );
   }
 
