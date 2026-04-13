@@ -5,3 +5,6 @@ node_modules
 # TypeScript
 type
 .env
+
+#Local database
+local.db
