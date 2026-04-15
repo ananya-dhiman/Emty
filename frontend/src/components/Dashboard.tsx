@@ -688,9 +688,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         if (progress?.aiFallbackCount > 0) {
           extraDetail = ` | Fallbacks: ${progress.aiFallbackCount}`;
         }
-        if (typeof progress?.dailyQuotaUsed === 'number' && typeof progress?.dailyQuotaLimit === 'number') {
-          extraDetail += ` | Daily AI: ${progress.dailyQuotaUsed}/${progress.dailyQuotaLimit}`;
-        }
       } catch {
         // non-blocking
       }

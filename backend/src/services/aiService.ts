@@ -1,10 +1,10 @@
-import { GoogleGenAI } from "@google/genai";
 import { inferActionIntelligence } from "./insightInference";
 import { AIResolvedContext, resolveAIContextForUser } from "./aiProviderService";
 import logger from '../utils/logger';
 
-const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
-const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+const OLLAMA_URL = process.env.OLLAMA_URL?.trim() || "http://127.0.0.1:11434";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL?.trim() || "llama2";
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY?.trim();
 
 export interface AIInsightExtraction {
   intent: "action_required" | "event" | "opportunity" | "information" | "waiting" | "noise";
@@ -255,35 +255,15 @@ const validateInsights = (insights: AIInsightExtraction): void => {
   if (!Array.isArray(insights.checklist)) insights.checklist = [];
 };
 
-const extractWithGemini = async (
+const extractWithOllama = async (
   prompt: string,
-  model: string,
-  apiKey: string
+  model: string
 ): Promise<AIInsightExtraction> => {
-  const genai = new GoogleGenAI({ apiKey });
-  const result = await genai.models.generateContent({
-    model,
-    contents: prompt,
-  });
-  const text = result.text;
-  if (!text) throw new Error("Gemini returned empty response");
-  const insights = parseAIResponse(text);
-  normalizeDates(insights);
-  normalizeLinksAndChecklist(insights);
-  validateInsights(insights);
-  return insights;
-};
-
-const extractWithOpenAI = async (
-  prompt: string,
-  model: string,
-  apiKey: string
-): Promise<AIInsightExtraction> => {
-  const response = await fetch(OPENAI_API_URL, {
+  const response = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
+      ...(OLLAMA_API_KEY ? { Authorization: `Bearer ${OLLAMA_API_KEY}` } : {}),
     },
     body: JSON.stringify({
       model,
@@ -295,48 +275,13 @@ const extractWithOpenAI = async (
 
   if (!response.ok) {
     const txt = await response.text();
-    throw new Error(`OpenAI API error: ${response.status} ${txt.slice(0, 500)}`);
-  }
-
-  const data: any = await response.json();
-  const extractedText: string | undefined = data?.choices?.[0]?.message?.content;
-  if (!extractedText) throw new Error("No content in OpenAI response");
-
-  const insights = parseAIResponse(extractedText);
-  normalizeDates(insights);
-  normalizeLinksAndChecklist(insights);
-  validateInsights(insights);
-  return insights;
-};
-
-const extractWithOpenRouter = async (
-  prompt: string,
-  model: string,
-  apiKey: string
-): Promise<AIInsightExtraction> => {
-  const response = await fetch(OPENROUTER_API_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: model || "openrouter/auto",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.3,
-      max_tokens: 1000,
-    }),
-  });
-
-  if (!response.ok) {
-    const txt = await response.text();
-    throw new Error(`OpenRouter API error: ${response.status} ${txt.slice(0, 500)}`);
+    throw new Error(`Ollama API error: ${response.status} ${txt.slice(0, 500)}`);
   }
 
   const data: any = await response.json();
   const extractedText: string | undefined =
-    data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text;
-  if (!extractedText) throw new Error("No content in OpenRouter response");
+    data?.choices?.[0]?.message?.content || data?.choices?.[0]?.content || data?.output?.[0]?.content;
+  if (!extractedText) throw new Error("No content in Ollama response");
 
   const insights = parseAIResponse(extractedText);
   normalizeDates(insights);
@@ -349,13 +294,7 @@ const runAttempt = async (
   attempt: AIResolvedContext["attempts"][number],
   prompt: string
 ): Promise<AIInsightExtraction> => {
-  if (attempt.transport === "gemini") {
-    return extractWithGemini(prompt, attempt.model, attempt.apiKey);
-  }
-  if (attempt.transport === "openrouter") {
-    return extractWithOpenRouter(prompt, attempt.model, attempt.apiKey);
-  }
-  return extractWithOpenAI(prompt, attempt.model, attempt.apiKey);
+  return extractWithOllama(prompt, attempt.model);
 };
 
 export const extractInsightsFromEmail = async (
@@ -397,19 +336,6 @@ export const extractInsightsFromEmail = async (
       logger.debug(
         `[AI] Attempt success provider=${attempt.provider} model=${attempt.model} source=${attempt.source}`
       );
-      if (attempt.source === "shared" && firstFailure && options.onFallback) {
-        logger.debug(
-          `[AI] Fallback triggered from ${firstFailure.provider}:${firstFailure.model} to ${attempt.provider}:${attempt.model}`
-        );
-        await options.onFallback({
-          usedSharedFallback: true,
-          reason: firstFailure.message,
-          fromProvider: firstFailure.provider,
-          fromModel: firstFailure.model,
-          toProvider: attempt.provider,
-          toModel: attempt.model,
-        });
-      }
       const enriched = applyInferenceFallback(result, emailContent);
       logger.debug(`[AI] Extraction completed successfully`);
       return enriched;

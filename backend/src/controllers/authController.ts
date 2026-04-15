@@ -4,29 +4,13 @@ import { UserModel } from '../model/User';
 import { GmailAccountModel } from '../model/GmailAccount';
 import admin from '../config/firebase';
 import mongoose from 'mongoose';
-import { getDailyQuotaLimit, getDailyUsageStatus } from '../services/aiUsageService';
-import { maskKey } from '../services/aiProviderService';
 import logger from '../utils/logger';
 
-const buildAiSettingsResponse = async (user: any) => {
-    const geminiKey = user?.aiSettings?.geminiApiKey || '';
-    const openaiKey = user?.aiSettings?.openaiApiKey || '';
-    const hasGeminiKey = Boolean(geminiKey);
-    const hasOpenaiKey = Boolean(openaiKey);
-    const hasByok = hasGeminiKey || hasOpenaiKey;
-    const quotaLimit = getDailyQuotaLimit(hasByok);
-    const usage = await getDailyUsageStatus(user.firebaseId, quotaLimit);
-
-    return {
-        hasGeminiKey,
-        hasOpenaiKey,
-        geminiKeyMasked: maskKey(geminiKey),
-        openaiKeyMasked: maskKey(openaiKey),
-        preferredProvider: user?.aiSettings?.preferredProvider || 'gemini',
-        preferredModel: user?.aiSettings?.preferredModel || null,
-        ...usage,
-    };
-};
+const buildAiSettingsResponse = async (_user: any) => ({
+    provider: 'ollama',
+    model: process.env.OLLAMA_MODEL || 'llama2',
+    ollamaUrl: process.env.OLLAMA_URL || 'http://127.0.0.1:11434',
+});
 
 /**
  * Authentication Controller
@@ -224,33 +208,7 @@ export const updateAiSettings = async (req: AuthRequest, res: Response): Promise
             return;
         }
 
-        const { geminiApiKey, openaiApiKey, preferredProvider, preferredModel } = req.body || {};
-        const updatePayload: any = {};
-
-        if (geminiApiKey !== undefined) {
-            updatePayload['aiSettings.geminiApiKey'] = String(geminiApiKey || '').trim() || null;
-        }
-        if (openaiApiKey !== undefined) {
-            updatePayload['aiSettings.openaiApiKey'] = String(openaiApiKey || '').trim() || null;
-        }
-        if (preferredProvider !== undefined) {
-            updatePayload['aiSettings.preferredProvider'] = preferredProvider === 'openai' ? 'openai' : 'gemini';
-        }
-        if (preferredModel !== undefined) {
-            updatePayload['aiSettings.preferredModel'] = String(preferredModel || '').trim() || null;
-        }
-
-        let user = null;
-        if (Object.keys(updatePayload).length === 0) {
-            user = await UserModel.findOne({ firebaseId: req.user.uid });
-        } else {
-            user = await UserModel.findOneAndUpdate(
-                { firebaseId: req.user.uid },
-                { $set: updatePayload },
-                { new: true }
-            );
-        }
-
+        const user = await UserModel.findOne({ firebaseId: req.user.uid });
         if (!user) {
             res.status(404).json({ success: false, message: 'User not found' });
             return;
@@ -258,7 +216,6 @@ export const updateAiSettings = async (req: AuthRequest, res: Response): Promise
 
         res.status(200).json({
             success: true,
-            message: 'AI settings updated',
             ai: await buildAiSettingsResponse(user),
         });
     } catch (error: any) {

@@ -17,14 +17,13 @@ import {
     AI_LABEL_SUGGESTION_MIN_MATCHES 
 } from "./labelLifecycleService";
 import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
-import { getDailyQuotaLimit, getDailyUsageStatus, consumeDailyQuota } from "./aiUsageService";
 import { resolveAIContextForUser } from "./aiProviderService";
 import logger from '../utils/logger';
 
 /**
  * AI Processing Worker Service
  * Runs asynchronously after the scoring worker.
- * Processes the top K emails using OpenRouter AI.
+ * Processes the top K emails using the local Ollama model.
  * Strict concurrency management via batching.
  */
 
@@ -85,10 +84,8 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
     const aiContext = await resolveAIContextForUser(userId);
-    const dailyQuotaLimit = getDailyQuotaLimit(aiContext.hasByokKey);
-    let usageSnapshot = await getDailyUsageStatus(userId, dailyQuotaLimit);
     logger.debug(
-        `[AI WORKER] AI context resolved | byok=${aiContext.hasByokKey} | dailyQuota=${dailyQuotaLimit} | remaining=${usageSnapshot.dailyQuotaRemaining}`
+        `[AI WORKER] AI context resolved | provider=${aiContext.preferredProvider} | attempts=${aiContext.attempts.length}`
     );
     logger.debug(
         `[AI WORKER] Provider attempts: ${aiContext.attempts.map(a => `${a.provider}:${a.model}:${a.source}`).join(" -> ")}`
@@ -96,14 +93,6 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
 
     // Initialize sync checkpoint if needed  
     const syncCheckpoint = syncCheckpointRepository.findOrCreate(accountId);
-
-    if (usageSnapshot.dailyQuotaRemaining <= 0) {
-        await syncCheckpointRepository.updateProgress(accountId, {
-            progress_message: `Daily AI quota reached (${usageSnapshot.dailyQuotaUsed}/${usageSnapshot.dailyQuotaLimit})`,
-        });
-        await updateProgressComplete(accountId);
-        return;
-    }
 
     // Ensure we process only high-priority emails that are score-qualified.
     const candidates = await emailMessageRepository.findUnprocessed(accountId);
@@ -146,20 +135,6 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         const promises = batch.map(async (email) => {
             const messageId = email.message_id;
             try {
-                const consumed = await consumeDailyQuota(userId, dailyQuotaLimit);
-                if (!consumed) {
-                    logger.debug(`[AI WORKER] Daily quota exhausted while processing account ${accountId}`);
-                    usageSnapshot = {
-                        ...usageSnapshot,
-                        dailyQuotaRemaining: 0,
-                    };
-                    return;
-                }
-                usageSnapshot = consumed;
-                logger.debug(
-                    `[AI WORKER] Quota consumed for ${messageId} | used=${usageSnapshot.dailyQuotaUsed}/${usageSnapshot.dailyQuotaLimit} | remaining=${usageSnapshot.dailyQuotaRemaining}`
-                );
-
                 // Determine relevant labels based on features (rules engine fallback)
                 let relevantLabelsStringList: string[] = [];
                 try {
@@ -441,16 +416,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         }
         processedCount += batch.length;
 
-        if (usageSnapshot.dailyQuotaRemaining <= 0) {
-            logger.debug(`[AI WORKER] Daily quota reached for user ${userId}`);
-            await syncCheckpointRepository.updateProgress(accountId, {
-                progress_message: `Daily AI quota reached (${usageSnapshot.dailyQuotaUsed}/${usageSnapshot.dailyQuotaLimit})`,
-            });
-            break;
-        }
-
-        // RATE LIMIT BUFFER: OpenRouter free models limit to 20 requests/min.
-        // If there are more batches left to process, wait 4 seconds to avoid 429s.
+        // RATE LIMIT BUFFER: If more batches remain, wait briefly to avoid model throttle.
         if (i + BATCH_SIZE < totalCount) {
           logger.debug(`[AI WORKER] Email complete. Sleeping 4s to respect rate limits...`);
           await new Promise(resolve => setTimeout(resolve, 4000));

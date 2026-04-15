@@ -1,5 +1,5 @@
 import express from 'express';
-import { getAiSettings, loginOrRegister, logout, updateAiSettings, verifyTokenEndpoint } from '../controllers/authController';
+import { loginOrRegister, logout, verifyTokenEndpoint } from '../controllers/authController';
 import { initiateGoogleOAuth, store_credentials, fetchUserEmails } from '../controllers/gmailAuthController';
 import { verifyToken } from '../middleware/authMiddleware';
 
@@ -20,8 +20,6 @@ router.post('/logout', logout);
 // GET /api/auth/verify - Verify token and get user data
 // Headers: Authorization: Bearer <firebase-token>
 router.get('/verify', verifyToken, verifyTokenEndpoint);
-router.get('/ai-settings', verifyToken, getAiSettings);
-router.put('/ai-settings', verifyToken, updateAiSettings);
 
 /**
  * ========================================
