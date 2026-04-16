@@ -86,6 +86,13 @@ export class RulesEngine {
       }
     }
 
+    // Explicit User Intent Bypass: Do not apply heuristic exclusions if domain is whitelisted
+    if (preferences?.preferredDomains?.length) {
+      if (preferences.preferredDomains.some(d => domain.includes(d.toLowerCase()))) {
+        return false;
+      }
+    }
+
     // Exclude no-reply emails
     if (
       from.toLowerCase().includes("no-reply@") ||
@@ -148,7 +155,7 @@ export class RulesEngine {
     const text = `${subject} ${snippet}`.toLowerCase();
 
     if (preferences?.preferredDomains && preferences.preferredDomains.some(d => domain.includes(d.toLowerCase()))) {
-      baseScore += 15;
+      baseScore += 40; // Heavily weight user intent so it easily clears 0.3 threshold
     }
     if (preferences?.includeKeywords && preferences.includeKeywords.some(kw => text.includes(kw.toLowerCase()))) {
       baseScore += 10;
