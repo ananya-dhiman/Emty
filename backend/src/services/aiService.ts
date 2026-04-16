@@ -121,9 +121,9 @@ ${emailContent.body.substring(0, 2000)}
 Extract and return a JSON object with:
 1. intent: One of 'action_required', 'event', 'opportunity', 'information', 'waiting', 'noise'
 2. shortSnippet: A 1-2 sentence summary of the email (max 150 chars)
-3. labels: Array of 0-3 labels. Use ONLY labels from the provided label candidates when they genuinely fit. Return an empty array if none fit. Highly consider the Pre-ranked candidates.
+3. labels: Array of 0-3 labels. Use ONLY labels from the provided label candidates when they genuinely fit. Return an empty array if none fit.
 4. suggestedLabel: Optional short label name if the email clearly belongs to a repeated category not covered by the provided candidates. Otherwise return null.
-5. labelMode: "existing" if you strictly used one of the pre-ranked candidates, "new" if you strongly suggest a new label.
+5. labelMode: "existing" if you strictly used one of the provided candidates, "new" if you strongly suggest a new label.
 6. confidence: Your confidence in the label assignment and insights from 0.0 to 1.0.
 7. labelReason: A short internal reason for why you chose the labels and mode.
 8. dates: Array of important dates with type ('deadline', 'event', 'followup') and ISO date string

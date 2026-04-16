@@ -140,45 +140,17 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         const promises = batch.map(async (email) => {
             const messageId = email.message_id;
             try {
-                // --- STAGE 2: PRE-FETCH BODY & GENERATE EMBEDDING ---
+                // --- STAGE 2: PRE-FETCH BODY ---
                 let parsedBodyResult: { body: string; payload: any; headers: any[] } | undefined;
-                let rankedCandidates: Array<{ labelId: string; labelName: string; score: number; labelMode: 'existing' | 'new' }> = [];
                 
                 try {
                     parsedBodyResult = await fetchFullEmailBody(gmail, messageId);
-                    const textToEmbed = `${email.subject}\n${parsedBodyResult.body}`.substring(0, 8000); // safety cap
-                    
-                    const embedding = await generateEmbedding(textToEmbed);
-                    emailMessageRepository.updateEmbedding(messageId, JSON.stringify(embedding), 'nomic-embed-text');
-
-                    const labelVectors = labelVectorRepository.findAll().map(lv => ({
-                        labelId: lv.label_id,
-                        labelName: lv.label_name,
-                        embedding: JSON.parse(lv.embedding)
-                    }));
-                    
-                    rankedCandidates = rankLabelsForEmail(embedding, labelVectors).slice(0, 5); // take top 5
-                    
-                    // Save Stage 2 Candidates
-                    labelCandidateRepository.deleteByEmailId(messageId);
-                    rankedCandidates.forEach(cand => {
-                        labelCandidateRepository.create({
-                            email_id: messageId,
-                            label_id: cand.labelId,
-                            label_name: cand.labelName,
-                            similarity_score: cand.score,
-                            label_mode: cand.labelMode,
-                            stage2_processed_at: Date.now()
-                        });
-                    });
                 } catch (stage2Err) {
-                    logger.info(`[AI WORKER] Stage 2 (Embedding) failed for ${messageId}, falling back...`, stage2Err);
+                    logger.info(`[AI WORKER] Pre-fetch body failed for ${messageId}, falling back...`, stage2Err);
                 }
 
-                // Determine relevant labels passing fallback + Stage 2
-                const relevantLabels = rankedCandidates.length > 0 
-                  ? rankedCandidates.map(c => ({ name: c.labelName, description: `Similarity: ${(c.score * 100).toFixed(1)}%` }))
-                  : rulesEngine.getRelevantLabels(`${email.subject}\n${email.snippet}`, labelCandidates);
+                // Determine relevant labels: Bypass embeddings and give all assignable labels to LLM directly
+                const relevantLabels = labelCandidates;
 
                 // Fetch full internal date string or default to unix epoch string
                 const internalDateStr = email.internal_date ? email.internal_date.toString() : Date.now().toString();
@@ -198,7 +170,6 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                         userId,
                         aiContext,
                         prefetchedBody: parsedBodyResult,
-                        stage2Candidates: rankedCandidates.map(r => ({ name: r.labelName, similarityScore: r.score, labelMode: r.labelMode })),
                         onFallback: async (notice) => {
                             logger.debug(
                                 `[AI WORKER] Fallback notice for ${messageId}: ${notice.fromProvider || "user-model"} -> ${notice.toProvider || "shared-model"}`
