@@ -32,6 +32,9 @@ export interface InsightRow {
   ai_confidence: number | null;
   ai_uncertainty_source: string | null;
   pipeline_stage_reached: string | null;
+  verification_status: string;
+  failed_verification_groups: string;
+  source: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -47,8 +50,8 @@ export function create(data: Omit<InsightRow, "id" | "created_at" | "updated_at"
       labels, label_suggestions, importance_score, base_score, base_score_breakdown, base_score_computed_at,
       summary_snippet, summary_intent, dates, attachments, checklist, state_relevance, state_first_seen_at,
       state_last_signal_at, state_last_verified_at, extracted_facts, embedding, needs_review, ai_confidence,
-      ai_uncertainty_source, pipeline_stage_reached, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ai_uncertainty_source, pipeline_stage_reached, verification_status, failed_verification_groups, source, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -82,6 +85,9 @@ export function create(data: Omit<InsightRow, "id" | "created_at" | "updated_at"
     data.ai_confidence,
     data.ai_uncertainty_source,
     data.pipeline_stage_reached,
+    data.verification_status || 'pending',
+    data.failed_verification_groups || '[]',
+    data.source,
     now,
     now
   );
@@ -187,4 +193,29 @@ export function getByIntent(accountId: string, intent: string): InsightRow[] {
     WHERE account_id = ? AND summary_intent = ?
   `);
   return stmt.all(accountId, intent) as InsightRow[];
+}
+
+export function updateVerificationStatus(
+  insightId: string,
+  verificationStatus: string,
+  failedGroups: string,
+  source: string | null
+): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE insights
+    SET verification_status = ?, failed_verification_groups = ?, source = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(verificationStatus, failedGroups, source, Date.now(), insightId);
+}
+
+export function updateSource(insightId: string, source: string): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE insights
+    SET source = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(source, Date.now(), insightId);
 }

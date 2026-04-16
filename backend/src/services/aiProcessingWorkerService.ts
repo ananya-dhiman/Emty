@@ -6,8 +6,12 @@ import * as emailMessageRepository from "../db/repositories/emailMessageReposito
 import * as insightRepository from "../db/repositories/insightRepository";
 import * as processedEmailLogRepository from "../db/repositories/processedEmailLogRepository";
 import * as syncCheckpointRepository from "../db/repositories/syncCheckpointRepository";
+import * as labelVectorRepository from "../db/repositories/labelVectorRepository";
+import * as labelCandidateRepository from "../db/repositories/labelCandidateRepository";
 import { refreshAccessToken } from "./gmailAuth";
 import { processEmailDeep } from "./emailProcessingService";
+import { fetchFullEmailBody } from "./emailBodyService";
+import { generateEmbedding, rankLabelsForEmail } from "./embeddingService";
 import rulesEngine from "./rulesEngine";
 import classifyError from "./errorClassifier";
 import { 
@@ -18,6 +22,7 @@ import {
 } from "./labelLifecycleService";
 import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
 import { resolveAIContextForUser } from "./aiProviderService";
+import { verifyInsights } from "./verificationService";
 import logger from '../utils/logger';
 
 /**
@@ -129,21 +134,52 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         await syncCheckpointRepository.updateProgress(accountId, {
             progress_percent: 60 + Math.floor(ratio * 39), // from 60 to 99
             progress_stage: "processing_emails",
-            progress_message: `Running AI insights on prioritized emails (${processedCount}/${totalCount})`,
+            progress_message: `Running 4-Stage AI Pipeline on emails (${processedCount}/${totalCount})`,
         });
 
         const promises = batch.map(async (email) => {
             const messageId = email.message_id;
             try {
-                // Determine relevant labels based on features (rules engine fallback)
-                let relevantLabelsStringList: string[] = [];
-                try {
-                    relevantLabelsStringList = JSON.parse(email.extracted_features || '[]');
-                } catch (e) {
-                    relevantLabelsStringList = [];
-                }
-                const relevantLabels = labelCandidates.filter(l => relevantLabelsStringList.includes(l.name));
+                // --- STAGE 2: PRE-FETCH BODY & GENERATE EMBEDDING ---
+                let parsedBodyResult: { body: string; payload: any; headers: any[] } | undefined;
+                let rankedCandidates: Array<{ labelId: string; labelName: string; score: number; labelMode: 'existing' | 'new' }> = [];
                 
+                try {
+                    parsedBodyResult = await fetchFullEmailBody(gmail, messageId);
+                    const textToEmbed = `${email.subject}\n${parsedBodyResult.body}`.substring(0, 8000); // safety cap
+                    
+                    const embedding = await generateEmbedding(textToEmbed);
+                    emailMessageRepository.updateEmbedding(messageId, JSON.stringify(embedding), 'nomic-embed-text');
+
+                    const labelVectors = labelVectorRepository.findAll().map(lv => ({
+                        labelId: lv.label_id,
+                        labelName: lv.label_name,
+                        embedding: JSON.parse(lv.embedding)
+                    }));
+                    
+                    rankedCandidates = rankLabelsForEmail(embedding, labelVectors).slice(0, 5); // take top 5
+                    
+                    // Save Stage 2 Candidates
+                    labelCandidateRepository.deleteByEmailId(messageId);
+                    rankedCandidates.forEach(cand => {
+                        labelCandidateRepository.create({
+                            email_id: messageId,
+                            label_id: cand.labelId,
+                            label_name: cand.labelName,
+                            similarity_score: cand.score,
+                            label_mode: cand.labelMode,
+                            stage2_processed_at: Date.now()
+                        });
+                    });
+                } catch (stage2Err) {
+                    logger.info(`[AI WORKER] Stage 2 (Embedding) failed for ${messageId}, falling back...`, stage2Err);
+                }
+
+                // Determine relevant labels passing fallback + Stage 2
+                const relevantLabels = rankedCandidates.length > 0 
+                  ? rankedCandidates.map(c => ({ name: c.labelName, description: `Similarity: ${(c.score * 100).toFixed(1)}%` }))
+                  : rulesEngine.getRelevantLabels(`${email.subject}\n${email.snippet}`, labelCandidates);
+
                 // Fetch full internal date string or default to unix epoch string
                 const internalDateStr = email.internal_date ? email.internal_date.toString() : Date.now().toString();
 
@@ -157,10 +193,12 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                         subject: email.subject,
                         snippet: email.snippet,
                     },
-                    relevantLabels.length ? relevantLabels : rulesEngine.getRelevantLabels(`${email.subject}\n${email.snippet}`, labelCandidates),
+                    relevantLabels,
                     {
                         userId,
                         aiContext,
+                        prefetchedBody: parsedBodyResult,
+                        stage2Candidates: rankedCandidates.map(r => ({ name: r.labelName, similarityScore: r.score, labelMode: r.labelMode })),
                         onFallback: async (notice) => {
                             logger.debug(
                                 `[AI WORKER] Fallback notice for ${messageId}: ${notice.fromProvider || "user-model"} -> ${notice.toProvider || "shared-model"}`
@@ -168,6 +206,10 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                         }
                     }
                 );
+
+                // --- STAGE 4: Verification (CoVe) ---
+                const verification = verifyInsights(parsedBodyResult?.body || email.snippet, deepResult.insights);
+                deepResult.insights = verification.correctedInsights || deepResult.insights;
 
                 // Upsert Insight
                 const normalizedLabels = normalizeAIClassification(
@@ -321,9 +363,12 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                         state_last_verified_at: Date.now(),
                         embedding: null,
                         needs_review: 0,
-                        ai_confidence: null,
-                        ai_uncertainty_source: null,
-                        pipeline_stage_reached: "stage2",
+                        ai_confidence: deepResult.confidence ?? null,
+                        ai_uncertainty_source: deepResult.labelReason ?? null,
+                        pipeline_stage_reached: "stage4",
+                        verification_status: verification.status,
+                        failed_verification_groups: JSON.stringify(verification.failedGroups),
+                        source: 'ai'
                     });
                     insight = newInsight;
                 } else {
@@ -366,6 +411,13 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                             state_last_signal_at: Date.now(),
                             state_last_verified_at: Date.now(),
                         }
+                    );
+
+                    await insightRepository.updateVerificationStatus(
+                        insight.id,
+                        verification.status,
+                        JSON.stringify(verification.failedGroups),
+                        'ai'
                     );
                 }
 

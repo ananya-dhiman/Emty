@@ -17,6 +17,7 @@ export interface EmailMessageRow {
   ai_processed: number;
   priority_state: string;
   embedding: string | null;
+  embedding_model: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -30,8 +31,8 @@ export function create(data: Omit<EmailMessageRow, "id" | "created_at" | "update
     INSERT INTO email_messages (
       id, user_id, account_id, message_id, thread_id, "from", subject, snippet,
       internal_date, has_attachments, extracted_features, score, ai_processed,
-      priority_state, embedding, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      priority_state, embedding, embedding_model, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -50,6 +51,7 @@ export function create(data: Omit<EmailMessageRow, "id" | "created_at" | "update
     data.ai_processed,
     data.priority_state,
     data.embedding,
+    data.embedding_model,
     now,
     now
   );
@@ -111,12 +113,12 @@ export function markProcessed(messageId: string): void {
   stmt.run(Date.now(), messageId);
 }
 
-export function updateEmbedding(messageId: string, embedding: string): void {
+export function updateEmbedding(messageId: string, embedding: string, embeddingModel: string): void {
   const db = getDb();
   const stmt = db.prepare(`
     UPDATE email_messages
-    SET embedding = ?, updated_at = ?
+    SET embedding = ?, embedding_model = ?, updated_at = ?
     WHERE id = ?
   `);
-  stmt.run(embedding, Date.now(), messageId);
+  stmt.run(embedding, embeddingModel, Date.now(), messageId);
 }

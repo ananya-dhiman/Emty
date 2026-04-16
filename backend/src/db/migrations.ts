@@ -73,6 +73,7 @@ function migration_v1(db: Database.Database): void {
       ai_processed INTEGER DEFAULT 0,
       priority_state TEXT DEFAULT 'pending',
       embedding TEXT DEFAULT NULL,
+      embedding_model TEXT DEFAULT NULL,
       created_at INTEGER DEFAULT (unixepoch('now') * 1000),
       updated_at INTEGER DEFAULT (unixepoch('now') * 1000),
       UNIQUE(account_id, message_id)
@@ -114,6 +115,9 @@ function migration_v1(db: Database.Database): void {
       ai_confidence REAL DEFAULT NULL,
       ai_uncertainty_source TEXT DEFAULT NULL,
       pipeline_stage_reached TEXT DEFAULT NULL,
+      verification_status TEXT DEFAULT 'pending',
+      failed_verification_groups TEXT DEFAULT '[]',
+      source TEXT DEFAULT NULL,
       created_at INTEGER DEFAULT (unixepoch('now') * 1000),
       updated_at INTEGER DEFAULT (unixepoch('now') * 1000)
     );
@@ -221,10 +225,28 @@ function migration_v1(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS label_vectors (
       id TEXT PRIMARY KEY,
       label_id TEXT NOT NULL UNIQUE,
+      label_name TEXT DEFAULT '',
       embedding TEXT NOT NULL,
+      embedding_model TEXT DEFAULT NULL,
       updated_at INTEGER DEFAULT (unixepoch('now') * 1000)
     );
 
     CREATE INDEX IF NOT EXISTS idx_label_vectors_label ON label_vectors(label_id);
+
+    CREATE TABLE IF NOT EXISTS label_candidates (
+      id TEXT PRIMARY KEY,
+      email_id TEXT NOT NULL,
+      label_id TEXT NOT NULL,
+      label_name TEXT NOT NULL,
+      similarity_score REAL NOT NULL,
+      label_mode TEXT DEFAULT 'existing',
+      stage2_processed_at INTEGER DEFAULT NULL,
+      created_at INTEGER DEFAULT (unixepoch('now') * 1000),
+      updated_at INTEGER DEFAULT (unixepoch('now') * 1000)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_lc_email ON label_candidates(email_id);
+    CREATE INDEX IF NOT EXISTS idx_lc_label ON label_candidates(label_id);
+    CREATE INDEX IF NOT EXISTS idx_lc_score ON label_candidates(similarity_score);
   `);
 }

@@ -1,6 +1,8 @@
 import { ILabel, Label } from "../model/Label";
 import { Types } from "mongoose";
 import { canonicalizeLabelName } from "../utils/labelNormalization";
+import { generateEmbedding } from "./embeddingService";
+import * as labelVectorRepository from "../db/repositories/labelVectorRepository";
 
 export const AI_LABEL_SUGGESTION_MIN_MATCHES = Number(
   process.env.AI_LABEL_SUGGESTION_MIN_MATCHES || 5
@@ -48,13 +50,33 @@ const toCandidate = (label: ILabel): LabelCandidate => ({
   suggestionCount: label.suggestionCount || 0,
 });
 
+export const generateAndStoreLabelVector = async (
+  labelId: string,
+  labelName: string,
+  description: string
+): Promise<void> => {
+  try {
+    const textToEmbed = `${labelName} ${description}`.trim();
+    const embedding = await generateEmbedding(textToEmbed);
+    labelVectorRepository.upsert(
+      labelId,
+      JSON.stringify(embedding),
+      labelName,
+      'nomic-embed-text'
+    );
+  } catch (error) {
+    // We log and swallow the error to not block label creation
+    console.error(`Failed to generate/store label vector for ${labelName}:`, error);
+  }
+};
+
 export const ensureSystemLabels = async (
   userId: string,
   accountId: string
 ): Promise<void> => {
   await Promise.all(
-    SYSTEM_LABEL_DEFINITIONS.map((label) =>
-      Label.upsert({
+    SYSTEM_LABEL_DEFINITIONS.map(async (label) => {
+      const result = await Label.upsert({
         where: {
           userId_accountId_nameNormalized: {
             userId,
@@ -76,8 +98,15 @@ export const ensureSystemLabels = async (
           source: label.source,
           status: "active",
         },
-      })
-    )
+      });
+      if (result && result._id) {
+        await generateAndStoreLabelVector(
+          (result._id as Types.ObjectId).toString(),
+          result.name,
+          result.description || ""
+        );
+      }
+    })
   );
 };
 
@@ -278,7 +307,7 @@ export const recordSuggestedLabel = async (params: {
     sampleThreadIds: params.threadId ? [params.threadId] : [],
   };
 
-  return Label.upsert({
+  const result = await Label.upsert({
     where: {
       userId_accountId_nameNormalized: {
         userId: params.userId,
@@ -300,4 +329,14 @@ export const recordSuggestedLabel = async (params: {
       }),
     },
   });
+
+  if (result && result._id && ((result.suggestionCount || 0) >= AI_LABEL_SUGGESTION_MIN_MATCHES)) {
+    await generateAndStoreLabelVector(
+      (result._id as Types.ObjectId).toString(),
+      result.name,
+      result.description || ""
+    );
+  }
+
+  return result;
 };

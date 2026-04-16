@@ -31,6 +31,9 @@ export interface AIInsightExtraction {
     reason?: string;
     inferred?: boolean;
   }>;
+  labelMode?: 'existing' | 'new';
+  confidence?: number;
+  labelReason?: string;
 }
 
 export interface AIFallbackNotice {
@@ -45,6 +48,7 @@ export interface AIFallbackNotice {
 export interface ExtractInsightOptions {
   userId?: string;
   context?: AIResolvedContext;
+  stage2Candidates?: Array<{ name: string; similarityScore: number; labelMode: string }>;
   onFallback?: (notice: AIFallbackNotice) => Promise<void> | void;
 }
 
@@ -87,12 +91,20 @@ const buildPrompt = (emailContent: {
   body: string;
   internalDate?: string;
   relevantLabels?: Array<{ name: string; description?: string }>;
+  stage2Candidates?: Array<{ name: string; similarityScore: number; labelMode: string }>;
 }): string => {
-  const candidates = emailContent.relevantLabels?.length
-    ? emailContent.relevantLabels
+  let candidatesText = "- Needs Action: Emails that require a response, deadline, or task\n- Finance: Bills, transactions, payments";
+  
+  if (emailContent.stage2Candidates?.length) {
+    candidatesText = "Pre-ranked Vector Similarity Candidates (highly recommended):\n" + 
+      emailContent.stage2Candidates
+        .map(c => `- ${c.name} (Similarity: ${(c.similarityScore * 100).toFixed(1)}%, Mode: ${c.labelMode})`)
+        .join("\n");
+  } else if (emailContent.relevantLabels?.length) {
+    candidatesText = emailContent.relevantLabels
         .map((l) => `- ${l.name}: ${l.description || "No description"}`)
-        .join("\n")
-    : "- Needs Action: Emails that require a response, deadline, or task\n- Finance: Bills, transactions, payments";
+        .join("\n");
+  }
 
   return `You are an email insight extraction AI. Analyze the following email and extract structured insights.
 
@@ -101,7 +113,7 @@ Subject: ${emailContent.subject}
 Date: ${emailContent.internalDate || "Unknown"}
 
 Label candidates:
-${candidates}
+${candidatesText}
 
 Body:
 ${emailContent.body.substring(0, 2000)}
@@ -109,13 +121,16 @@ ${emailContent.body.substring(0, 2000)}
 Extract and return a JSON object with:
 1. intent: One of 'action_required', 'event', 'opportunity', 'information', 'waiting', 'noise'
 2. shortSnippet: A 1-2 sentence summary of the email (max 150 chars)
-3. labels: Array of 0-3 labels. Use ONLY labels from the provided label candidates when they genuinely fit. Return an empty array if none fit.
+3. labels: Array of 0-3 labels. Use ONLY labels from the provided label candidates when they genuinely fit. Return an empty array if none fit. Highly consider the Pre-ranked candidates.
 4. suggestedLabel: Optional short label name if the email clearly belongs to a repeated category not covered by the provided candidates. Otherwise return null.
-5. dates: Array of important dates with type ('deadline', 'event', 'followup') and ISO date string
-6. extractedFacts: Object with any important facts
-7. importanceScore: A number from 0.0 to 1.0
-8. importantLinks: Array of important URLs with optional label/reason.
-9. checklist: Array of actionable tasks with shape { task, status, dueDate?, reason? }. Keep status as "pending".
+5. labelMode: "existing" if you strictly used one of the pre-ranked candidates, "new" if you strongly suggest a new label.
+6. confidence: Your confidence in the label assignment and insights from 0.0 to 1.0.
+7. labelReason: A short internal reason for why you chose the labels and mode.
+8. dates: Array of important dates with type ('deadline', 'event', 'followup') and ISO date string
+9. extractedFacts: Object with any important facts
+10. importanceScore: A number from 0.0 to 1.0
+11. importantLinks: Array of important URLs with optional label/reason.
+12. checklist: Array of actionable tasks with shape { task, status, dueDate?, reason? }. Keep status as "pending".
 
 Return ONLY valid JSON, no markdown code blocks.`;
 };
@@ -307,7 +322,7 @@ export const extractInsightsFromEmail = async (
   },
   options: ExtractInsightOptions = {}
 ): Promise<AIInsightExtraction> => {
-  const prompt = buildPrompt(emailContent);
+  const prompt = buildPrompt({ ...emailContent, stage2Candidates: options.stage2Candidates });
   const context =
     options.context || (options.userId ? await resolveAIContextForUser(options.userId) : null);
 

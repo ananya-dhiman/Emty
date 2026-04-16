@@ -644,6 +644,16 @@ export class IncrementalSyncService {
       let failed = 0;
       const totalToProcess = emailsToProcess.length;
 
+      const profile = await UserIntentProfile.findUnique({
+        where: { userId: gmailAccount.userId },
+      });
+      const preferences = {
+        includeKeywords: profile?.includeKeywords || [],
+        preferredDomains: profile?.preferredDomains || [],
+        excludeKeywords: profile?.excludeKeywords || [],
+        blockedDomains: profile?.blockedDomains || [],
+      };
+
       for (const email of emailsToProcess) {
         processed++;
         if (totalToProcess > 0 && (processed % 5 === 0 || processed === totalToProcess)) {
@@ -657,6 +667,13 @@ export class IncrementalSyncService {
            });
         }
         try {
+           const filterResult = rulesEngine.shouldProcessEmail(email, preferences);
+           
+           if (!filterResult.process) {
+             logger.debug(`[SYNC] Stage 1 skip: ${email.messageId} - ${filterResult.reason}`);
+             continue; // Skip staging this email
+           }
+
            const relevantLabels = rulesEngine.getRelevantLabels(
               `${email.subject}\n${email.snippet}`,
               labelCandidates

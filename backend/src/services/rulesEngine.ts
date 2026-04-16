@@ -127,6 +127,59 @@ export class RulesEngine {
   }
 
   /**
+   * Compute normalized relevance score for an email (0.0-1.0)
+   * Wraps computeRelevanceScore and incorporates user preferences
+   */
+  scoreEmailMetadata(
+    metadata: EmailMetadata,
+    preferences?: UserPreferences
+  ): { score: number; excluded: boolean; exclusionReason?: string } {
+    if (this.isExcluded(metadata, preferences)) {
+      return { score: 0, excluded: true, exclusionReason: 'Matched exclusion rules' };
+    }
+
+    let baseScore = this.computeRelevanceScore(metadata); // 0-100
+
+    // Add preference boosts
+    const { from, subject, snippet } = metadata;
+    const domainMatch = from.match(/@([^>]+)/);
+    let domain = domainMatch ? domainMatch[1].toLowerCase() : "";
+    domain = domain.replace(/^["']|["']$/g, '').trim();
+    const text = `${subject} ${snippet}`.toLowerCase();
+
+    if (preferences?.preferredDomains && preferences.preferredDomains.some(d => domain.includes(d.toLowerCase()))) {
+      baseScore += 15;
+    }
+    if (preferences?.includeKeywords && preferences.includeKeywords.some(kw => text.includes(kw.toLowerCase()))) {
+      baseScore += 10;
+    }
+
+    const normalizedScore = Math.min(baseScore / 100, 1.0);
+
+    return { score: normalizedScore, excluded: false };
+  }
+
+  /**
+   * Determine if an email should be processed and staged
+   */
+  shouldProcessEmail(
+    metadata: EmailMetadata,
+    preferences?: UserPreferences
+  ): { process: boolean; score: number; reason: string } {
+    const { score, excluded, exclusionReason } = this.scoreEmailMetadata(metadata, preferences);
+
+    if (excluded) {
+      return { process: false, score: 0, reason: exclusionReason || 'Excluded' };
+    }
+
+    if (score < 0.3) {
+      return { process: false, score, reason: 'Below relevance threshold (0.3)' };
+    }
+
+    return { process: true, score, reason: 'Passed rules filter' };
+  }
+
+  /**
    * Compute relevance score for an email (0-100, for future use)
    * Currently simple, can be extended with ML scoring
    */

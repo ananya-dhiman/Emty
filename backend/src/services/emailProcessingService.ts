@@ -4,7 +4,7 @@
  */
 
 import { google } from 'googleapis';
-import { htmlToText } from 'html-to-text';
+import { fetchFullEmailBody, extractEmailBody, extractAttachmentMetadata } from './emailBodyService';
 import { extractInsightsFromEmail, AIInsightExtraction, AIParsingError } from './aiService';
 import { AIResolvedContext } from './aiProviderService';
 import logger from '../utils/logger';
@@ -26,103 +26,10 @@ export interface ProcessedEmailInsight {
         size: number;
         messageId: string;
     }>;
+    labelMode?: 'existing' | 'new';
+    confidence?: number;
+    labelReason?: string;
 }
-
-/**
- * Extract email body from Gmail message payload
- */
-const extractEmailBody = (payload: any): string => {
-    const extractTextFromParts = (parts: any[]): string => {
-        const textPart = parts.find(p => p.mimeType === 'text/plain');
-        if (textPart?.body?.data) {
-            return Buffer.from(textPart.body.data, 'base64').toString('utf-8');
-        }
-
-        const htmlPart = parts.find(p => p.mimeType === 'text/html');
-        if (htmlPart?.body?.data) {
-            const htmlContent = Buffer.from(htmlPart.body.data, 'base64').toString('utf-8');
-            return htmlToText(htmlContent, {
-                wordwrap: false,
-                selectors: [
-                    { selector: 'a', options: { linkBrackets: false, hideLinkHrefIfSameAsText: true } },
-                    { selector: 'img', format: 'skip' },
-                    { selector: 'script', format: 'skip' },
-                    { selector: 'style', format: 'skip' },
-                ],
-            });
-        }
-
-        for (const part of parts) {
-            if (part.parts) {
-                const nestedText = extractTextFromParts(part.parts);
-                if (nestedText) return nestedText;
-            }
-        }
-
-        return '';
-    };
-
-    if (payload?.parts) {
-        return extractTextFromParts(payload.parts);
-    }
-
-    if (payload?.body?.data) {
-        const rawBody = Buffer.from(payload.body.data, 'base64').toString('utf-8');
-        if (rawBody.includes('<') && rawBody.includes('>')) {
-            return htmlToText(rawBody, {
-                wordwrap: false,
-                selectors: [
-                    { selector: 'a', options: { linkBrackets: false, hideLinkHrefIfSameAsText: true } },
-                    { selector: 'img', format: 'skip' },
-                    { selector: 'script', format: 'skip' },
-                    { selector: 'style', format: 'skip' },
-                ],
-            });
-        }
-        return rawBody;
-    }
-
-    return '';
-};
-
-/**
- * Extract attachment metadata from Gmail message payload
- */
-const extractAttachmentMetadata = (payload: any, messageId: string): Array<{
-    filename: string;
-    mimeType: string;
-    size: number;
-    messageId: string;
-}> => {
-    const attachments: Array<{
-        filename: string;
-        mimeType: string;
-        size: number;
-        messageId: string;
-    }> = [];
-
-    const processPayloadParts = (parts: any[]) => {
-        for (const part of parts) {
-            if (part.filename && part.filename.trim() !== '') {
-                attachments.push({
-                    filename: part.filename,
-                    mimeType: part.mimeType || 'application/octet-stream',
-                    size: parseInt(part.size) || 0,
-                    messageId,
-                });
-            }
-            if (part.parts) {
-                processPayloadParts(part.parts);
-            }
-        }
-    };
-
-    if (payload?.parts) {
-        processPayloadParts(payload.parts);
-    }
-
-    return attachments;
-};
 
 /**
  * Parse email address from "Name <email@domain.com>" format
@@ -158,6 +65,8 @@ export const processEmailDeep = async (
     options: {
         userId?: string;
         aiContext?: AIResolvedContext;
+        stage2Candidates?: Array<{ name: string; similarityScore: number; labelMode: string }>;
+        prefetchedBody?: { body: string; payload: any; headers: any[] };
         onFallback?: (notice: {
             usedSharedFallback: boolean;
             reason: string;
@@ -169,20 +78,26 @@ export const processEmailDeep = async (
     } = {}
 ): Promise<ProcessedEmailInsight> => {
     try {
-        // Fetch full message
-        const fullMessage = await gmail.users.messages.get({
-            userId: 'me',
-            id: messageId,
-            format: 'full',
-        });
+        let body = '';
+        let payload = null;
+        let headers: any[] = [];
 
-        const payload = fullMessage.data.payload;
-        const headers = payload?.headers || [];
+        if (options.prefetchedBody) {
+            body = options.prefetchedBody.body;
+            payload = options.prefetchedBody.payload;
+            headers = options.prefetchedBody.headers;
+        } else {
+            // Fetch full message if not prefetched
+            const fullMessageResult = await fetchFullEmailBody(gmail, messageId);
+            body = fullMessageResult.body;
+            payload = fullMessageResult.payload;
+            headers = fullMessageResult.headers;
+        }
 
         // Extract fields
         const from = headers.find((h: any) => h.name === 'From')?.value || metadata.from;
         const subject = headers.find((h: any) => h.name === 'Subject')?.value || metadata.subject;
-        const body = extractEmailBody(payload) || metadata.snippet;
+        body = body || metadata.snippet; // fallback to snippet
         const attachmentMetadata = extractAttachmentMetadata(payload, messageId);
         const parsedFrom = parseEmailAddress(from);
 
@@ -196,6 +111,7 @@ export const processEmailDeep = async (
         }, {
             userId: options.userId,
             context: options.aiContext,
+            stage2Candidates: options.stage2Candidates,
             onFallback: options.onFallback,
         });
 
@@ -207,6 +123,9 @@ export const processEmailDeep = async (
             internalDate,
             insights,
             attachmentMetadata,
+            labelMode: (insights as any).labelMode,
+            confidence: (insights as any).confidence,
+            labelReason: (insights as any).labelReason,
         };
     } catch (error) {
         if (error instanceof AIParsingError) {
@@ -217,5 +136,3 @@ export const processEmailDeep = async (
         throw error;
     }
 };
-
-

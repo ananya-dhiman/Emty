@@ -8,6 +8,7 @@ import { RankingFeedbackLogModel } from "../model/RankingFeedbackLog";
 import { runAndPersistColdStart } from "../services/coldStartService";
 import { runScoringWorker } from "../services/scoringWorkerService";
 import { runAiProcessingWorker } from "../services/aiProcessingWorkerService";
+import * as trainingDatasetRepository from "../db/repositories/trainingDatasetRepository";
 import logger from '../utils/logger';
 
 // ─── GET /api/intent/profile ─────────────────────────────────────────────────
@@ -195,6 +196,68 @@ export const recordFeedback = async (
         },
         { upsert: true }
       );
+
+      // Phase 6: Integrate with training_dataset for continuous learning model
+      try {
+        if (insightId) {
+          const insight = await InsightModel.findById(insightId).lean() as any;
+          if (insight && insight.emails && insight.emails.length > 0) {
+            const firstEmail = insight.emails[0];
+            const parsedInternalDate = firstEmail.internalDate ? new Date(firstEmail.internalDate) : new Date();
+            trainingDatasetRepository.create({
+              user_id: userId,
+              message_id: insight.emailIds?.[0] || firstEmail.messageId,
+              subject: firstEmail.subject || '',
+              snippet: firstEmail.snippet || '',
+              from_domain: firstEmail.from?.domain || '',
+              has_attachment: (Array.isArray(firstEmail.attachments) && firstEmail.attachments.length > 0) ? 1 : 0,
+              hour_received: parsedInternalDate.getHours(),
+              is_weekend: [0, 6].includes(parsedInternalDate.getDay()) ? 1 : 0,
+              thread_size: Array.isArray(insight.emailIds) ? insight.emailIds.length : 1,
+              embedding: null,
+              final_label: signal === 'boost' ? 'important' : (signal === 'suppress' ? 'noise' : 'neutral'),
+              final_intent: insight.summary?.intent || null,
+              label_source: 'user_feedback',
+              training_weight: 1.0,
+              confirmed_at: Date.now()
+            });
+          }
+        } else if (messageId) {
+          const msg = await EmailMessageModel.findOne({ messageId, userId }).lean() as any;
+          if (msg) {
+            const parsedInternalDate = msg.internalDate ? new Date(msg.internalDate) : new Date();
+            
+            // simple domain extraction from standard string 'Name <email@domain>'
+            let domain = '';
+            if (msg.from) {
+              const match = msg.from.match(/@([^>]+)>/);
+              if (match) domain = match[1];
+              else if (msg.from.includes('@')) domain = msg.from.split('@')[1];
+            }
+
+            trainingDatasetRepository.create({
+              user_id: userId,
+              message_id: messageId,
+              subject: msg.subject || '',
+              snippet: msg.snippet || '',
+              from_domain: domain,
+              has_attachment: msg.hasAttachments ? 1 : 0,
+              hour_received: parsedInternalDate.getHours(),
+              is_weekend: [0, 6].includes(parsedInternalDate.getDay()) ? 1 : 0,
+              thread_size: 1,
+              embedding: null,
+              final_label: signal === 'boost' ? 'important' : (signal === 'suppress' ? 'noise' : 'neutral'),
+              final_intent: 'noise', // default for pre filter emails
+              label_source: 'user_feedback',
+              training_weight: 1.0,
+              confirmed_at: Date.now()
+            });
+          }
+        }
+      } catch (trainErr) {
+         logger.debug("[Intent] Ignored error while persisting to training_dataset", trainErr);
+      }
+
     } catch (logErr: any) {
       logger.info("[Intent] Error logging ranking feedback telemetry:", logErr.message);
     }
