@@ -106,7 +106,7 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         // Use access token to get user's Gmail email address
         const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
         const profile = await gmail.users.getProfile({ userId: 'me' });
-        const email = profile.data.emailAddress;
+        const email = profile.data.emailAddress?.toLowerCase();
 
         if (!email) {
             res.redirect('http://localhost:5173/?gmail_error=no_email');

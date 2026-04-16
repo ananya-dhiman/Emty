@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import { ILabel, Label } from "../model/Label";
-import { Insight } from "../model/Insight";
-import { EmailMessage } from "../model/EmailMessage";
+import * as insightRepository from "../db/repositories/insightRepository";
+import * as emailMessageRepository from "../db/repositories/emailMessageRepository";
 import {
   ILabelPriorityConfig,
   LabelPriorityConfig,
@@ -47,35 +47,26 @@ const getObservedCounts = async (
   accountId: string,
   onlyRecent: boolean
 ): Promise<Map<string, number>> => {
-  const accountObjectId = asObjectId(accountId);
-  const cutoff = new Date(Date.now() - THIRTY_DAYS_MS);
-  const query: Record<string, any> = { userId, accountId: accountObjectId };
+  const cutoff = Date.now() - THIRTY_DAYS_MS;
+  const allInsights = insightRepository.getByIntent(accountId, userId);
+  const insights = onlyRecent
+    ? allInsights.filter(i => i.updated_at ? i.updated_at >= cutoff : false)
+    : allInsights;
 
-  if (onlyRecent) {
-    query.updatedAt = { $gte: cutoff };
-  }
-
-  const insights = await Insight.findMany({
-    where: query,
-    select: { labels: true },
-  });
   const counts = new Map<string, number>();
 
   for (const insight of insights) {
-    const labels = Array.isArray(insight.labels) ? insight.labels : [];
+    let labels: any[] = [];
+    try { labels = JSON.parse(insight.labels || '[]'); } catch (e) {}
     const seenPerInsight = new Set<string>();
 
     for (const label of labels) {
-      const labelId = label?.labelId
-        ? new Types.ObjectId(label.labelId).toString()
-        : "";
+      const labelId = label?.labelId ? String(label.labelId) : "";
       const nameKey = typeof label?.name === "string"
         ? `name:${normalizeLabelName(label.name)}`
         : "";
       const key = labelId ? `id:${labelId}` : nameKey;
-      if (!key || seenPerInsight.has(key)) {
-        continue;
-      }
+      if (!key || seenPerInsight.has(key)) continue;
       seenPerInsight.add(key);
       counts.set(key, (counts.get(key) || 0) + 1);
     }
@@ -611,37 +602,32 @@ export const getPriorityRanking = async (params: {
 
   const now = new Date();
   const accountObjectId = asObjectId(params.accountId);
-  const insights = await Insight.findMany({
-    where: {
-      userId: params.userId,
-      accountId: accountObjectId.toString(),
-      OR: [
-        { "state.relevance": "active" },
-        { state: null },
-        { "state.relevance": { exists: false } },
-      ],
-    },
-    select: {
-      gmailThreadId: true,
-      summary: true,
-      from: true,
-      labels: true,
-      importanceScore: true,
-      baseScore: true,
-      baseScoreBreakdown: true,
-      state: true,
-      createdAt: true,
-      updatedAt: true,
-      dates: true,
-      attachments: true,
-      checklist: true,
-      emails: true,
-    },
+  // Fetch insights for account from local SQLite, filter active/null state_relevance in JS
+  const insights = insightRepository.findAllByAccountId(accountObjectId.toString()).filter((row) => {
+    return !row.state_relevance || row.state_relevance === 'active';
   });
 
   const scoredItems: PriorityRankingItem[] = [];
 
-  for (const insight of insights) {
+  for (const rawInsight of insights) {
+    // Parse JSON fields from the SQLite row
+    const insight = {
+      _id: { toString: () => rawInsight.id },
+      gmailThreadId: rawInsight.gmail_thread_id,
+      summary: (() => { try { return JSON.parse(rawInsight.summary_snippet || '{}'); } catch { return { shortSnippet: rawInsight.summary_snippet, intent: rawInsight.summary_intent }; } })(),
+      from: (() => { try { return JSON.parse(rawInsight.from_email || '{}'); } catch { return { email: rawInsight.from_email, name: rawInsight.from_name, domain: rawInsight.from_domain }; } })(),
+      labels: (() => { try { return JSON.parse(rawInsight.labels || '[]'); } catch { return []; } })(),
+      importanceScore: rawInsight.importance_score,
+      baseScore: rawInsight.base_score,
+      baseScoreBreakdown: (() => { try { return JSON.parse(rawInsight.base_score_breakdown || 'null'); } catch { return null; } })(),
+      state: { lastSignalAt: rawInsight.state_last_signal_at ? new Date(rawInsight.state_last_signal_at) : null },
+      createdAt: rawInsight.created_at ? new Date(rawInsight.created_at) : null,
+      updatedAt: rawInsight.updated_at ? new Date(rawInsight.updated_at) : null,
+      dates: (() => { try { return JSON.parse(rawInsight.dates || '[]'); } catch { return []; } })(),
+      attachments: (() => { try { return JSON.parse(rawInsight.attachments || '[]'); } catch { return []; } })(),
+      checklist: (() => { try { return JSON.parse(rawInsight.checklist || '[]'); } catch { return []; } })(),
+      emails: (() => { try { return JSON.parse(rawInsight.emails || '[]'); } catch { return []; } })(),
+    };
     const labels = (Array.isArray(insight.labels) ? insight.labels : []) as Array<{
       labelId?: Types.ObjectId;
       name?: string;
@@ -730,21 +716,13 @@ export const getPriorityRanking = async (params: {
     );
 
     if (missingSourceIds.length > 0) {
-      const fallbackEmails = await EmailMessage.findMany({
-        where: {
-          accountId: accountObjectId,
-          messageId: { in: missingSourceIds },
-        },
-        select: {
-          messageId: true,
-          from: true,
-          subject: true,
-          internalDate: true,
-        },
-      });
+      const allAccountEmails = emailMessageRepository.findByAccountId(accountObjectId.toString());
+      const fallbackEmails = allAccountEmails.filter(
+        e => missingSourceIds.includes(e.message_id)
+      );
 
       for (const fallbackEmail of fallbackEmails) {
-        const rawFrom = typeof fallbackEmail.from === "string" ? fallbackEmail.from : "";
+        const rawFrom = fallbackEmail.from || "";
         const emailMatch = rawFrom.match(/<(.+?)>/);
         const parsedEmail = emailMatch ? emailMatch[1] : rawFrom;
         const parsedName = emailMatch
@@ -752,7 +730,7 @@ export const getPriorityRanking = async (params: {
           : undefined;
         const parsedDomain = parsedEmail.includes("@") ? parsedEmail.split("@")[1] : undefined;
 
-        emailContextById[fallbackEmail.messageId] = {
+        emailContextById[fallbackEmail.message_id] = {
           subject: fallbackEmail.subject || undefined,
           from: parsedEmail
             ? {
@@ -761,7 +739,7 @@ export const getPriorityRanking = async (params: {
                 domain: parsedDomain || undefined,
               }
             : undefined,
-          internalDate: fallbackEmail.internalDate ? new Date(fallbackEmail.internalDate) : undefined,
+          internalDate: fallbackEmail.internal_date ? new Date(fallbackEmail.internal_date) : undefined,
         };
       }
     }
@@ -791,9 +769,9 @@ export const getPriorityRanking = async (params: {
         matchedLabelRank,
       },
       timestamps: {
-        createdAt: insight.createdAt,
-        updatedAt: insight.updatedAt,
-        lastSignalAt: insight.state?.lastSignalAt,
+        createdAt: insight.createdAt ?? undefined,
+        updatedAt: insight.updatedAt ?? undefined,
+        lastSignalAt: insight.state?.lastSignalAt ?? undefined,
       },
       dates: sortBySignal(
         Array.isArray(derivedDates)
@@ -892,39 +870,28 @@ export const getPriorityRanking = async (params: {
   const topPriority = remaining.slice(0, topPriorityCount);
   const topPrioritySet = new Set(topPriority.map((item) => item.insightId));
   const others = remaining.filter((item) => !topPrioritySet.has(item.insightId));
-  const lowPriorityEmails = await EmailMessage.findMany({
-    where: {
-      userId: params.userId,
-      accountId: accountObjectId,
-      score: { not: null, lt: 0.4 },
-      aiProcessed: false,
-    },
-    select: {
-      messageId: true,
-      threadId: true,
-      from: true,
-      subject: true,
-      internalDate: true,
-      score: true,
-      extractedFeatures: true,
-    },
-    orderBy: { internalDate: "desc" },
-  });
+  const lowPriorityRows = emailMessageRepository.findByAccountId(accountObjectId.toString()).filter(
+    email =>
+      email.user_id === params.userId &&
+      email.score !== null &&
+      email.score < 0.4 &&
+      email.ai_processed === 0
+  ).sort((a, b) => b.internal_date - a.internal_date);
 
   return {
     actionRequired,
     topPriority,
     others,
-    lowPriorityEmails: lowPriorityEmails.map((email) => ({
-      messageId: email.messageId,
-      threadId: email.threadId,
-      from: typeof email.from === "string" ? email.from : "",
-      subject: typeof email.subject === "string" ? email.subject : "",
-      internalDate: new Date(email.internalDate),
-      score: typeof email.score === "number" ? email.score : 0,
-      extractedFeatures: Array.isArray(email.extractedFeatures)
-        ? email.extractedFeatures.filter((item: any): item is string => typeof item === "string")
-        : [],
+    lowPriorityEmails: lowPriorityRows.map((email) => ({
+      messageId: email.message_id,
+      threadId: email.thread_id,
+      from: email.from,
+      subject: email.subject,
+      internalDate: new Date(email.internal_date),
+      score: email.score ?? 0,
+      extractedFeatures: (() => {
+        try { return JSON.parse(email.extracted_features || '[]'); } catch { return []; }
+      })(),
     })),
     config,
   };

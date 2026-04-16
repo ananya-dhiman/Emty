@@ -1,5 +1,5 @@
 import { UserIntentProfile } from "../model/UserIntentProfile";
-import { EmailMessage } from "../model/EmailMessage";
+import * as emailMessageRepository from "../db/repositories/emailMessageRepository";
 
 // Configurable limits — change here without a redeploy
 export const COLD_START_LIMIT_TEST = 10;
@@ -85,17 +85,17 @@ export async function extractColdStartFeatures(
 ): Promise<ColdStartResult> {
   // Use EmailMessage instead of InsightModel since AI Insights aren't generated
   // until AFTER onboarding in the new decoupled async pipeline.
-  const emails = await EmailMessage.findMany({
-    where: { accountId },
-    orderBy: { internalDate: "desc" },
-    take: limit,
-  });
+  const emails = emailMessageRepository.findByAccountId(accountId);
+  // Sort descending by internal_date and take `limit`
+  const latestEmails = emails
+    .sort((a, b) => b.internal_date - a.internal_date)
+    .slice(0, limit);
 
   const allTokens: string[] = [];
   const domainFreq = new Map<string, number>();
   const labelFreq = new Map<string, number>();
 
-  for (const email of emails) {
+  for (const email of latestEmails) {
     // Keywords from snippet + subject
     const text = [email.subject ?? "", email.snippet ?? ""].join(" ");
     const tokens = tokenise(text);
@@ -108,7 +108,11 @@ export async function extractColdStartFeatures(
     }
 
     // Generic extracted labels from RulesEngine phase 1
-    for (const lblName of email.extractedFeatures ?? []) {
+    let extractedFeatures: string[] = [];
+    try {
+      extractedFeatures = email.extracted_features ? JSON.parse(email.extracted_features) : [];
+    } catch (e) {}
+    for (const lblName of extractedFeatures) {
       if (lblName) {
         labelFreq.set(lblName, (labelFreq.get(lblName) ?? 0) + 1);
       }
@@ -121,7 +125,7 @@ export async function extractColdStartFeatures(
     inferredKeywords: topN(kwFreq, 15),
     inferredDomains: topN(domainFreq, 10),
     inferredLabels: topN(labelFreq, 10),
-    emailsScanned: emails.length,
+    emailsScanned: latestEmails.length,
   };
 }
 

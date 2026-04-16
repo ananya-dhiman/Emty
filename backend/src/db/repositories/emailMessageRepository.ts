@@ -64,7 +64,7 @@ export function create(data: Omit<EmailMessageRow, "id" | "created_at" | "update
   };
 }
 
-export function findUnprocessed(accountId: string, limit: number = 10): EmailMessageRow[] {
+export function findUnprocessed(accountId: string, limit: number = 50): EmailMessageRow[] {
   const db = getDb();
   const stmt = db.prepare(`
     SELECT * FROM email_messages
@@ -121,4 +121,74 @@ export function updateEmbedding(messageId: string, embedding: string, embeddingM
     WHERE id = ?
   `);
   stmt.run(embedding, embeddingModel, Date.now(), messageId);
+}
+
+export function findByAccountId(accountId: string): EmailMessageRow[] {
+  const db = getDb();
+  const stmt = db.prepare(`
+    SELECT * FROM email_messages
+    WHERE account_id = ?
+  `);
+  return stmt.all(accountId) as EmailMessageRow[];
+}
+
+export function findTopScoredByAccountId(accountId: string): EmailMessageRow[] {
+  const db = getDb();
+  const stmt = db.prepare(`
+    SELECT * FROM email_messages
+    WHERE account_id = ?
+    ORDER BY score DESC, internal_date DESC
+  `);
+  return stmt.all(accountId) as EmailMessageRow[];
+}
+
+export function updatePriorityStateAndScore(id: string, score: number | null, priorityState: string): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE email_messages
+    SET score = ?, priority_state = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(score, priorityState, Date.now(), id);
+}
+
+export function updatePriorityState(id: string, priorityState: string): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE email_messages
+    SET priority_state = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(priorityState, Date.now(), id);
+}
+
+export function upsertMessage(data: Omit<EmailMessageRow, "id" | "created_at" | "updated_at">): void {
+  const db = getDb();
+  const now = Date.now();
+  
+  // Try to find if it exists
+  const existing = findByMessageId(data.account_id, data.message_id);
+  
+  if (existing) {
+    const stmt = db.prepare(`
+      UPDATE email_messages
+      SET thread_id = ?, "from" = ?, subject = ?, snippet = ?, 
+          internal_date = ?, has_attachments = ?, extracted_features = ?, updated_at = ?
+      WHERE id = ?
+    `);
+    
+    stmt.run(
+      data.thread_id,
+      data.from,
+      data.subject,
+      data.snippet,
+      data.internal_date,
+      data.has_attachments,
+      data.extracted_features,
+      now,
+      existing.id
+    );
+  } else {
+    create(data);
+  }
 }

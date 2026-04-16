@@ -51,7 +51,7 @@ export function create(data: Omit<InsightRow, "id" | "created_at" | "updated_at"
       summary_snippet, summary_intent, dates, attachments, checklist, state_relevance, state_first_seen_at,
       state_last_signal_at, state_last_verified_at, extracted_facts, embedding, needs_review, ai_confidence,
       ai_uncertainty_source, pipeline_stage_reached, verification_status, failed_verification_groups, source, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -219,3 +219,13 @@ export function updateSource(insightId: string, source: string): void {
   `);
   stmt.run(source, Date.now(), insightId);
 }
+
+export function findAllByAccountId(accountId: string): InsightRow[] {
+  const db = getDb();
+  const stmt = db.prepare(`
+    SELECT * FROM insights
+    WHERE account_id = ?
+  `);
+  return stmt.all(accountId) as InsightRow[];
+}
+

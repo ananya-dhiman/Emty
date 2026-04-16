@@ -2,9 +2,9 @@ import { Response } from "express";
 import { AuthRequest } from "../middleware/authMiddleware";
 import { UserIntentProfileModel } from "../model/UserIntentProfile";
 import { GmailAccountModel } from "../model/GmailAccount";
-import { InsightModel } from "../model/Insight";
-import { EmailMessageModel } from "../model/EmailMessage";
-import { RankingFeedbackLogModel } from "../model/RankingFeedbackLog";
+import * as insightRepository from "../db/repositories/insightRepository";
+import * as emailMessageRepository from "../db/repositories/emailMessageRepository";
+import * as feedbackRepository from "../db/repositories/feedbackRepository";
 import { runAndPersistColdStart } from "../services/coldStartService";
 import { runScoringWorker } from "../services/scoringWorkerService";
 import { runAiProcessingWorker } from "../services/aiProcessingWorkerService";
@@ -173,90 +173,101 @@ export const recordFeedback = async (
       let source: "ai_insight" | "pre_filter" = "ai_insight";
 
       if (insightId) {
-        const insight = await InsightModel.findById(insightId).select("baseScore importanceScore").lean();
+        const insight = insightRepository.findById(insightId);
         if (insight) {
-          predictedScore = typeof (insight as any).baseScore === "number" ? (insight as any).baseScore : (insight.importanceScore || 0);
+          predictedScore = typeof insight.base_score === 'number' ? insight.base_score :
+                           typeof insight.importance_score === 'number' ? insight.importance_score : 0;
         }
       } else if (messageId) {
-        const msg = await EmailMessageModel.findOne({ messageId, userId }).select("score").lean();
+        const msg = emailMessageRepository.findById(messageId);
         if (msg) {
-          predictedScore = typeof msg.score === "number" ? msg.score : 0;
+          predictedScore = typeof msg.score === 'number' ? msg.score : 0;
           source = "pre_filter";
         }
       }
 
-      await RankingFeedbackLogModel.findOneAndUpdate(
-        { userId, ...(insightId ? { insightId } : { messageId }) },
-        { 
-          $set: { 
-            signal, 
-            predictedScore, 
-            source 
-          } 
-        },
-        { upsert: true }
-      );
+      // Record feedback telemetry in local feedbackRepository
+      feedbackRepository.create({
+        user_id: userId,
+        account_id: '',
+        message_id: messageId || null,
+        insight_id: insightId || null,
+        thread_id: null,
+        feedback_type: signal === 'boost' ? 'boosted' : signal === 'suppress' ? 'suppressed' : 'none',
+        original_label: null,
+        original_intent: null,
+        original_score: predictedScore,
+        corrected_label: null,
+        corrected_intent: null,
+        signal,
+        source,
+        used_in_training: 0,
+        training_weight: null,
+      });
 
-      // Phase 6: Integrate with training_dataset for continuous learning model
-      try {
-        if (insightId) {
-          const insight = await InsightModel.findById(insightId).lean() as any;
-          if (insight && insight.emails && insight.emails.length > 0) {
-            const firstEmail = insight.emails[0];
-            const parsedInternalDate = firstEmail.internalDate ? new Date(firstEmail.internalDate) : new Date();
-            trainingDatasetRepository.create({
-              user_id: userId,
-              message_id: insight.emailIds?.[0] || firstEmail.messageId,
-              subject: firstEmail.subject || '',
-              snippet: firstEmail.snippet || '',
-              from_domain: firstEmail.from?.domain || '',
-              has_attachment: (Array.isArray(firstEmail.attachments) && firstEmail.attachments.length > 0) ? 1 : 0,
-              hour_received: parsedInternalDate.getHours(),
-              is_weekend: [0, 6].includes(parsedInternalDate.getDay()) ? 1 : 0,
-              thread_size: Array.isArray(insight.emailIds) ? insight.emailIds.length : 1,
-              embedding: null,
-              final_label: signal === 'boost' ? 'important' : (signal === 'suppress' ? 'noise' : 'neutral'),
-              final_intent: insight.summary?.intent || null,
-              label_source: 'user_feedback',
-              training_weight: 1.0,
-              confirmed_at: Date.now()
-            });
-          }
-        } else if (messageId) {
-          const msg = await EmailMessageModel.findOne({ messageId, userId }).lean() as any;
-          if (msg) {
-            const parsedInternalDate = msg.internalDate ? new Date(msg.internalDate) : new Date();
-            
-            // simple domain extraction from standard string 'Name <email@domain>'
-            let domain = '';
-            if (msg.from) {
-              const match = msg.from.match(/@([^>]+)>/);
-              if (match) domain = match[1];
-              else if (msg.from.includes('@')) domain = msg.from.split('@')[1];
+        // Phase 6: Integrate with training_dataset for continuous learning
+        try {
+          if (insightId) {
+            const insight = insightRepository.findById(insightId);
+            if (insight && insight.email_ids) {
+              let emailIds: string[] = [];
+              try { emailIds = JSON.parse(insight.email_ids || '[]'); } catch {}
+              let emails: any[] = [];
+              try { emails = JSON.parse(insight.emails || '[]'); } catch {}
+              const firstEmail = emails[0];
+              if (firstEmail) {
+                const parsedInternalDate = firstEmail.internalDate ? new Date(firstEmail.internalDate) : new Date();
+                trainingDatasetRepository.create({
+                  user_id: userId,
+                  message_id: emailIds[0] || firstEmail.messageId,
+                  subject: firstEmail.subject || '',
+                  snippet: firstEmail.snippet || '',
+                  from_domain: firstEmail.from?.domain || '',
+                  has_attachment: (Array.isArray(firstEmail.attachments) && firstEmail.attachments.length > 0) ? 1 : 0,
+                  hour_received: parsedInternalDate.getHours(),
+                  is_weekend: [0, 6].includes(parsedInternalDate.getDay()) ? 1 : 0,
+                  thread_size: emailIds.length || 1,
+                  embedding: null,
+                  final_label: signal === 'boost' ? 'important' : (signal === 'suppress' ? 'noise' : 'neutral'),
+                  final_intent: insight.summary_intent || null,
+                  label_source: 'user_feedback',
+                  training_weight: 1.0,
+                  confirmed_at: Date.now()
+                });
+              }
             }
-
-            trainingDatasetRepository.create({
-              user_id: userId,
-              message_id: messageId,
-              subject: msg.subject || '',
-              snippet: msg.snippet || '',
-              from_domain: domain,
-              has_attachment: msg.hasAttachments ? 1 : 0,
-              hour_received: parsedInternalDate.getHours(),
-              is_weekend: [0, 6].includes(parsedInternalDate.getDay()) ? 1 : 0,
-              thread_size: 1,
-              embedding: null,
-              final_label: signal === 'boost' ? 'important' : (signal === 'suppress' ? 'noise' : 'neutral'),
-              final_intent: 'noise', // default for pre filter emails
-              label_source: 'user_feedback',
-              training_weight: 1.0,
-              confirmed_at: Date.now()
-            });
+          } else if (messageId) {
+            const msg = emailMessageRepository.findById(messageId);
+            if (msg) {
+              const parsedInternalDate = msg.internal_date ? new Date(msg.internal_date) : new Date();
+              let domain = '';
+              if (msg.from) {
+                const match = msg.from.match(/@([^>]+)>/);
+                if (match) domain = match[1];
+                else if (msg.from.includes('@')) domain = msg.from.split('@')[1];
+              }
+              trainingDatasetRepository.create({
+                user_id: userId,
+                message_id: messageId,
+                subject: msg.subject || '',
+                snippet: msg.snippet || '',
+                from_domain: domain,
+                has_attachment: msg.has_attachments ? 1 : 0,
+                hour_received: parsedInternalDate.getHours(),
+                is_weekend: [0, 6].includes(parsedInternalDate.getDay()) ? 1 : 0,
+                thread_size: 1,
+                embedding: null,
+                final_label: signal === 'boost' ? 'important' : (signal === 'suppress' ? 'noise' : 'neutral'),
+                final_intent: 'noise',
+                label_source: 'user_feedback',
+                training_weight: 1.0,
+                confirmed_at: Date.now()
+              });
+            }
           }
+        } catch (trainErr) {
+           logger.debug("[Intent] Ignored error while persisting to training_dataset", trainErr);
         }
-      } catch (trainErr) {
-         logger.debug("[Intent] Ignored error while persisting to training_dataset", trainErr);
-      }
 
     } catch (logErr: any) {
       logger.info("[Intent] Error logging ranking feedback telemetry:", logErr.message);

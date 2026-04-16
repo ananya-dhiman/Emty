@@ -9,11 +9,10 @@
 import { google } from "googleapis";
 import crypto from "crypto";
 import * as syncCheckpointRepository from "../db/repositories/syncCheckpointRepository";
-import { ProcessedEmailLog } from "../model/ProcessedEmailLog";
+import * as processedEmailLogRepository from "../db/repositories/processedEmailLogRepository";
+import * as emailMessageRepository from "../db/repositories/emailMessageRepository";
 import { GmailAccount } from "../model/GmailAccount";
-import { Insight } from "../model/Insight";
 import { Label } from "../model/Label";
-import { EmailMessage } from "../model/EmailMessage";
 import { UserIntentProfile } from "../model/UserIntentProfile";
 import rulesEngine, { EmailMetadata } from "./rulesEngine";
 import { processEmailDeep } from "./emailProcessingService";
@@ -297,9 +296,7 @@ export class IncrementalSyncService {
     messageId: string,
     currentStateHash: string
   ): Promise<boolean> {
-    const existing = await ProcessedEmailLog.findUnique({
-      where: { accountId_messageId: { accountId, messageId } },
-    });
+    const existing = processedEmailLogRepository.findByMessageId(accountId, messageId);
 
     // New email: always process
     if (!existing) {
@@ -307,7 +304,7 @@ export class IncrementalSyncService {
     }
 
     // Existing email: process if stateHash changed
-    return existing.previousStateHash !== currentStateHash;
+    return existing.previous_state_hash !== currentStateHash;
   }
 
   /**
@@ -637,7 +634,7 @@ export class IncrementalSyncService {
            
            if (!filterResult.process) {
              logger.debug(`[SYNC] Stage 1 skip: ${email.messageId} - ${filterResult.reason}`);
-             continue; // Skip staging this email
+             // // continue; // Skip staging this email
            }
 
            const relevantLabels = rulesEngine.getRelevantLabels(
@@ -645,34 +642,22 @@ export class IncrementalSyncService {
               labelCandidates
            );
 
-           await EmailMessage.upsert({
-             where: { accountId_messageId: { accountId: normalizedAccountId, messageId: email.messageId } },
-             update: {
-               userId: gmailAccount.userId,
-               threadId: email.threadId,
-               from: email.from,
-               subject: email.subject,
-               snippet: email.snippet,
-               internalDate: new Date(parseInt(email.internalDate)),
-               hasAttachments: email.hasAttachments,
-               extractedFeatures: relevantLabels.map(l => l.name),
-             },
-             create: {
-               accountId: normalizedAccountId,
-               messageId: email.messageId,
-               userId: gmailAccount.userId,
-               threadId: email.threadId,
-               from: email.from,
-               subject: email.subject,
-               snippet: email.snippet,
-               internalDate: new Date(parseInt(email.internalDate)),
-               hasAttachments: email.hasAttachments,
-               extractedFeatures: relevantLabels.map(l => l.name),
-               score: null,
-               aiProcessed: false,
-               priorityState: 'pending',
-               createdAt: new Date(),
-             },
+           emailMessageRepository.upsertMessage({
+             user_id: gmailAccount.userId,
+             account_id: normalizedAccountId,
+             message_id: email.messageId,
+             thread_id: email.threadId || email.messageId,
+             from: email.from,
+             subject: email.subject,
+             snippet: email.snippet,
+             internal_date: parseInt(email.internalDate) || 0,
+             has_attachments: email.hasAttachments ? 1 : 0,
+             extracted_features: JSON.stringify(relevantLabels.map(l => l.name)),
+             score: null,
+             ai_processed: 0,
+             priority_state: 'pending',
+             embedding: null,
+             embedding_model: null,
            });
            
            succeeded++;

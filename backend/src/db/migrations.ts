@@ -13,21 +13,29 @@ export function runMigrations(db: Database.Database): void {
         applied_at INTEGER DEFAULT (unixepoch('now') * 1000)
       );
     `);
-
     // Get current schema version
     const versionRow = db
       .prepare("SELECT MAX(version) as version FROM schema_version")
       .get() as { version: number | null };
     const currentVersion = versionRow?.version || 0;
 
-    // Run pending migrations
     if (currentVersion < 1) {
       migration_v1(db);
       db.prepare("INSERT INTO schema_version (version) VALUES (1)").run();
       logger.info("Applied migration v1: Create core tables");
     }
 
-    logger.info(`Database schema version: ${currentVersion + (currentVersion === 0 ? 1 : 0)}`);
+    if (currentVersion < 2) {
+      migration_v2(db);
+      db.prepare("INSERT INTO schema_version (version) VALUES (2)").run();
+      logger.info("Applied migration v2: Add label_name to label_vectors");
+    }
+
+    const finalVersion = db
+      .prepare("SELECT MAX(version) as version FROM schema_version")
+      .get() as { version: number | null };
+
+    logger.info(`Database schema version: ${finalVersion?.version || 0}`);
   } catch (error) {
     logger.info("Migration failed:", error);
     throw error;
@@ -249,4 +257,21 @@ function migration_v1(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_lc_label ON label_candidates(label_id);
     CREATE INDEX IF NOT EXISTS idx_lc_score ON label_candidates(similarity_score);
   `);
+}
+
+/**
+ * Migration v2: Add label_name column to label_vectors
+ */
+function migration_v2(db: Database.Database): void {
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(label_vectors)").all() as any[];
+    const hasLabelName = tableInfo.some((col) => col.name === "label_name");
+
+    if (!hasLabelName) {
+      db.exec("ALTER TABLE label_vectors ADD COLUMN label_name TEXT DEFAULT ''");
+      logger.info("Added label_name column to label_vectors table");
+    }
+  } catch (error) {
+    logger.info("Migration v2 failed (non-critical):", error);
+  }
 }
