@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/authMiddleware";
 import { GmailAccountModel } from "../model/GmailAccount";
-import { SyncCheckpointModel } from "../model/SyncCheckpoint";
+import * as syncCheckpointRepository from "../db/repositories/syncCheckpointRepository";
 
 import logger from '../utils/logger';
 
@@ -30,9 +30,7 @@ export const getSyncProgress = async (
       return;
     }
 
-    const checkpoint = await SyncCheckpointModel.findOne({
-      accountId: gmailAccount._id,
-    });
+    const checkpoint = syncCheckpointRepository.getByAccountId(accountId);
     if (!checkpoint) {
       res.status(200).json({
         success: true,
@@ -42,9 +40,6 @@ export const getSyncProgress = async (
         progressMessage: "Waiting to start sync...",
         totalCandidates: 0,
         processedCandidates: 0,
-        aiFallbackCount: 0,
-        aiFallbackMessage: "",
-        aiFallbackAt: null,
         updatedAt: new Date().toISOString(),
       });
       return;
@@ -52,19 +47,14 @@ export const getSyncProgress = async (
 
       res.status(200).json({
         success: true,
-        syncState: checkpoint.syncState,
-        progressPercent: checkpoint.progressPercent ?? 0,
-        progressStage: checkpoint.progressStage ?? "initializing",
-        progressMessage: checkpoint.progressMessage ?? "",
-        totalCandidates: checkpoint.totalCandidates ?? 0,
-        processedCandidates: checkpoint.processedCandidates ?? 0,
-        aiFallbackCount: checkpoint.aiFallbackCount ?? 0,
-        aiFallbackMessage: checkpoint.aiFallbackMessage ?? "",
-        aiFallbackAt: checkpoint.aiFallbackAt ? checkpoint.aiFallbackAt.toISOString() : null,
-        updatedAt: (
-          checkpoint.lastProgressAt ||
-          checkpoint.updatedAt ||
-          new Date()
+        syncState: checkpoint.sync_state,
+        progressPercent: checkpoint.progress_percent ?? 0,
+        progressStage: checkpoint.progress_stage ?? "initializing",
+        progressMessage: checkpoint.progress_message ?? "",
+        totalCandidates: checkpoint.total_candidates ?? 0,
+        processedCandidates: checkpoint.processed_candidates ?? 0,
+        updatedAt: new Date(
+          checkpoint.last_progress_at || checkpoint.updated_at || Date.now()
         ).toISOString(),
     });
   } catch (error: any) {

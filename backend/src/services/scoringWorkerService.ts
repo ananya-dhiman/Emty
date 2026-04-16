@@ -1,6 +1,6 @@
 import { Types } from "mongoose";
 import { EmailMessage } from "../model/EmailMessage";
-import { SyncCheckpoint } from "../model/SyncCheckpoint";
+import * as syncCheckpointRepository from "../db/repositories/syncCheckpointRepository";
 import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
 
 import logger from '../utils/logger';
@@ -17,15 +17,12 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
     logger.debug(`[SCORING] Worker started for account ${accountId}`);
     
     // Update progress
-    await SyncCheckpoint.updateMany(
-        { where: { accountId: objectIdAccountId.toString() } },
-        {
-            progressPercent: 60,
-            progressStage: "scoring_emails",
-            progressMessage: "Evaluating priority of emails...",
-            lastProgressAt: new Date(),
-        }
-    );
+    syncCheckpointRepository.updateProgress(objectIdAccountId.toString(), {
+        progress_percent: 60,
+        progress_stage: "scoring_emails",
+        progress_message: "Evaluating priority of emails...",
+        last_progress_at: Date.now(),
+    });
 
     try {
         const priorityScoringContext = await getPriorityScoringContext({

@@ -22,6 +22,32 @@ export interface SyncCheckpointRow {
   updated_at: number;
 }
 
+interface StartSyncPayload {
+  progress_percent: number;
+  progress_stage: string;
+  progress_message: string;
+  total_candidates: number;
+  processed_candidates: number;
+  last_progress_at: number;
+}
+
+interface FinalizeSyncPayload {
+  sync_state: "idle" | "error";
+  last_history_id: string | null;
+  last_sync_timestamp: number;
+  processed_count: number;
+  succeeded_count: number;
+  failed_count: number;
+  last_sync_error: string | null;
+  sync_started_at: null;
+  progress_percent: number;
+  progress_stage: string;
+  progress_message: string;
+  total_candidates: number;
+  processed_candidates: number;
+  last_progress_at: number;
+}
+
 export function findOrCreate(accountId: string): SyncCheckpointRow {
   const db = getDb();
   
@@ -143,4 +169,89 @@ export function getByAccountId(accountId: string): SyncCheckpointRow | null {
     SELECT * FROM sync_checkpoints WHERE account_id = ? LIMIT 1
   `);
   return (stmt.get(accountId) as SyncCheckpointRow | undefined) || null;
+}
+
+export function resetStaleSyncLock(accountId: string, staleThresholdMs: number): number {
+  const db = getDb();
+  const now = Date.now();
+  const stmt = db.prepare(`
+    UPDATE sync_checkpoints
+    SET sync_state = 'idle', sync_started_at = NULL, updated_at = ?
+    WHERE account_id = ? AND sync_state = 'syncing' AND sync_started_at IS NOT NULL AND sync_started_at < ?
+  `);
+  const result = stmt.run(now, accountId, staleThresholdMs);
+  return result.changes;
+}
+
+export function acquireSyncLock(accountId: string, payload: StartSyncPayload): boolean {
+  const db = getDb();
+  const now = Date.now();
+  const stmt = db.prepare(`
+    UPDATE sync_checkpoints
+    SET sync_state = 'syncing',
+        sync_started_at = ?,
+        last_sync_error = NULL,
+        progress_percent = ?,
+        progress_stage = ?,
+        progress_message = ?,
+        total_candidates = ?,
+        processed_candidates = ?,
+        last_progress_at = ?,
+        updated_at = ?
+    WHERE account_id = ? AND sync_state = 'idle'
+  `);
+  const result = stmt.run(
+    now,
+    payload.progress_percent,
+    payload.progress_stage,
+    payload.progress_message,
+    payload.total_candidates,
+    payload.processed_candidates,
+    payload.last_progress_at,
+    now,
+    accountId
+  );
+  return result.changes > 0;
+}
+
+export function finalizeSync(accountId: string, payload: FinalizeSyncPayload): void {
+  const db = getDb();
+  const now = Date.now();
+  const stmt = db.prepare(`
+    UPDATE sync_checkpoints
+    SET sync_state = ?,
+        last_history_id = ?,
+        last_sync_timestamp = ?,
+        processed_count = ?,
+        succeeded_count = ?,
+        failed_count = ?,
+        last_sync_error = ?,
+        sync_started_at = ?,
+        progress_percent = ?,
+        progress_stage = ?,
+        progress_message = ?,
+        total_candidates = ?,
+        processed_candidates = ?,
+        last_progress_at = ?,
+        updated_at = ?
+    WHERE account_id = ?
+  `);
+  stmt.run(
+    payload.sync_state,
+    payload.last_history_id,
+    payload.last_sync_timestamp,
+    payload.processed_count,
+    payload.succeeded_count,
+    payload.failed_count,
+    payload.last_sync_error,
+    payload.sync_started_at,
+    payload.progress_percent,
+    payload.progress_stage,
+    payload.progress_message,
+    payload.total_candidates,
+    payload.processed_candidates,
+    payload.last_progress_at,
+    now,
+    accountId
+  );
 }

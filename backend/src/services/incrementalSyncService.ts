@@ -8,10 +8,7 @@
 
 import { google } from "googleapis";
 import crypto from "crypto";
-import {
-  SyncCheckpoint,
-  SyncProgressStage,
-} from "../model/SyncCheckpoint";
+import * as syncCheckpointRepository from "../db/repositories/syncCheckpointRepository";
 import { ProcessedEmailLog } from "../model/ProcessedEmailLog";
 import { GmailAccount } from "../model/GmailAccount";
 import { Insight } from "../model/Insight";
@@ -77,6 +74,16 @@ export interface SyncResult {
 }
 
 export type EmailSource = "historyId" | "timestamp" | "fullScan";
+type SyncProgressStage =
+  | "initializing"
+  | "auth_setup"
+  | "fetch_candidates"
+  | "metadata_filtering"
+  | "scoring_emails"
+  | "processing_emails"
+  | "finalizing"
+  | "completed"
+  | "error";
 
 interface SyncProgressPatch {
   progressPercent?: number;
@@ -95,45 +102,42 @@ export class IncrementalSyncService {
     accountId: string | any,
     patch: SyncProgressPatch
   ): Promise<void> {
-    const progressUpdate: Record<string, any> = {
-      ...patch,
-      lastProgressAt: new Date(),
-    };
-    if (typeof progressUpdate.progressPercent === "number") {
-      progressUpdate.progressPercent = this.clampPercent(
-        progressUpdate.progressPercent
-      );
-    }
-    await SyncCheckpoint.update(
-      { where: { accountId: String(accountId) } },
-      progressUpdate
-    );
+    const progressPercent =
+      typeof patch.progressPercent === "number"
+        ? this.clampPercent(patch.progressPercent)
+        : undefined;
+    syncCheckpointRepository.updateProgress(String(accountId), {
+      progress_percent: progressPercent,
+      progress_stage: patch.progressStage,
+      progress_message: patch.progressMessage,
+      total_candidates: patch.totalCandidates,
+      processed_candidates: patch.processedCandidates,
+      last_progress_at: Date.now(),
+    });
   }
 
-  /**
-   * Compute state hash from email metadata
-   * Used to detect changes in labels, attachments, from field
-   */
-  private computeStateHash(metadata: any): string {
-    const stateObject = {
-      labels: (metadata.labels || []).sort(),
-      hasAttachments: metadata.hasAttachments || false,
-      from: metadata.from || "",
+  private toCheckpointShape(row: syncCheckpointRepository.SyncCheckpointRow) {
+    return {
+      lastHistoryId: row.last_history_id || undefined,
+      lastSyncTimestamp:
+        typeof row.last_sync_timestamp === "number"
+          ? new Date(row.last_sync_timestamp)
+          : undefined,
     };
-
-    const jsonStr = JSON.stringify(stateObject);
-    return crypto.createHash("sha256").update(jsonStr).digest("hex");
   }
 
   /**
    * Determine which sync strategy to use
    * Returns: "historyId" | "timestamp" | "fullScan"
    */
-  private determineEmailSource(checkpoint: any): EmailSource {
-    if (checkpoint?.lastHistoryId) {
+  private determineEmailSource(checkpoint: {
+    lastHistoryId?: string;
+    lastSyncTimestamp?: Date;
+  }): EmailSource {
+    if (checkpoint.lastHistoryId) {
       return "historyId";
     }
-    if (checkpoint?.lastSyncTimestamp) {
+    if (checkpoint.lastSyncTimestamp) {
       return "timestamp";
     }
     return "fullScan";
@@ -336,37 +340,19 @@ export class IncrementalSyncService {
    * Returns true if lock acquired, false if another sync is running
    */
   private async acquireSyncLock(accountId: string): Promise<boolean> {
-    // First, clean up stale locks (older than SYNC_LOCK_TIMEOUT)
-    const staleThreshold = new Date(Date.now() - SYNC_LOCK_TIMEOUT);
-    await SyncCheckpoint.updateMany({
-      where: {
-        accountId,
-        syncState: "syncing",
-        syncStartedAt: { lt: staleThreshold },
-      },
-      data: { syncState: "idle", syncStartedAt: null }
-    });
+    syncCheckpointRepository.resetStaleSyncLock(
+      accountId,
+      Date.now() - SYNC_LOCK_TIMEOUT
+    );
 
-    // Attempt atomic update: only succeeds if current state is "idle"
-    const result = await SyncCheckpoint.updateMany({
-      where: { accountId, syncState: "idle" },
-      data: {
-        syncState: "syncing",
-        syncStartedAt: new Date(),
-        lastSyncError: null,
-        progressPercent: 2,
-        progressStage: "initializing",
-        progressMessage: "Initializing sync...",
-        totalCandidates: 0,
-        processedCandidates: 0,
-        aiFallbackCount: 0,
-        aiFallbackMessage: null,
-        aiFallbackAt: null,
-        lastProgressAt: new Date(),
-      },
+    return syncCheckpointRepository.acquireSyncLock(accountId, {
+      progress_percent: 2,
+      progress_stage: "initializing",
+      progress_message: "Initializing sync...",
+      total_candidates: 0,
+      processed_candidates: 0,
+      last_progress_at: Date.now(),
     });
-
-    return result.count > 0;
   }
 
   /**
@@ -379,33 +365,23 @@ export class IncrementalSyncService {
     stats: { processed: number; succeeded: number; failed: number },
     error?: string
   ): Promise<void> {
-    const setPayload: Record<string, any> = {
-      syncState: error ? "error" : "idle",
-      lastHistoryId: newHistoryId,
-      lastSyncTimestamp: timestamp,
-      processedCount: stats.processed,
-      succeededCount: stats.succeeded,
-      failedCount: stats.failed,
-      lastSyncError: error || null,
-      syncStartedAt: null,
-      lastProgressAt: new Date(),
-    };
-
-    if (error) {
-      setPayload.progressStage = "error";
-      setPayload.progressMessage = error;
-    } else {
-      setPayload.progressPercent = 100;
-      setPayload.progressStage = "completed";
-      setPayload.progressMessage = "Sync complete";
-      setPayload.totalCandidates = stats.processed;
-      setPayload.processedCandidates = stats.processed;
-    }
-
-    await SyncCheckpoint.update(
-      { where: { accountId } },
-      setPayload
-    );
+    const isError = Boolean(error);
+    syncCheckpointRepository.finalizeSync(accountId, {
+      sync_state: isError ? "error" : "idle",
+      last_history_id: newHistoryId,
+      last_sync_timestamp: timestamp.getTime(),
+      processed_count: stats.processed,
+      succeeded_count: stats.succeeded,
+      failed_count: stats.failed,
+      last_sync_error: error || null,
+      sync_started_at: null,
+      progress_percent: isError ? 99 : 100,
+      progress_stage: isError ? "error" : "completed",
+      progress_message: isError ? error! : "Sync complete",
+      total_candidates: stats.processed,
+      processed_candidates: stats.processed,
+      last_progress_at: Date.now(),
+    });
   }
 
   /**
@@ -417,6 +393,7 @@ export class IncrementalSyncService {
     const objectIdAccountId = new (require("mongoose").Types.ObjectId)(
       accountId
     );
+    const normalizedAccountId = String(objectIdAccountId);
 
     try {
       // ===== STEP 1: Ensure checkpoint record exists =====
@@ -426,23 +403,12 @@ export class IncrementalSyncService {
       // only created a checkpoint *after* trying to acquire the lock which
       // meant the first sync would always fail with "Another sync is already
       // running" and the document would never be created.
-      let checkpoint = await SyncCheckpoint.findUnique({
-        where: { accountId: String(objectIdAccountId) },
-      });
-      if (!checkpoint) {
-        checkpoint = await SyncCheckpoint.create({
-          data: {
-            accountId: String(objectIdAccountId),
-            syncState: "idle",
-          },
-        });
-        if (!checkpoint) {
-          throw new Error("Failed to initialize sync checkpoint");
-        }
-      }
+      const checkpoint = this.toCheckpointShape(
+        syncCheckpointRepository.findOrCreate(normalizedAccountId)
+      );
 
       // ===== STEP 2: Acquire Lock =====
-      const lockAcquired = await this.acquireSyncLock(objectIdAccountId);
+      const lockAcquired = await this.acquireSyncLock(normalizedAccountId);
       if (!lockAcquired) {
         return {
           success: false,
@@ -457,7 +423,7 @@ export class IncrementalSyncService {
         };
       }
 
-      await this.updateProgress(objectIdAccountId, {
+      await this.updateProgress(normalizedAccountId, {
         progressPercent: 10,
         progressStage: "auth_setup",
         progressMessage: "Authenticating Gmail access...",
@@ -507,7 +473,7 @@ export class IncrementalSyncService {
 
       const assignableLabels = await getAssignableLabels(
         gmailAccount.userId,
-        objectIdAccountId.toString()
+        normalizedAccountId
       );
 
       const labelCandidates = assignableLabels.map((label) => ({
@@ -516,7 +482,7 @@ export class IncrementalSyncService {
       }));
       const priorityScoringContext = await getPriorityScoringContext({
         userId: gmailAccount.userId,
-        accountId: objectIdAccountId.toString(),
+        accountId: normalizedAccountId,
       });
 
       const gmail = google.gmail({ version: "v1", auth: oauth2Client });
@@ -530,7 +496,7 @@ export class IncrementalSyncService {
       let candidates: any[] = [];
       let newHistoryId: string | null = null;
 
-      await this.updateProgress(objectIdAccountId, {
+      await this.updateProgress(normalizedAccountId, {
         progressPercent: 25,
         progressStage: "fetch_candidates",
         progressMessage: "Fetching candidate emails...",
@@ -585,7 +551,7 @@ export class IncrementalSyncService {
       if (candidates.length === 0) {
         logger.debug("[SYNC] No new emails found");
         await this.releaseSyncLock(
-          objectIdAccountId,
+          normalizedAccountId,
           newHistoryId,
           new Date(),
           { processed: 0, succeeded: 0, failed: 0 }
@@ -624,7 +590,7 @@ export class IncrementalSyncService {
         ? metadataList.slice(0, MAX_EMAILS_TEST_MODE)
         : metadataList;
 
-      await this.updateProgress(objectIdAccountId, {
+      await this.updateProgress(normalizedAccountId, {
         progressPercent: 40,
         progressStage: "metadata_filtering",
         progressMessage: "Applying metadata filters...",
@@ -658,7 +624,7 @@ export class IncrementalSyncService {
         processed++;
         if (totalToProcess > 0 && (processed % 5 === 0 || processed === totalToProcess)) {
            const ratio = processed / totalToProcess;
-           await this.updateProgress(objectIdAccountId, {
+           await this.updateProgress(normalizedAccountId, {
              progressPercent: 40 + Math.floor(ratio * 55),
              progressStage: "processing_emails",
              progressMessage: "Saving features directly to staging...",
@@ -680,7 +646,7 @@ export class IncrementalSyncService {
            );
 
            await EmailMessage.upsert({
-             where: { accountId_messageId: { accountId: String(objectIdAccountId), messageId: email.messageId } },
+             where: { accountId_messageId: { accountId: normalizedAccountId, messageId: email.messageId } },
              update: {
                userId: gmailAccount.userId,
                threadId: email.threadId,
@@ -692,7 +658,7 @@ export class IncrementalSyncService {
                extractedFeatures: relevantLabels.map(l => l.name),
              },
              create: {
-               accountId: String(objectIdAccountId),
+               accountId: normalizedAccountId,
                messageId: email.messageId,
                userId: gmailAccount.userId,
                threadId: email.threadId,
@@ -718,7 +684,7 @@ export class IncrementalSyncService {
       }
 
       // ===== STEP 7: Release Lock & Update Checkpoint =====
-      await this.updateProgress(objectIdAccountId, {
+      await this.updateProgress(normalizedAccountId, {
         progressPercent: 99,
         progressStage: "finalizing",
         progressMessage: "Finalizing sync...",
@@ -727,7 +693,7 @@ export class IncrementalSyncService {
       });
 
       await this.releaseSyncLock(
-        objectIdAccountId,
+        normalizedAccountId,
         newHistoryId,
         new Date(),
         { processed, succeeded, failed }
@@ -749,7 +715,7 @@ export class IncrementalSyncService {
     } catch (error: any) {
       logger.info("[SYNC] Fatal error:", error.message);
       await this.releaseSyncLock(
-        objectIdAccountId,
+        normalizedAccountId,
         null,
         new Date(),
         { processed: 0, succeeded: 0, failed: 0 },
