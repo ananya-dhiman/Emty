@@ -27,20 +27,12 @@ const provider = new GoogleAuthProvider();
  */
 export const signInWithGoogle = async () => {
     try {
-        const { signInWithPopup } = await import("firebase/auth");
-        const result = await signInWithPopup(auth, provider);
-        const user = result.user;
-        const token = await user.getIdToken();
-
+        const { signInWithRedirect } = await import("firebase/auth");
+        await signInWithRedirect(auth, provider);
+        // It will navigate away. We return a pending state.
         return {
             success: true,
-            user: {
-                uid: user.uid,
-                email: user.email,
-                displayName: user.displayName,
-                photoURL: user.photoURL
-            },
-            token
+            pending: true
         };
     } catch (error: any) {
         console.error("Google sign-in error:", error.message);

@@ -78,7 +78,7 @@ function App() {
           localStorage.setItem('firebaseToken', token);
           
           if (!user) {
-            const response = await axios.get(`${API_URL}/api/auth/verify`);
+            const response = await axios.post(`${API_URL}/api/auth/login`, { token });
             if (response.data.success) {
               setUser(response.data.user);
               if (response.data.user.isGmailConnected) {
@@ -127,6 +127,11 @@ function App() {
       if (!result.success) {
         setError(result.error || 'Login failed');
         setLoading(false);
+        return;
+      }
+      
+      // If pending redirect, just wait
+      if (result.pending) {
         return;
       }
       
