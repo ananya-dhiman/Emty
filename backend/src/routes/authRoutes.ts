@@ -43,11 +43,20 @@ router.get('/verify', verifyToken, verifyTokenEndpoint);
 // Returns: authorizationUrl to redirect user to Google login
 router.post('/google/initiate', verifyToken, initiateGoogleOAuth);
 
+import { initiateDesktopOAuth, desktopOAuthCallback } from '../controllers/authController';
+
+// GET /api/auth/google/desktop/initiate - Start Desktop OAuth Login flow
+router.get('/google/desktop/initiate', initiateDesktopOAuth);
+
 // GET /api/auth/google/callback - Google redirects here after user consent
-// Step 2: Google sends authorization code & state parameter
-// Public route (state in Redis links it to user)
-// Returns: Success/failure of token exchange
-router.get('/google/callback', store_credentials);
+// Multiplexed to handle both Desktop Login and Gmail Connect
+router.get('/google/callback', (req, res, next) => {
+    const state = req.query.state as string;
+    if (state && state.startsWith('desktop_login_')) {
+        return desktopOAuthCallback(req, res);
+    }
+    return store_credentials(req, res);
+});
 
 /**
  * ========================================

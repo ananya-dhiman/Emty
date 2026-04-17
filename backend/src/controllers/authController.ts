@@ -5,6 +5,10 @@ import { GmailAccountModel } from '../model/GmailAccount';
 import admin from '../config/firebase';
 import mongoose from 'mongoose';
 import logger from '../utils/logger';
+import crypto from 'crypto';
+import { createOAuthClient } from '../utils/createOAuth';
+import { client } from '../utils/redis';
+import { google } from 'googleapis';
 
 const buildAiSettingsResponse = async (_user: any) => ({
     provider: 'ollama',
@@ -39,22 +43,19 @@ export const loginOrRegister = async (req: AuthRequest, res: Response): Promise<
         const decodedToken = await admin.auth().verifyIdToken(token);
         const { uid, email, name, picture } = decodedToken;
 
-        if (!email) {
-            res.status(400).json({
-                success: false,
-                message: 'Email is required for registration'
-            });
-            return;
-        }
-
-        // Check if user exists
+        // Check if user exists FIRST before enforcing email 
+        // (Custom Tokens from Desktop OAuth won't bind email to the ID token immediately)
         let user = await UserModel.findOne({ firebaseId: uid });
 
-        // Check if Gmail is connected
-        const gmailAccount = await GmailAccountModel.findOne({ userId: uid });
-        const isGmailConnected = !!gmailAccount;
-
         if (!user) {
+             if (!email) {
+                 res.status(400).json({
+                     success: false,
+                     message: 'Email is required for registration'
+                 });
+                 return;
+             }
+
             // Create new user
             user = new UserModel({
                 _id: new mongoose.Types.ObjectId(),
@@ -64,38 +65,26 @@ export const loginOrRegister = async (req: AuthRequest, res: Response): Promise<
                 avatar: picture || ''
             });
             await user.save();
-
-            res.status(201).json({
-                success: true,
-                message: 'User registered successfully',
-                user: {
-                    id: user._id,
-                    email: user.email,
-                    name: user.name,
-                    avatar: user.avatar,
-                    firebaseId: user.firebaseId,
-                    isGmailConnected,
-                    gmailAccountId: gmailAccount ? gmailAccount._id : null,
-                    ai: await buildAiSettingsResponse(user),
-                }
-            });
-        } else {
-            // User exists, return user data
-            res.status(200).json({
-                success: true,
-                message: 'Login successful',
-                user: {
-                    id: user._id,
-                    email: user.email,
-                    name: user.name,
-                    avatar: user.avatar,
-                    firebaseId: user.firebaseId,
-                    isGmailConnected,
-                    gmailAccountId: gmailAccount ? gmailAccount._id : null,
-                    ai: await buildAiSettingsResponse(user),
-                }
-            });
         }
+
+        // Check if Gmail is connected
+        const gmailAccount = await GmailAccountModel.findOne({ userId: uid });
+        const isGmailConnected = !!gmailAccount;
+
+        res.status(200).json({
+            success: true,
+            message: 'Authentication successful',
+            user: {
+                id: user._id,
+                email: user.email,
+                name: user.name,
+                avatar: user.avatar,
+                firebaseId: user.firebaseId,
+                isGmailConnected,
+                gmailAccountId: gmailAccount ? gmailAccount._id : null,
+                ai: await buildAiSettingsResponse(user),
+            }
+        });
     } catch (error: any) {
         logger.info('Login/Register error:', error.message);
         res.status(500).json({
@@ -221,6 +210,96 @@ export const updateAiSettings = async (req: AuthRequest, res: Response): Promise
     } catch (error: any) {
         logger.info('Update AI settings error:', error.message);
         res.status(500).json({ success: false, message: 'Failed to update AI settings' });
+    }
+};
+
+/**
+ * =========================================
+ * Desktop Google Login Fallback via Backend
+ * =========================================
+ */
+export const initiateDesktopOAuth = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const oauth2Client = createOAuthClient();
+        const state = crypto.randomBytes(32).toString('hex');
+        
+        await client.setEx(
+            `desktop_oauth:state:${state}`,
+            300, 
+            'pending'
+        );
+
+        const authorizationUrl = oauth2Client.generateAuthUrl({
+            access_type: 'offline',
+            prompt: 'select_account',
+            scope: ['profile', 'email'],
+            state: `desktop_login_${state}`
+        });
+
+        res.redirect(authorizationUrl);
+    } catch (error) {
+        logger.debug("Failed to initiate Desktop OAuth", error);
+        res.status(500).send("Failed to initiate Google Login.");
+    }
+};
+
+export const desktopOAuthCallback = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const code = req.query.code as string;
+        const stateParam = req.query.state as string;
+
+        if (!stateParam || !stateParam.startsWith('desktop_login_')) {
+            res.redirect('http://localhost:5173/?error=invalid_state');
+            return;
+        }
+
+        const stateId = stateParam.replace('desktop_login_', '');
+        const stateExists = await client.get(`desktop_oauth:state:${stateId}`);
+
+        if (!stateExists) {
+            res.redirect('http://localhost:5173/?error=session_expired');
+            return;
+        }
+
+        const oauth2Client = createOAuthClient();
+        const { tokens } = await oauth2Client.getToken(code);
+        oauth2Client.setCredentials(tokens);
+
+        const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+        const userInfoRes = await oauth2.userinfo.get();
+        const googleUser = userInfoRes.data;
+
+        if (!googleUser.email) {
+            res.redirect('http://localhost:5173/?error=no_email');
+            return;
+        }
+
+        const uid = googleUser.id!; 
+
+        // Upsert user in database
+        let user = await UserModel.findOne({ email: googleUser.email });
+        if (!user) {
+            user = new UserModel({
+                _id: new mongoose.Types.ObjectId(),
+                firebaseId: uid,
+                email: googleUser.email,
+                name: googleUser.name || '',
+                avatar: googleUser.picture || ''
+            });
+            await user.save();
+        } else if (!user.firebaseId || user.firebaseId !== uid) {
+            user.firebaseId = uid;
+            await user.save();
+        }
+
+        const customToken = await admin.auth().createCustomToken(user.firebaseId);
+
+        await client.del(`desktop_oauth:state:${stateId}`);
+
+        res.redirect(`http://localhost:5173/?desktop_login_token=${customToken}`);
+    } catch (error: any) {
+        logger.debug('Desktop OAuth Callback Error', error);
+        res.redirect(`http://localhost:5173/?error=auth_failed`);
     }
 };
 

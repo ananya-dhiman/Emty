@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from 'react'
 import './App.css'
-import { signInWithGoogle, signOutUser, auth } from './utils/firebase'
-import { onIdTokenChanged } from 'firebase/auth'
+import { signOutUser, auth } from './utils/firebase'
+import { onIdTokenChanged, signInWithCustomToken } from 'firebase/auth'
 import axios from 'axios'
 import { ConnectGmail } from './components/ConnectGmail'
 import { Dashboard } from './components/Dashboard'
@@ -53,6 +53,9 @@ function App() {
     const gmailSuccess = params.get('gmail_success');
     const gmailError = params.get('gmail_error');
 
+    const desktopLoginToken = params.get('desktop_login_token');
+    const authError = params.get('error');
+
     if (gmailSuccess === 'true') {
       setIsGmailConnected(true);
       setRoute('syncing'); // Sync runs first; it navigates to onboarding when done
@@ -65,6 +68,20 @@ function App() {
          setError(`Gmail connection error: ${gmailError.replace('_', ' ')}`);
       }
       // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (desktopLoginToken) {
+      setLoading(true);
+      signInWithCustomToken(auth, desktopLoginToken).then(() => {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }).catch((err: any) => {
+        console.error("Custom token sign in failed", err);
+        setError('Desktop Secure Login failed: ' + err.message);
+        setLoggedOutView('signin');
+        setLoading(false);
+      });
+    } else if (authError) {
+      setError(`Authentication Error: ${authError.replace(/_/g, ' ')}`);
+      setLoggedOutView('signin');
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
@@ -115,52 +132,13 @@ function App() {
   }, [theme]);
 
   /**
-   * Handle Google Login
+   * Handle Google Login via Desktop Native Flow
    */
   const handleLogin = async () => {
     setLoading(true);
     setError('');
-
-    try {
-      const result = await signInWithGoogle();
-
-      if (!result.success) {
-        setError(result.error || 'Login failed');
-        setLoading(false);
-        return;
-      }
-      
-      // If pending redirect, just wait
-      if (result.pending) {
-        return;
-      }
-      
-      const response = await axios.post(`${API_URL}/api/auth/login`, {
-        token: result.token
-      });
-
-      const data = response.data;
-
-      if (!data.success) {
-        setError(data.message || 'Backend authentication failed');
-        setLoading(false);
-        return;
-      }
-
-      if (result.token) {
-        localStorage.setItem('firebaseToken', result.token);
-      }
-      setUser(data.user);
-      if (data.user.isGmailConnected) {
-        setIsGmailConnected(true);
-      }
-
-    } catch (err: any) {
-      console.error('Login error:', err);
-      setError(err?.response?.data?.message || err?.message || 'An error occurred during login');
-    } finally {
-      setLoading(false);
-    }
+    // Safely redirect Tauri app to Backend handler
+    window.location.href = `${API_URL}/api/auth/google/desktop/initiate`;
   };
 
   /**
