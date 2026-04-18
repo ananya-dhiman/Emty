@@ -4,7 +4,6 @@ import axios from 'axios';
 import '../styles/Dashboard.css';
 import { API_BASE_URL } from '../utils/api';
 
-const API_URL = API_BASE_URL;
 
 interface ProfileProps {
   user: any;
@@ -206,7 +205,7 @@ function PreferencesPanel({ accountId }: { accountId: string }) {
 
     setLoadState('loading');
     try {
-      const { data } = await axios.get(`${API_URL}/api/intent/profile`, {
+      const { data } = await axios.get(`${API_BASE_URL}/api/intent/profile`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (data.success && data.profile) {
@@ -248,7 +247,7 @@ function PreferencesPanel({ accountId }: { accountId: string }) {
         inferredLabels: form.labelChips,
         userPrompt: form.intentBoxes.map((s) => s.trim()).filter(Boolean),
       };
-      const { data } = await axios.post(`${API_URL}/api/intent/profile`, payload, {
+      const { data } = await axios.post(`${API_BASE_URL}/api/intent/profile`, payload, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (data.success) {

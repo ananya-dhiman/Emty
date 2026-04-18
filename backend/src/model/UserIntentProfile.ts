@@ -64,8 +64,7 @@ const UserIntentProfileSchema = new Schema<IUserIntentProfile>(
   { timestamps: true }
 );
 
-UserIntentProfileSchema.index({ userId: 1 });
-
+// UserIntentProfileSchema.index({ userId: 1 }); - duplicated by unique:true
 export const UserIntentProfileModel = mongoose.model<IUserIntentProfile>(
   "UserIntentProfile",
   UserIntentProfileSchema

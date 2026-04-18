@@ -13,8 +13,7 @@ import  LandingPage  from './components/LandingPage'
 import { API_BASE_URL } from './utils/api'
 import MetricsDashboard from './pages/MetricsDashboard';
 
-const API_URL = API_BASE_URL;
-
+// No static cache, always resolve API_BASE_URL at runtime
 // Global Axios Interceptor to automatically append the freshest Firebase token
 axios.interceptors.request.use(async (config) => {
   if (auth.currentUser) {
@@ -95,7 +94,7 @@ function App() {
           localStorage.setItem('firebaseToken', token);
           
           if (!user) {
-            const response = await axios.post(`${API_URL}/api/auth/login`, { token });
+            const response = await axios.post(`${API_BASE_URL}/api/auth/login`, { token });
             if (response.data.success) {
               setUser(response.data.user);
               if (response.data.user.isGmailConnected) {
@@ -138,7 +137,7 @@ function App() {
     setLoading(true);
     setError('');
     // Safely redirect Tauri app to Backend handler
-    window.location.href = `${API_URL}/api/auth/google/desktop/initiate`;
+    window.location.href = `${API_BASE_URL}/api/auth/google/desktop/initiate`;
   };
 
   /**
@@ -154,7 +153,7 @@ function App() {
         throw new Error('No authentication token found. Please log in again.');
       }
 
-      const response = await axios.post(`${API_URL}/api/auth/google/initiate`, {}, {
+      const response = await axios.post(`${API_BASE_URL}/api/auth/google/initiate`, {}, {
         headers: {
           Authorization: `Bearer ${token}`
         }

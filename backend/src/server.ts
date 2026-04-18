@@ -14,13 +14,24 @@ dotenv.config();
 
 const app = express();
 
-// Middleware
-app.use(cors({
-  origin: [
-    "https://emty-vert.vercel.app",
-    "http://localhost:5173"
+// CORS: allow tauri:// protocol, any localhost port, and the web deployment.
+// The backend runs as a private sidecar - it is never publicly accessible.
+const ALLOWED_ORIGINS = [
+  "https://emty-vert.vercel.app",
+];
 
-  ],
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (desktop native, curl, health checks)
+    if (!origin) return callback(null, true);
+    // Allow the Tauri custom protocol
+    if (origin.startsWith("tauri://")) return callback(null, true);
+    // Allow any localhost regardless of port (dev + sidecar)
+    if (origin.startsWith("http://localhost") || origin.startsWith("http://127.0.0.1")) return callback(null, true);
+    // Allow known web origins
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
   credentials: true
 }));
 app.use(express.json()); // Parse JSON bodies

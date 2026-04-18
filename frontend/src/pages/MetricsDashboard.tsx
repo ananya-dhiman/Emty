@@ -4,7 +4,7 @@ import MetricsCharts from '../components/MetricsCharts';
 import type { MetricsResult, AggregateMetrics, MetricsInfo } from '../utils/metricsTypes';
 import '../styles/MetricsDashboard.css';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+import { API_BASE_URL } from '../utils/api';
 
 export const MetricsDashboard: React.FC = () => {
   const [metrics, setMetrics] = useState<MetricsResult | null>(null);

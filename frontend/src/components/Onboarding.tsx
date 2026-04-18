@@ -194,7 +194,6 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
 
-  const API_URL = API_BASE_URL;
   const token = localStorage.getItem('firebaseToken');
   const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
 
@@ -203,7 +202,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     const fetchProfile = async () => {
       if (!token) { setLoadingProfile(false); return; }
       try {
-        const { data } = await axios.get(`${API_URL}/api/intent/profile`, { headers });
+        const { data } = await axios.get(`${API_BASE_URL}/api/intent/profile`, { headers });
         if (data.success && data.profile) {
           const p = data.profile;
           setKeywords([...new Set([...(p.includeKeywords || [])])]);
@@ -229,7 +228,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
       if (!user?.gmailAccountId || !token) { setLoadingLabels(false); return; }
       try {
         const { data } = await axios.get(
-          `${API_URL}/api/emails/label-priorities?accountId=${user.gmailAccountId}`,
+          `${API_BASE_URL}/api/emails/label-priorities?accountId=${user.gmailAccountId}`,
           { headers }
         );
         if (data.success && data.priorities) {
@@ -266,7 +265,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     try {
       const filledPrompts = intentBoxes.filter((b) => b.trim().length > 0);
       await axios.post(
-        `${API_URL}/api/intent/profile`,
+        `${API_BASE_URL}/api/intent/profile`,
         {
           includeKeywords: keywords,
           preferredDomains: senders,
@@ -306,7 +305,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     try {
       setSaving(true);
       const { data } = await axios.post(
-        `${API_URL}/api/emails/labels`,
+        `${API_BASE_URL}/api/emails/labels`,
         { accountId: user.gmailAccountId, name: newLabelName.trim(), description: newLabelDesc.trim() },
         { headers }
       );
@@ -329,7 +328,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
 
   const completeOnboardingAndStartProcessing = async () => {
     await axios.post(
-      `${API_URL}/api/intent/profile`,
+      `${API_BASE_URL}/api/intent/profile`,
       { onboardingCompleted: true },
       { headers }
     );
@@ -341,12 +340,12 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     try {
       setSaving(true);
       await axios.put(
-        `${API_URL}/api/emails/label-priorities`,
+        `${API_BASE_URL}/api/emails/label-priorities`,
         { accountId: user.gmailAccountId, orderedLabelIds: labels.map((l) => l.id) },
         { headers }
       );
       await axios.post(
-        `${API_URL}/api/emails/label-priorities/review`,
+        `${API_BASE_URL}/api/emails/label-priorities/review`,
         { accountId: user.gmailAccountId },
         { headers }
       );

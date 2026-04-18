@@ -39,11 +39,18 @@ async function download(url, dest) {
 
       response.pipe(file);
       file.on('finish', () => {
-        file.close();
-        // Give execution permissions on unix
-        if (!dest.endsWith('.exe')) fs.chmodSync(dest, 0o755);
-        logger(`Saved to ${dest}`);
-        resolve();
+        file.close((err) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          // Give execution permissions on unix
+          if (!dest.endsWith('.exe')) {
+            try { fs.chmodSync(dest, 0o755); } catch(e){}
+          }
+          logger(`Saved to ${dest}`);
+          setTimeout(resolve, 500); // 500ms buffer for Windows OS handle release
+        });
       });
     }).on('error', (err) => {
       fs.unlink(dest, () => {});

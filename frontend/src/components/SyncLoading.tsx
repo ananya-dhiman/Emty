@@ -18,7 +18,6 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
   const [stageLabel, setStageLabel] = useState('Initializing sync');
   const [statusDetail, setStatusDetail] = useState('We are securely fetching and organizing your emails into your new priority stack.');
   const [typedDetail, setTypedDetail] = useState('');
-  const API_URL = API_BASE_URL;
 
   // Keep a ref to always read the latest user prop inside the effect closure
   const userRef = useRef(user);
@@ -196,7 +195,7 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
         } else {
             console.log('[SyncLoading] Initiating sync call to backend for account:', currentUser.gmailAccountId);
             const headers = await getAuthHeaders();
-            const response = await axios.post(`${API_URL}/api/emails/sync`, {
+            const response = await axios.post(`${API_BASE_URL}/api/emails/sync`, {
               accountId: currentUser.gmailAccountId
             }, headers ? { headers } : undefined);
             console.log('[SyncLoading] Sync call completed successfully.', response.data);
