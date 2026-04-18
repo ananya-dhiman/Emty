@@ -34,6 +34,7 @@
       "icons/icon.ico"
     ],
     "resources": [
+      "../../backend/package.json",
       "../../backend/dist/**/*",
       "../../backend/node_modules/**/*"
     ],

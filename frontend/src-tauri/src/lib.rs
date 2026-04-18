@@ -1,5 +1,6 @@
 use tauri::{Manager, State};
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_shell::process::CommandEvent;
 use std::time::Duration;
 
 struct AppState {
@@ -36,7 +37,7 @@ pub fn run() {
             let backend_entry_path = resource_dir.join("_up_").join("_up_").join("backend").join("dist").join("index.js");
 
             // Spawn the Node sidecar
-            let (_rx, _child) = app
+            let (mut rx, _child) = app
                 .shell()
                 .sidecar("node")
                 .expect("Failed to create sidecar command")
@@ -45,6 +46,16 @@ pub fn run() {
                 .env("TAURI_APP_DATA_DIR", app_data_dir.to_string_lossy().to_string())
                 .spawn()
                 .expect("Failed to spawn node sidecar");
+            
+            tauri::async_runtime::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    if let CommandEvent::Stdout(line) = event {
+                        println!("[Backend] {}", String::from_utf8_lossy(&line));
+                    } else if let CommandEvent::Stderr(line) = event {
+                        eprintln!("[Backend Errors] {}", String::from_utf8_lossy(&line));
+                    }
+                }
+            });
 
             // Poll the backend health endpoint before showing UI
             let client = reqwest::blocking::Client::new();
