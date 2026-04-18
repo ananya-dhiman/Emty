@@ -8,3 +8,6 @@ type
  
 #Local database
 local.db
+
+# Distribution
+dist

@@ -14,7 +14,7 @@ import { initializeDatabase, closeDatabase } from "./db/sqlite";
  * Connects to databases and starts Express server
  */
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.TAURI_PORT || process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/emty";
 
 /**
@@ -45,13 +45,15 @@ mongoose
         process.exit(1);
     });
 
-// Handle graceful shutdown
-process.on("SIGINT", async () => {
+const shutdownHandler = async () => {
     logger.info("Shutting down gracefully...");
     closeDatabase();
     await mongoose.connection.close();
     logger.info("All database connections closed");
     process.exit(0);
-});
+};
+
+process.on("SIGINT", shutdownHandler);
+process.on("SIGTERM", shutdownHandler);
 
 

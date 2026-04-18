@@ -20,7 +20,11 @@ export function getDb(): Database.Database {
  */
 export function initializeDatabase(): void {
   try {
-    const dbPath = process.env.LOCAL_DB_PATH || "./local.db";
+    const dbName = process.env.LOCAL_DB_PATH || "local.db";
+    let dbPath = dbName;
+    if (process.env.TAURI_APP_DATA_DIR) {
+      dbPath = path.join(process.env.TAURI_APP_DATA_DIR, dbName);
+    }
     const absolutePath = path.resolve(dbPath);
 
     db = new Database(absolutePath);
