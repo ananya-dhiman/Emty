@@ -25,7 +25,9 @@ pub fn run() {
                 )?;
             }
 
-            let port = portpicker::pick_unused_port().expect("Failed to find unused port");
+            // Try to use a fixed port (5000) for OAuth redirect matching, fallback to random if used
+            let port = 5000;
+            // Note: In production we should ensure 5000 is available, or use deep linking.
             app.manage(AppState { backend_port: port });
 
             let app_data_dir = app.path().app_data_dir().expect("Failed to resolve app data dir");

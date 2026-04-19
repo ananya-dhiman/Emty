@@ -97,7 +97,7 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
       try {
         const headers = await getAuthHeaders();
         await axios.post(
-          `${API_URL}/api/intent/cold-start`,
+          `${API_BASE_URL}/api/intent/cold-start`,
           { accountId: currentUser.gmailAccountId },
           headers ? { headers } : undefined
         );
@@ -152,7 +152,7 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
       try {
         const headers = await getAuthHeaders();
         const { data } = await axios.get(
-          `${API_URL}/api/emails/sync-progress?accountId=${currentUser.gmailAccountId}`,
+          `${API_BASE_URL}/api/emails/sync-progress?accountId=${currentUser.gmailAccountId}`,
           headers ? { headers } : undefined
         );
         if (data?.success) applyProgressFromBackend(data);

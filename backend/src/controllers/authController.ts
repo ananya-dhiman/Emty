@@ -248,8 +248,10 @@ export const desktopOAuthCallback = async (req: AuthRequest, res: Response): Pro
         const code = req.query.code as string;
         const stateParam = req.query.state as string;
 
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
         if (!stateParam || !stateParam.startsWith('desktop_login_')) {
-            res.redirect('http://localhost:5173/?error=invalid_state');
+            res.redirect(`${frontendUrl}/?error=invalid_state`);
             return;
         }
 
@@ -257,7 +259,7 @@ export const desktopOAuthCallback = async (req: AuthRequest, res: Response): Pro
         const stateExists = await client.get(`desktop_oauth:state:${stateId}`);
 
         if (!stateExists) {
-            res.redirect('http://localhost:5173/?error=session_expired');
+            res.redirect(`${frontendUrl}/?error=session_expired`);
             return;
         }
 
@@ -270,7 +272,7 @@ export const desktopOAuthCallback = async (req: AuthRequest, res: Response): Pro
         const googleUser = userInfoRes.data;
 
         if (!googleUser.email) {
-            res.redirect('http://localhost:5173/?error=no_email');
+            res.redirect(`${frontendUrl}/?error=no_email`);
             return;
         }
 
@@ -296,10 +298,11 @@ export const desktopOAuthCallback = async (req: AuthRequest, res: Response): Pro
 
         await client.del(`desktop_oauth:state:${stateId}`);
 
-        res.redirect(`http://localhost:5173/?desktop_login_token=${customToken}`);
+        res.redirect(`${frontendUrl}/?desktop_login_token=${customToken}`);
     } catch (error: any) {
         logger.debug('Desktop OAuth Callback Error', error);
-        res.redirect(`http://localhost:5173/?error=auth_failed`);
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        res.redirect(`${frontendUrl}/?error=auth_failed`);
     }
 };
 
