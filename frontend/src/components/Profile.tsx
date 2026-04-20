@@ -475,6 +475,52 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
   const togglePanel = (id: string) =>
     setOpenPrefPanel((prev) => (prev === id ? null : id));
 
+  // Ollama + GPU info (desktop only)
+  const [ollamaInfo, setOllamaInfo] = useState<{
+    source: string;
+    status: string;
+    model: string;
+    origin: string;
+  } | null>(null);
+  const [gpuInfo, setGpuInfo] = useState<{
+    detected: boolean;
+    name: string | null;
+    acceleration_likely: boolean;
+    display_message: string;
+  } | null>(null);
+
+  const isTauri = typeof window !== 'undefined' && typeof (window as any).__TAURI_INTERNALS__ !== 'undefined';
+
+  const loadOllamaInfo = useCallback(async () => {
+    if (!isTauri) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const [ollama, gpu] = await Promise.all([
+        invoke('get_ollama_status') as Promise<any>,
+        invoke('get_gpu_info') as Promise<any>,
+      ]);
+      setOllamaInfo(ollama);
+      setGpuInfo(gpu);
+    } catch (e) {
+      console.error('Failed to load Ollama/GPU info:', e);
+    }
+  }, [isTauri]);
+
+  useEffect(() => {
+    loadOllamaInfo();
+  }, [loadOllamaInfo]);
+
+  const handleRestartOllama = async () => {
+    if (!isTauri) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const result = await invoke('restart_ollama') as any;
+      setOllamaInfo(result);
+    } catch (e) {
+      console.error('Failed to restart Ollama:', e);
+    }
+  };
+
   return (
     <div
       style={{
@@ -717,6 +763,217 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
               </div>
             )}
           </div>
+
+          {/* Local AI Engine Info -- desktop only */}
+          {isTauri && (
+            <div
+              id="local-ai-engine-section"
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                overflow: 'hidden',
+                marginTop: '20px',
+              }}
+            >
+              <div
+                style={{
+                  padding: '12px 20px',
+                  borderBottom: '1px solid var(--border-lt)',
+                  background: 'var(--panel)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '10px',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.07em',
+                    color: 'var(--text-2)',
+                  }}
+                >
+                  Local AI Engine
+                </span>
+                {ollamaInfo && (
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '9px',
+                      padding: '2px 8px',
+                      border: '1px solid',
+                      borderColor: ollamaInfo.source !== 'None'
+                        ? 'var(--green, #22c55e)'
+                        : 'var(--text-3)',
+                      color: ollamaInfo.source !== 'None'
+                        ? 'var(--green, #22c55e)'
+                        : 'var(--text-3)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                    }}
+                  >
+                    {ollamaInfo.source !== 'None' ? 'Active' : 'Unavailable'}
+                  </span>
+                )}
+              </div>
+
+              <div style={{ padding: '16px 20px' }}>
+                {/* Status row */}
+                {ollamaInfo ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+                      <div>
+                        <div style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '9px',
+                          color: 'var(--text-3)',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                          marginBottom: '3px',
+                        }}>
+                          Status
+                        </div>
+                        <div style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '12px',
+                          color: 'var(--text-1)',
+                        }}>
+                          {ollamaInfo.source !== 'None'
+                            ? `Running (${gpuInfo?.acceleration_likely ? 'GPU' : 'CPU'} mode)`
+                            : 'Not running'}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '9px',
+                          color: 'var(--text-3)',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                          marginBottom: '3px',
+                        }}>
+                          Model
+                        </div>
+                        <div style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '12px',
+                          color: 'var(--text-1)',
+                        }}>
+                          {ollamaInfo.model}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '9px',
+                          color: 'var(--text-3)',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                          marginBottom: '3px',
+                        }}>
+                          Source
+                        </div>
+                        <div style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '12px',
+                          color: 'var(--text-1)',
+                        }}>
+                          {ollamaInfo.source === 'System'
+                            ? 'System installed'
+                            : ollamaInfo.source === 'Bundled'
+                            ? 'Bundled'
+                            : '--'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* GPU info */}
+                    {gpuInfo && (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '8px',
+                        padding: '10px 12px',
+                        background: 'var(--bg)',
+                        border: '1px solid var(--border-lt)',
+                        marginTop: '4px',
+                      }}>
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="var(--text-3)"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          style={{ flexShrink: 0, marginTop: '1px' }}
+                        >
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="16" x2="12" y2="12" />
+                          <line x1="12" y1="8" x2="12.01" y2="8" />
+                        </svg>
+                        <div>
+                          <div style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '11px',
+                            color: 'var(--text-2)',
+                            lineHeight: 1.5,
+                          }}>
+                            {gpuInfo.detected && gpuInfo.name
+                              ? `GPU: ${gpuInfo.name}`
+                              : 'No dedicated GPU detected'}
+                          </div>
+                          <div style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '10px',
+                            color: 'var(--text-3)',
+                            lineHeight: 1.5,
+                            marginTop: '2px',
+                          }}>
+                            GPU acceleration is optional and only enhances performance.
+                            It will not hamper functioning of the app.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Retry button when unavailable */}
+                    {ollamaInfo.source === 'None' && (
+                      <button
+                        id="ollama-retry-btn"
+                        onClick={handleRestartOllama}
+                        style={{
+                          alignSelf: 'flex-start',
+                          padding: '6px 14px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          fontFamily: 'var(--font-mono)',
+                          background: 'var(--surface)',
+                          color: 'var(--text-2)',
+                          border: '1px solid var(--border)',
+                          cursor: 'pointer',
+                          marginTop: '4px',
+                        }}
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '11px',
+                    color: 'var(--text-3)',
+                  }}>
+                    Loading AI engine info...
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -1,0 +1,198 @@
+/* ════════════════════════════════════════════════
+   AppIntro.css
+   Desktop exclusive intro screen.
+   Premium, sleek, focused on authentication.
+════════════════════════════════════════════════ */
+
+.intro-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100vw;
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  position: relative;
+  overflow: hidden;
+  transition: background 0.3s ease;
+}
+
+/* ─── AMBIENT GLOW BACKDROP ─── */
+.intro-glow-1 {
+  position: absolute;
+  top: -20%;
+  left: -10%;
+  width: 50vw;
+  height: 50vw;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 60%);
+  border-radius: 50%;
+  filter: blur(80px);
+  z-index: 0;
+  opacity: 0.6;
+}
+
+.intro-glow-2 {
+  position: absolute;
+  bottom: -20%;
+  right: -10%;
+  width: 40vw;
+  height: 40vw;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 60%);
+  border-radius: 50%;
+  filter: blur(80px);
+  z-index: 0;
+  opacity: 0.4;
+}
+
+/* ─── NAV ─── */
+.intro-nav {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 30px 50px;
+}
+
+.intro-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.intro-logo svg {
+  width: 24px;
+  height: 24px;
+}
+
+.intro-logo-text {
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: -0.5px;
+}
+
+.intro-theme-toggle {
+  background: transparent;
+  border: 1px solid var(--border-lt);
+  color: var(--text-2);
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border-radius: 4px;
+}
+
+.intro-theme-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: var(--glow-sm);
+}
+
+/* ─── MAIN CONTENT ─── */
+.intro-content {
+  position: relative;
+  z-index: 10;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 0 20px;
+}
+
+.intro-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--accent);
+  margin-bottom: 24px;
+  border: 1px solid var(--accent-glow);
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: rgba(0,0,0,0.02);
+}
+
+[data-mode="dark"] .intro-tag {
+  background: rgba(255,255,255,0.02);
+}
+
+.intro-hl {
+  font-size: clamp(48px, 6vw, 72px);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -1px;
+  margin-bottom: 24px;
+  max-width: 600px;
+}
+
+.intro-hl span {
+  color: var(--accent);
+}
+
+.intro-sub {
+  font-size: 16px;
+  color: var(--text-2);
+  max-width: 480px;
+  line-height: 1.6;
+  margin-bottom: 48px;
+}
+
+/* ─── ACTIONS ─── */
+.intro-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.intro-btn-primary {
+  width: 100%;
+  padding: 16px;
+  background: var(--text-1);
+  color: var(--bg);
+  border: none;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-radius: 4px;
+}
+
+.intro-btn-primary:hover {
+  transform: translateY(-2px);
+  background: var(--accent);
+  color: var(--accent-inv);
+  box-shadow: 0 4px 12px var(--accent-glow);
+}
+
+/* ─── FOOTER ─── */
+.intro-footer {
+  position: relative;
+  z-index: 10;
+  padding: 30px 50px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.intro-footer-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.intro-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--accent);
+}

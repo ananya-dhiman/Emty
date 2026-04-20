@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm --prefix ../backend run build && npm run setup:sidecar && npm run dev",
-    "beforeBuildCommand": "npm --prefix ../backend run build && npm run setup:sidecar && npm run build"
+    "beforeDevCommand": "npm --prefix ../backend run build && npm run setup:sidecar && npm run setup:ollama-sidecar && npm run dev",
+    "beforeBuildCommand": "npm --prefix ../backend run build && npm run setup:sidecar && npm run setup:ollama-sidecar && npm run build"
   },
   "app": {
     "windows": [
@@ -40,7 +40,8 @@
       "../../backend/node_modules/**/*"
     ],
     "externalBin": [
-      "binaries/node"
+      "binaries/node",
+      "binaries/ollama"
     ]
   }
 }

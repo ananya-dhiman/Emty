@@ -3,24 +3,44 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 
-import { initApi } from './utils/api';
+import { initApi, API_BASE_URL } from './utils/api';
 import { useState, useEffect } from 'react';
+import { SystemLoader } from './components/SystemLoader';
 
 function AppLauncher() {
-  const [ready, setReady] = useState(false);
+  const [apiReady, setApiReady] = useState(false);
+  const [backendReady, setBackendReady] = useState(false);
 
   useEffect(() => {
     initApi().finally(() => {
-      setReady(true);
+      setApiReady(true);
     });
   }, []);
 
-  if (!ready) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column' }}>
-        <div style={{ marginBottom: '20px' }}>Loading services...</div>
-      </div>
-    );
+  useEffect(() => {
+    if (!apiReady) return;
+    
+    let isCancelled = false;
+    const checkBackend = async () => {
+      try {
+         const res = await fetch(`${API_BASE_URL}/health`);
+         if (res.ok) {
+            if (!isCancelled) setBackendReady(true);
+            return;
+         }
+      } catch (e) {
+         // Server not ready yet, will retry
+      }
+      if (!isCancelled) {
+         setTimeout(checkBackend, 500); // retry every 500ms
+      }
+    };
+    checkBackend();
+    return () => { isCancelled = true; };
+  }, [apiReady]);
+
+  if (!backendReady) {
+    return <SystemLoader />;
   }
 
   return <App />;

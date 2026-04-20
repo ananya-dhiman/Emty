@@ -1,0 +1,87 @@
+/* ════════════════════════════════════════════════
+   SystemLoader.css
+   Minimalistic, premium pulsing skeleton UI.
+   Relies heavily on global tokens: var(--bg),
+   var(--accent), var(--text-2), etc.
+════════════════════════════════════════════════ */
+
+.sys-loader-root {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  transition: background 0.3s ease;
+}
+
+@keyframes pulseGlow {
+  0% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.4); opacity: 0.8; }
+  70% { box-shadow: 0 0 0 15px rgba(0, 229, 255, 0); opacity: 1; }
+  100% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0); opacity: 0.8; }
+}
+
+@keyframes skeletonPulse {
+  0% { opacity: 0.2; }
+  50% { opacity: 0.5; }
+  100% { opacity: 0.2; }
+}
+
+.sys-loader-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border-lt);
+  margin-bottom: 30px;
+  position: relative;
+  transition: border-color 0.4s ease;
+  animation: pulseGlow 2.5s infinite;
+}
+
+.sys-loader-logo svg {
+  color: var(--text-1);
+  width: 24px;
+  height: 24px;
+}
+
+.sys-loader-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--accent);
+  margin-bottom: 20px;
+  min-height: 15px; 
+}
+
+.sys-loader-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+.sys-sk-line {
+  height: 2px;
+  background: var(--border-lt);
+  border-radius: 2px;
+  animation: skeletonPulse 1.8s infinite ease-in-out;
+}
+
+.sys-sk-line.l1 { width: 120px; animation-delay: 0s; }
+.sys-sk-line.l2 { width: 80px; animation-delay: 0.2s; }
+.sys-sk-line.l3 { width: 100px; animation-delay: 0.4s; }
+
+.sys-loader-note {
+  position: absolute;
+  bottom: 40px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-3);
+  letter-spacing: 1px;
+}

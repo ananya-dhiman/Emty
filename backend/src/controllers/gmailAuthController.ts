@@ -78,14 +78,14 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
     const oauth2Client = createOAuthClient();
     const code: string = req.query.code as string;
     const state: string = req.query.state as string;
-
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     try {
         // ========== STEP 1: Validate state from Redis ==========
         // State is the security token we created and stored in initiateGoogleOAuth
         // If state is invalid/missing, this is a suspicious request (CSRF attack)
         
         if (!state) {
-            res.redirect('http://localhost:5173/?gmail_error=missing_state');
+            res.redirect(`${frontendUrl}/?gmail_error=missing_state`);
             return;
         }
 
@@ -93,7 +93,7 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         const uid = await client.get(`oauth:state:${state}`);
 
         if (!uid) {
-            res.redirect('http://localhost:5173/?gmail_error=invalid_state');
+            res.redirect(`${frontendUrl}/?gmail_error=invalid_state`);
             return;
         }
 
@@ -109,7 +109,7 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         const email = profile.data.emailAddress?.toLowerCase();
 
         if (!email) {
-            res.redirect('http://localhost:5173/?gmail_error=no_email');
+            res.redirect(`${frontendUrl}/?gmail_error=no_email`);
             return;
         }
 
