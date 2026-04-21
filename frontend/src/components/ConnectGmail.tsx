@@ -1,3 +1,5 @@
+import { Logo } from './Logo';
+
 interface ConnectGmailProps {
   onConnect: () => void;
   loading?: boolean;
@@ -8,15 +10,11 @@ export function ConnectGmail({ onConnect, loading }: ConnectGmailProps) {
     <div className="auth-container">
       <div className="shell auth-shell" style={{ minHeight: '360px' }}>
         <div className="bar auth-bar">
-          <div className="bar-logo">
-            <div className="logo-block">
-              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                <rect x="1" y="1" width="9" height="1.8" fill="var(--accent-inv)"/>
-                <rect x="1" y="4.6" width="9" height="1.8" fill="var(--accent-inv)"/>
-                <rect x="1" y="8.2" width="5.5" height="1.8" fill="var(--accent-inv)"/>
-              </svg>
+          <div className="bar-logo" style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+            <div className="logo-block" style={{color: 'var(--accent-inv)'}}>
+              <Logo size={14} />
             </div>
-            Emty
+            <span style={{color: 'var(--accent-inv)', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 600}}>Emty</span>
           </div>
         </div>
         <div className="auth-content">

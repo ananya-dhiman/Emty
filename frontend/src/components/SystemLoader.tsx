@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SystemLoader.css';
+import { Logo } from './Logo';
 
 const MESSAGES = [
   'INITIALIZING SUBSYSTEMS',
@@ -24,10 +25,7 @@ export const SystemLoader: React.FC = () => {
   return (
     <div className="sys-loader-root">
       <div className="sys-loader-logo">
-        <svg viewBox="0 0 28 28" fill="none">
-          <rect x="1.5" y="1.5" width="25" height="25" stroke="currentColor" strokeWidth="2.2" />
-          <polygon points="14,5 22,14 14,23 6,14" fill="none" stroke="currentColor" strokeWidth="2" />
-        </svg>
+        <Logo size={28} />
       </div>
 
       <div className="sys-loader-status">
