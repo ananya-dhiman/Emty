@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use tauri::Manager; 
 
 // ---------------------------------------------------------------------------
 // Public types

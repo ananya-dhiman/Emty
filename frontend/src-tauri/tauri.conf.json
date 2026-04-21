@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm --prefix ../backend run build && npm run setup:sidecar && npm run setup:ollama-sidecar && npm run dev",
+    "beforeDevCommand": "npm --prefix ../backend run build && npm run setup:sidecar && npm run dev",
     "beforeBuildCommand": "npm --prefix ../backend run build && npm run setup:sidecar && npm run setup:ollama-sidecar && npm run build"
   },
   "app": {
