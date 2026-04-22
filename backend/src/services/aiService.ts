@@ -272,7 +272,8 @@ const validateInsights = (insights: AIInsightExtraction): void => {
 
 const extractWithOllama = async (
   prompt: string,
-  model: string
+  model: string,
+  attemptFallback = true
 ): Promise<AIInsightExtraction> => {
   const response = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
     method: "POST",
@@ -290,6 +291,33 @@ const extractWithOllama = async (
 
   if (!response.ok) {
     const txt = await response.text();
+    
+    // Dynamic Fallback if model is not found (happens if backend hits api before full provisioning is done)
+    if (response.status === 404 && txt.includes("not found") && attemptFallback) {
+      logger.info(`[AI] Requested model ${model} not found, attempting dynamic fallback...`);
+      try {
+        const tagsRes = await fetch(`${OLLAMA_URL}/api/tags`);
+        if (tagsRes.ok) {
+          const tagsData: any = await tagsRes.json();
+          const availableModels = tagsData?.models || [];
+          const validFallbackModels = availableModels.filter((m: any) => !m.name.includes('embed'));
+          if (validFallbackModels.length > 0) {
+            const fallbackModel = (
+              validFallbackModels.find((m: any) => m.name.includes('qwen')) || 
+              validFallbackModels.find((m: any) => m.name.includes('llama')) || 
+              validFallbackModels[0]
+            ).name;
+            logger.info(`[AI] Successfully located fallback model: ${fallbackModel}. Retrying extraction.`);
+            return await extractWithOllama(prompt, fallbackModel, false);
+          } else {
+            throw new Error(`AIPendingProvisioningError: No chat-capable models are available currently. Ollama is likely still downloading the primary model.`);
+          }
+        }
+      } catch (e) {
+        logger.debug(`[AI] Failed to fetch fallback models from /api/tags: ${e}`);
+      }
+    }
+
     throw new Error(`Ollama API error: ${response.status} ${txt.slice(0, 500)}`);
   }
 

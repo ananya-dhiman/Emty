@@ -34,6 +34,60 @@ pub struct OllamaState {
     pub port: u16,
     pub model: String,
     pub model_present: bool,
+    pub selected_model: String,
+    pub embedding_model_present: bool,
+    pub inference_model_present: bool,
+    pub provisioning_status: String,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelTier {
+    pub model_name: String,
+    pub display_name: String,
+    pub size: String,
+    pub ram_required: u64,
+    pub recommended_for: String,
+    pub accuracy_rating: String,
+    pub speed_rating: String,
+}
+
+pub fn get_model_for_specs(ram_gb: u64, has_gpu: bool) -> ModelTier {
+    if ram_gb < 8 {
+        ModelTier {
+            model_name: "qwen2.5:3b".to_string(),
+            display_name: "Qwen 2.5 (3B) - Basic".to_string(),
+            size: "2.2GB".to_string(),
+            ram_required: 6,
+            recommended_for: "Low-spec devices".to_string(),
+            accuracy_rating: "Good (75%)".to_string(),
+            speed_rating: "Fast".to_string(),
+        }
+    } else if ram_gb < 16 {
+       
+            ModelTier {
+                model_name: "qwen2.5:7b".to_string(),
+                display_name: "Qwen 2.5 (7B) - Recommended".to_string(),
+                size: "4.7GB".to_string(),
+                ram_required: 10,
+                recommended_for: "Most users - best balance".to_string(),
+                accuracy_rating: "Very Good (85%)".to_string(),
+                speed_rating: "Moderate".to_string(),
+            
+        }
+    } else {
+         
+            ModelTier {
+                model_name: "qwen2.5:7b".to_string(),
+                display_name: "Qwen 2.5 (7B) - Recommended".to_string(),
+                size: "4.7GB".to_string(),
+                ram_required: 10,
+                recommended_for: "Most users - best balance".to_string(),
+                accuracy_rating: "Very Good (85%)".to_string(),
+                speed_rating: "Moderate".to_string(),
+            
+        }
+    }
 }
 
 /// Persisted to `{app_data_dir}/ollama_state.json` for fast subsequent boots.
@@ -64,12 +118,17 @@ pub struct OllamaManager {
     binary_path: Mutex<Option<PathBuf>>,
     /// App data directory root.
     app_data_dir: PathBuf,
-    /// Model name to use.
-    model: String,
+    pub selected_model: Mutex<String>,
+    pub embedding_model_present: Mutex<bool>,
+    pub inference_model_present: Mutex<bool>,
+    pub provisioning_status: Mutex<String>,
+    pub last_error: Mutex<Option<String>>,
 }
 
 impl OllamaManager {
-    pub fn new(app_data_dir: PathBuf, model: String) -> Self {
+    pub fn new(app_data_dir: PathBuf, ram_gb: u64, has_gpu: bool) -> Self {
+        let tier = get_model_for_specs(ram_gb, has_gpu);
+        let selected_model = tier.model_name;
         Self {
             managed_pid: Mutex::new(None),
             source: Mutex::new(OllamaSource::None),
@@ -77,7 +136,11 @@ impl OllamaManager {
             port: Mutex::new(11434),
             binary_path: Mutex::new(None),
             app_data_dir,
-            model,
+            selected_model: Mutex::new(selected_model),
+            embedding_model_present: Mutex::new(false),
+            inference_model_present: Mutex::new(false),
+            provisioning_status: Mutex::new("Pending initialization".to_string()),
+            last_error: Mutex::new(None),
         }
     }
 
@@ -88,6 +151,7 @@ impl OllamaManager {
         let origin = self.origin.lock().unwrap().clone();
         let port = *self.port.lock().unwrap();
         let has_managed = self.managed_pid.lock().unwrap().is_some();
+        let selected_model = self.selected_model.lock().unwrap().clone();
 
         let status = if source == OllamaSource::None {
             OllamaStatus::Stopped
@@ -97,13 +161,23 @@ impl OllamaManager {
             OllamaStatus::Stopped
         };
 
+        let embedding_model_present = *self.embedding_model_present.lock().unwrap();
+        let inference_model_present = *self.inference_model_present.lock().unwrap();
+        let provisioning_status = self.provisioning_status.lock().unwrap().clone();
+        let last_error = self.last_error.lock().unwrap().clone();
+
         OllamaState {
             source,
             status,
             origin,
             port,
-            model: self.model.clone(),
-            model_present: false, // updated by health check
+            model: selected_model.clone(),
+            model_present: inference_model_present,
+            selected_model,
+            embedding_model_present,
+            inference_model_present,
+            provisioning_status,
+            last_error,
         }
     }
 
@@ -220,17 +294,116 @@ impl OllamaManager {
         false
     }
 
+    pub async fn pull_model(origin: &str, model_name: &str) -> bool {
+        log::info!("Pulling model {} from {}", model_name, origin);
+        let url = format!("{}/api/pull", origin);
+        let client = reqwest::Client::new();
+        let payload = serde_json::json!({
+            "name": model_name,
+            "stream": false
+        });
+
+        match client.post(&url)
+            .json(&payload)
+            .timeout(Duration::from_secs(3600 * 2))
+            .send()
+            .await 
+        {
+            Ok(res) => {
+                let status = res.status();
+                if !status.is_success() {
+                    log::warn!("Pull failed with status: {}", status);
+                }
+                status.is_success()
+            },
+            Err(e) => {
+                log::error!("Pull error: {}", e);
+                false
+            }
+        }
+    }
+
+    pub async fn provision_models(&self, origin: &str) {
+        *self.provisioning_status.lock().unwrap() = "Checking models".to_string();
+        let target_inference = { self.selected_model.lock().unwrap().clone() };
+        let embed_model = "nomic-embed-text";
+        
+        let has_embed = Self::check_model(origin, embed_model).await;
+        let has_inf = Self::check_model(origin, &target_inference).await;
+        
+        *self.embedding_model_present.lock().unwrap() = has_embed;
+        *self.inference_model_present.lock().unwrap() = has_inf;
+
+        if !has_embed {
+            *self.provisioning_status.lock().unwrap() = format!("Pulling {}", embed_model);
+            let ok = Self::pull_model(origin, embed_model).await;
+            if ok {
+                *self.embedding_model_present.lock().unwrap() = true;
+            } else {
+                *self.last_error.lock().unwrap() = Some(format!("Failed to pull {}", embed_model));
+                *self.provisioning_status.lock().unwrap() = format!("Error pulling {}", embed_model);
+                // Continue despite missing embeddings, but mark error
+            }
+        }
+
+        if !has_inf {
+            *self.provisioning_status.lock().unwrap() = format!("Pulling target inference model ({})", target_inference);
+            let ok = Self::pull_model(origin, &target_inference).await;
+            if ok {
+                *self.inference_model_present.lock().unwrap() = true;
+            } else {
+                log::warn!("Failed to pull target inference model {}, falling back to qwen2.5:3b", target_inference);
+                *self.provisioning_status.lock().unwrap() = "Falling back to qwen2.5:3b".to_string();
+                let fallback = "qwen2.5:3b";
+                let fallback_ok = Self::pull_model(origin, fallback).await;
+                if fallback_ok {
+                    *self.selected_model.lock().unwrap() = fallback.to_string();
+                    *self.inference_model_present.lock().unwrap() = true;
+                } else {
+                    *self.last_error.lock().unwrap() = Some(format!("Failed to pull fallback {}", fallback));
+                    *self.provisioning_status.lock().unwrap() = format!("Error pulling fallback {}", fallback);
+                    return;
+                }
+            }
+        }
+
+        *self.provisioning_status.lock().unwrap() = "Ready".to_string();
+    }
+
     // -- Lifecycle ----------------------------------------------------------
 
     /// Full resolution + start flow. Call once during app setup.
     pub async fn resolve_and_start(&self, app_handle: &tauri::AppHandle) {
+        // Load persisted state to help classify correctly
+        let persisted_state = self.load_persisted_state();
+
         // 1. Check if Ollama is already running on default port
         let default_origin = "http://127.0.0.1:11434".to_string();
         if Self::quick_check(&default_origin, 2).await {
-            log::info!("Ollama already running on port 11434, using existing instance");
-            *self.source.lock().unwrap() = OllamaSource::System;
-            *self.origin.lock().unwrap() = default_origin;
+            log::info!("Ollama already running on port 11434, identifying source...");
+            
+            let mut resolved_source = OllamaSource::System; // Default assumption
+            
+            // Priority 1: Persisted state mapping
+            if let Some(state) = &persisted_state {
+                if state.port == 11434 {
+                    log::info!("Found persisted state matching port 11434, reusing source: {:?}", state.source);
+                    resolved_source = state.source.clone();
+                }
+            } else {
+                // Priority 2: PID file means we probably backgrounded a bundled instance earlier
+                let pid_path = self.app_data_dir.join("ollama.pid");
+                if pid_path.exists() {
+                     log::info!("PID file exists, assuming this is a backgrounded Bundled process");
+                     resolved_source = OllamaSource::Bundled;
+                }
+            }
+
+            *self.source.lock().unwrap() = resolved_source;
+            *self.origin.lock().unwrap() = default_origin.clone();
             *self.port.lock().unwrap() = 11434;
+            self.provision_models(&default_origin).await;
+            self.persist_state();
             return;
         }
 
@@ -242,9 +415,11 @@ impl OllamaManager {
             let port = self.find_available_port(11434);
             if self.start_process(app_handle, &sys_path, port).await {
                 *self.source.lock().unwrap() = OllamaSource::System;
-                *self.origin.lock().unwrap() = format!("http://127.0.0.1:{}", port);
+                let origin = format!("http://127.0.0.1:{}", port);
+                *self.origin.lock().unwrap() = origin.clone();
                 *self.port.lock().unwrap() = port;
                 log::info!("System Ollama started on port {}", port);
+                self.provision_models(&origin).await;
                 self.persist_state();
                 return;
             }
@@ -261,9 +436,11 @@ impl OllamaManager {
                 let port = self.find_available_port(11434);
                 if self.start_process(app_handle, &bundled, port).await {
                     *self.source.lock().unwrap() = OllamaSource::Bundled;
-                    *self.origin.lock().unwrap() = format!("http://127.0.0.1:{}", port);
+                    let origin = format!("http://127.0.0.1:{}", port);
+                    *self.origin.lock().unwrap() = origin.clone();
                     *self.port.lock().unwrap() = port;
                     log::info!("Bundled Ollama started on port {}", port);
+                    self.provision_models(&origin).await;
                     self.persist_state();
                     return;
                 }
@@ -277,6 +454,7 @@ impl OllamaManager {
         log::warn!("No Ollama available -- entering degraded mode (AI features disabled)");
         *self.source.lock().unwrap() = OllamaSource::None;
         *self.origin.lock().unwrap() = String::new();
+        *self.provisioning_status.lock().unwrap() = "Ollama not available".to_string();
     }
 
     /// Start Ollama `serve` as a child process.
@@ -484,8 +662,8 @@ impl OllamaManager {
             source: self.source.lock().unwrap().clone(),
             binary_path: self.binary_path.lock().unwrap().as_ref().map(|p| p.to_string_lossy().to_string()),
             port: *self.port.lock().unwrap(),
-            model: self.model.clone(),
-            model_present: false,
+            model: self.selected_model.lock().unwrap().clone(),
+            model_present: *self.inference_model_present.lock().unwrap(),
         };
         if let Ok(json) = serde_json::to_string_pretty(&state) {
             std::fs::write(self.state_file_path(), json).ok();

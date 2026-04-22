@@ -1,3 +1,7 @@
+/**
+ * @deprecated This repository is no longer used. 
+ * Vector embeddings for labels are discontinued in favor of direct LLM classification.
+ */
 import { getDb } from "../sqlite";
 import { randomUUID } from "crypto";
 
