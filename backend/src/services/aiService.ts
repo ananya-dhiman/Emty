@@ -98,10 +98,12 @@ const buildPrompt = (emailContent: {
   if (emailContent.stage2Candidates?.length) {
     candidatesText = "Pre-ranked Vector Similarity Candidates (highly recommended):\n" + 
       emailContent.stage2Candidates
-        .map(c => `- ${c.name} (Similarity: ${(c.similarityScore * 100).toFixed(1)}%, Mode: ${c.labelMode})`)
+        .slice(0, 7)
+        .map(c => `- ${c.name} (Similarity: ${(c.similarityScore * 100).toFixed(1)}%)`)
         .join("\n");
   } else if (emailContent.relevantLabels?.length) {
     candidatesText = emailContent.relevantLabels
+        .slice(0, 7)
         .map((l) => `- ${l.name}: ${l.description || "No description"}`)
         .join("\n");
   }
@@ -116,21 +118,20 @@ Label candidates:
 ${candidatesText}
 
 Body:
-${emailContent.body.substring(0, 2000)}
+${emailContent.body.split(/\s+/).slice(0, 150).join(' ')}
 
 Extract and return a JSON object with:
 1. intent: One of 'action_required', 'event', 'opportunity', 'information', 'waiting', 'noise'
-2. shortSnippet: A 1-2 sentence summary of the email (max 150 chars)
-3. labels: Array of 0-3 labels. Use ONLY labels from the provided label candidates when they genuinely fit. Return an empty array if none fit.
-4. suggestedLabel: Optional short label name if the email clearly belongs to a repeated category not covered by the provided candidates. Otherwise return null.
-5. labelMode: "existing" if you strictly used one of the provided candidates, "new" if you strongly suggest a new label.
-6. confidence: Your confidence in the label assignment and insights from 0.0 to 1.0.
-7. labelReason: A short internal reason for why you chose the labels and mode.
-8. dates: Array of important dates with type ('deadline', 'event', 'followup') and ISO date string
-9. extractedFacts: Object with any important facts
-10. importanceScore: A number from 0.0 to 1.0
-11. importantLinks: Array of important URLs with optional label/reason.
-12. checklist: Array of actionable tasks with shape { task, status, dueDate?, reason? }. Keep status as "pending".
+2. shortSnippet: A summary under 15 words.
+3. labels: Array of 0-3 labels. Use ONLY from candidates. Empty array if none fit.
+4. suggestedLabel: Short label name if it strongly needs a new category. Otherwise null.
+5. labelMode: "existing" or "new".
+6. confidence: Number 0.0 to 1.0.
+7. labelReason: Short internal reason.
+8. dates: Array of max 2 dates (type: 'deadline', 'event', 'followup', date: ISO string).
+9. importanceScore: Number 0.0 to 1.0.
+10. importantLinks: Array of max 2 URLs.
+11. checklist: Array of max 2 tasks { task, status: "pending" }.
 
 Return ONLY valid JSON, no markdown code blocks.`;
 };
@@ -285,7 +286,7 @@ const extractWithOllama = async (
       model,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.3,
-      max_tokens: 1000,
+      max_tokens: 280,
     }),
   });
 

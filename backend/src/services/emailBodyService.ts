@@ -1,33 +1,62 @@
 import { htmlToText } from 'html-to-text';
 
 /**
+ * Aggressively clean text to save LLM tokens
+ */
+const cleanEmailText = (text: string): string => {
+    let result = text;
+    
+    // 1. Strip URLs (they cost a lot of tokens)
+    result = result.replace(/https?:\/\/[^\s]+/g, '[URL]');
+    
+    // 2. Strip common email reply headers (e.g., "On [Date], [User] wrote:")
+    const replyHeaderRegex = /(On\s+.*?wrote:|From:.*?\r?\nSent:.*?\r?\nTo:.*?\r?\nSubject:)/s;
+    const replyMatch = result.match(replyHeaderRegex);
+    if (replyMatch && replyMatch.index !== undefined) {
+        result = result.substring(0, replyMatch.index);
+    }
+    
+    // 3. Strip common signature dashes
+    const signatureMatch = result.search(/\r?\n--\r?\n|\r?\n___\r?\n/);
+    if (signatureMatch !== -1) {
+        result = result.substring(0, signatureMatch);
+    }
+
+    // 4. Compress excessive whitespace
+    result = result.replace(/\n{3,}/g, '\n\n');
+    result = result.replace(/[ \t]{2,}/g, ' ');
+    
+    return result.trim();
+};
+
+/**
  * Extract email body from Gmail message payload
  */
 export const extractEmailBody = (payload: any): string => {
     const extractTextFromParts = (parts: any[]): string => {
         const textPart = parts.find(p => p.mimeType === 'text/plain');
         if (textPart?.body?.data) {
-            return Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+            return cleanEmailText(Buffer.from(textPart.body.data, 'base64').toString('utf-8'));
         }
 
         const htmlPart = parts.find(p => p.mimeType === 'text/html');
         if (htmlPart?.body?.data) {
             const htmlContent = Buffer.from(htmlPart.body.data, 'base64').toString('utf-8');
-            return htmlToText(htmlContent, {
+            return cleanEmailText(htmlToText(htmlContent, {
                 wordwrap: false,
                 selectors: [
-                    { selector: 'a', options: { linkBrackets: false, hideLinkHrefIfSameAsText: true } },
+                    { selector: 'a', options: { ignoreHref: true } },
                     { selector: 'img', format: 'skip' },
                     { selector: 'script', format: 'skip' },
                     { selector: 'style', format: 'skip' },
                 ],
-            });
+            }));
         }
 
         for (const part of parts) {
             if (part.parts) {
                 const nestedText = extractTextFromParts(part.parts);
-                if (nestedText) return nestedText;
+                if (nestedText) return cleanEmailText(nestedText);
             }
         }
 
@@ -41,17 +70,17 @@ export const extractEmailBody = (payload: any): string => {
     if (payload?.body?.data) {
         const rawBody = Buffer.from(payload.body.data, 'base64').toString('utf-8');
         if (rawBody.includes('<') && rawBody.includes('>')) {
-            return htmlToText(rawBody, {
+            return cleanEmailText(htmlToText(rawBody, {
                 wordwrap: false,
                 selectors: [
-                    { selector: 'a', options: { linkBrackets: false, hideLinkHrefIfSameAsText: true } },
+                    { selector: 'a', options: { ignoreHref: true } },
                     { selector: 'img', format: 'skip' },
                     { selector: 'script', format: 'skip' },
                     { selector: 'style', format: 'skip' },
                 ],
-            });
+            }));
         }
-        return rawBody;
+        return cleanEmailText(rawBody);
     }
 
     return '';

@@ -53,41 +53,18 @@ pub struct ModelTier {
 }
 
 pub fn get_model_for_specs(ram_gb: u64, has_gpu: bool) -> ModelTier {
-    if ram_gb < 8 {
+   
         ModelTier {
-            model_name: "qwen2.5:3b".to_string(),
-            display_name: "Qwen 2.5 (3B) - Basic".to_string(),
-            size: "2.2GB".to_string(),
-            ram_required: 6,
+            model_name: "qwen2.5:1.5b".to_string(),
+            display_name: "Qwen 2.5 (1.5B) - Basic".to_string(),
+            size: "1.2GB".to_string(),
+            ram_required: 2,
             recommended_for: "Low-spec devices".to_string(),
             accuracy_rating: "Good (75%)".to_string(),
             speed_rating: "Fast".to_string(),
         }
-    } else if ram_gb < 16 {
-       
-            ModelTier {
-                model_name: "qwen2.5:7b".to_string(),
-                display_name: "Qwen 2.5 (7B) - Recommended".to_string(),
-                size: "4.7GB".to_string(),
-                ram_required: 10,
-                recommended_for: "Most users - best balance".to_string(),
-                accuracy_rating: "Very Good (85%)".to_string(),
-                speed_rating: "Moderate".to_string(),
-            
-        }
-    } else {
-         
-            ModelTier {
-                model_name: "qwen2.5:7b".to_string(),
-                display_name: "Qwen 2.5 (7B) - Recommended".to_string(),
-                size: "4.7GB".to_string(),
-                ram_required: 10,
-                recommended_for: "Most users - best balance".to_string(),
-                accuracy_rating: "Very Good (85%)".to_string(),
-                speed_rating: "Moderate".to_string(),
-            
-        }
-    }
+    
+    
 }
 
 /// Persisted to `{app_data_dir}/ollama_state.json` for fast subsequent boots.
