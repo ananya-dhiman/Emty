@@ -464,6 +464,8 @@ impl OllamaManager {
             .arg("serve")
             .env("OLLAMA_HOST", &host)
             .env("OLLAMA_MODELS", models_dir.to_string_lossy().to_string())
+            .env("OLLAMA_KEEP_ALIVE", "-1")
+            .env("OLLAMA_NUM_PARALLEL", "1")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn();

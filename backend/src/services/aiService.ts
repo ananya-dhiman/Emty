@@ -287,6 +287,10 @@ const extractWithOllama = async (
       messages: [{ role: "user", content: prompt }],
       temperature: 0.3,
       max_tokens: 280,
+      stream: true,
+      options: {
+        num_ctx: 8192
+      }
     }),
   });
 
@@ -322,9 +326,42 @@ const extractWithOllama = async (
     throw new Error(`Ollama API error: ${response.status} ${txt.slice(0, 500)}`);
   }
 
-  const data: any = await response.json();
-  const extractedText: string | undefined =
-    data?.choices?.[0]?.message?.content || data?.choices?.[0]?.content || data?.output?.[0]?.content;
+  let extractedText = "";
+
+  if (response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || ""; // The last chunk might be incomplete
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed === "data: [DONE]") continue;
+        if (trimmed.startsWith("data: ")) {
+          try {
+            const payload = JSON.parse(trimmed.slice(6));
+            const delta = payload.choices?.[0]?.delta?.content;
+            if (delta) {
+              extractedText += delta;
+            }
+          } catch (e) {
+            // Wait for next chunk if JSON is fragmented
+          }
+        }
+      }
+    }
+  } else {
+    const data: any = await response.json();
+    extractedText = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.content || data?.output?.[0]?.content || "";
+  }
+
   if (!extractedText) throw new Error("No content in Ollama response");
 
   const insights = parseAIResponse(extractedText);
