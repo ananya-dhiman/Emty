@@ -52,7 +52,7 @@ pub struct ModelTier {
     pub speed_rating: String,
 }
 
-pub fn get_model_for_specs(ram_gb: u64, has_gpu: bool) -> ModelTier {
+pub fn get_model_for_specs(_ram_gb: u64, _has_gpu: bool) -> ModelTier {
    
         ModelTier {
             model_name: "qwen2.5:1.5b".to_string(),
@@ -95,6 +95,8 @@ pub struct OllamaManager {
     binary_path: Mutex<Option<PathBuf>>,
     /// App data directory root.
     app_data_dir: PathBuf,
+    /// Whether a GPU capable of acceleration was detected on this machine.
+    has_gpu: bool,
     pub selected_model: Mutex<String>,
     pub embedding_model_present: Mutex<bool>,
     pub inference_model_present: Mutex<bool>,
@@ -113,6 +115,7 @@ impl OllamaManager {
             port: Mutex::new(11434),
             binary_path: Mutex::new(None),
             app_data_dir,
+            has_gpu,
             selected_model: Mutex::new(selected_model),
             embedding_model_present: Mutex::new(false),
             inference_model_present: Mutex::new(false),
@@ -437,7 +440,7 @@ impl OllamaManager {
     /// Start Ollama `serve` as a child process.
     async fn start_process(
         &self,
-        app_handle: &tauri::AppHandle,
+        _app_handle: &tauri::AppHandle,
         binary_path: &PathBuf,
         port: u16,
     ) -> bool {
@@ -466,6 +469,18 @@ impl OllamaManager {
             .env("OLLAMA_MODELS", models_dir.to_string_lossy().to_string())
             .env("OLLAMA_KEEP_ALIVE", "-1")
             .env("OLLAMA_NUM_PARALLEL", "1")
+            // GPU acceleration: push all transformer layers onto VRAM if GPU is available.
+            // CUDA_VISIBLE_DEVICES=0 ensures the primary GPU is always found.
+            // OLLAMA_GPU_LAYERS=999 means "offload as many layers as possible".
+            .envs(if self.has_gpu {
+                vec![
+                    ("CUDA_VISIBLE_DEVICES", "0"),
+                    ("OLLAMA_GPU_LAYERS", "999"),
+                ]
+            } else {
+                log::info!("[Ollama] No GPU detected, running in CPU-only mode");
+                vec![]
+            })
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn();

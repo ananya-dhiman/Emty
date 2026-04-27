@@ -31,6 +31,12 @@ export function runMigrations(db: Database.Database): void {
       logger.info("Applied migration v2: Add label_name to label_vectors");
     }
 
+    if (currentVersion < 3) {
+      migration_v3(db);
+      db.prepare("INSERT INTO schema_version (version) VALUES (3)").run();
+      logger.info("Applied migration v3: Add background sync fields to sync_checkpoints");
+    }
+
     const finalVersion = db
       .prepare("SELECT MAX(version) as version FROM schema_version")
       .get() as { version: number | null };
@@ -273,5 +279,28 @@ function migration_v2(db: Database.Database): void {
     }
   } catch (error) {
     logger.info("Migration v2 failed (non-critical):", error);
+  }
+}
+
+/**
+ * Migration v3: Add background sync tray fields to sync_checkpoints
+ */
+function migration_v3(db: Database.Database): void {
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(sync_checkpoints)").all() as any[];
+    
+    if (!tableInfo.some((col) => col.name === "sync_interval_minutes")) {
+      db.exec("ALTER TABLE sync_checkpoints ADD COLUMN sync_interval_minutes INTEGER DEFAULT 180");
+    }
+    if (!tableInfo.some((col) => col.name === "emails_processed_last_sync")) {
+      db.exec("ALTER TABLE sync_checkpoints ADD COLUMN emails_processed_last_sync INTEGER DEFAULT 0");
+    }
+    if (!tableInfo.some((col) => col.name === "last_sync_email_count")) {
+      db.exec("ALTER TABLE sync_checkpoints ADD COLUMN last_sync_email_count INTEGER DEFAULT 0");
+    }
+    
+    logger.info("Added background sync fields to sync_checkpoints table");
+  } catch (error) {
+    logger.info("Migration v3 failed (non-critical):", error);
   }
 }

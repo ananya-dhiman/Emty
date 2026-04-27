@@ -1,9 +1,12 @@
 mod gpu_detector;
 mod ollama_manager;
+mod sync_timer;
 
 use tauri::{Manager, State};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -189,15 +192,80 @@ pub fn run() {
                 std::thread::sleep(Duration::from_millis(500));
             }
 
+            // ---------------------------------------------------------------
+            // Tray Setup
+            // ---------------------------------------------------------------
+            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let sync_i = MenuItem::with_id(app, "sync", "Sync Now", true, None::<&str>)?;
+            let status_i = MenuItem::with_id(app, "status", "Last synced: —", false, None::<&str>)?;
+            let open_i = MenuItem::with_id(app, "open", "Open Emty", true, None::<&str>)?;
+            
+            let menu = Menu::with_items(app, &[&open_i, &status_i, &sync_i, &quit_i])?;
+            
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "quit" => {
+                        std::process::exit(0);
+                    }
+                    "sync" => {
+                        let state: tauri::State<AppState> = app.state();
+                        let port = state.backend_port;
+                        tauri::async_runtime::spawn(async move {
+                            let client = reqwest::Client::new();
+                            let _ = client.post(format!("http://localhost:{}/api/sync/trigger", port))
+                                .json(&serde_json::json!({ "accountId": "default", "mode": "urgent" }))
+                                .send()
+                                .await;
+                        });
+                    }
+                    "open" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // ---------------------------------------------------------------
+            // Background Sync Timer & Launch Check
+            // ---------------------------------------------------------------
+            let app_handle = app.handle().clone();
+            sync_timer::check_on_launch(app_handle.clone(), port);
+            sync_timer::start_sync_timer(app_handle, port);
+
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Clean up Ollama process when the app window is closed
-            if let tauri::WindowEvent::Destroyed = event {
-                if let Some(state) = window.try_state::<AppState>() {
-                    log::info!("App window closing - stopping managed Ollama process");
-                    state.ollama.stop();
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
                 }
+                tauri::WindowEvent::Destroyed => {
+                    if let Some(state) = window.try_state::<AppState>() {
+                        log::info!("App window closing - stopping managed Ollama process");
+                        state.ollama.stop();
+                    }
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![

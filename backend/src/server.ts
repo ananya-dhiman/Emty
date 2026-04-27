@@ -6,6 +6,7 @@ import authRoutes from "./routes/authRoutes";
 import emailRoutes from "./routes/emailRoutes";
 import intentRoutes from "./routes/intentRoutes";
 import metricsRoutes from "./routes/metricsRoutes";
+import syncRoutes from "./routes/syncRoutes";
 
 import logger from './utils/logger';
 
@@ -41,6 +42,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/emails", emailRoutes);
 app.use("/api/intent", intentRoutes);
 app.use("/api/metrics", metricsRoutes);
+app.use("/api/sync", syncRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => {
