@@ -37,6 +37,12 @@ export function runMigrations(db: Database.Database): void {
       logger.info("Applied migration v3: Add background sync fields to sync_checkpoints");
     }
 
+    if (currentVersion < 4) {
+      migration_v4(db);
+      db.prepare("INSERT INTO schema_version (version) VALUES (4)").run();
+      logger.info("Applied migration v4: Add is_active to accounts");
+    }
+
     const finalVersion = db
       .prepare("SELECT MAX(version) as version FROM schema_version")
       .get() as { version: number | null };
@@ -302,5 +308,20 @@ function migration_v3(db: Database.Database): void {
     logger.info("Added background sync fields to sync_checkpoints table");
   } catch (error) {
     logger.info("Migration v3 failed (non-critical):", error);
+  }
+}
+
+/**
+ * Migration v4: Add is_active column to accounts table
+ */
+function migration_v4(db: Database.Database): void {
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(accounts)").all() as any[];
+    if (!tableInfo.some((col) => col.name === "is_active")) {
+      db.exec("ALTER TABLE accounts ADD COLUMN is_active INTEGER DEFAULT 0");
+      logger.info("Added is_active column to accounts table");
+    }
+  } catch (error) {
+    logger.info("Migration v4 failed (non-critical):", error);
   }
 }

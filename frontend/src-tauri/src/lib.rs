@@ -7,7 +7,7 @@ use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpu_detector::{GpuDetector, GpuInfo};
@@ -50,6 +50,18 @@ async fn restart_ollama(
     state.ollama.stop();
     state.ollama.resolve_and_start(&app_handle).await;
     Ok(state.ollama.get_state())
+}
+
+#[tauri::command]
+async fn set_active_account(state: State<'_, AppState>, account_id: String) -> Result<(), String> {
+    let port = state.backend_port;
+    let client = reqwest::Client::new();
+    let _ = client.post(format!("http://localhost:{}/api/sync/active", port))
+        .json(&serde_json::json!({ "accountId": account_id }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -214,8 +226,9 @@ pub fn run() {
                         let port = state.backend_port;
                         tauri::async_runtime::spawn(async move {
                             let client = reqwest::Client::new();
+                            // Use "active" keyword which the backend now resolves via DB
                             let _ = client.post(format!("http://localhost:{}/api/sync/trigger", port))
-                                .json(&serde_json::json!({ "accountId": "default", "mode": "urgent" }))
+                                .json(&serde_json::json!({ "accountId": "active", "mode": "urgent" }))
                                 .send()
                                 .await;
                         });
@@ -272,7 +285,8 @@ pub fn run() {
             get_backend_url,
             get_ollama_status,
             get_gpu_info,
-            restart_ollama
+            restart_ollama,
+            set_active_account
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

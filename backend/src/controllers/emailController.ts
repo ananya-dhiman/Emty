@@ -627,9 +627,6 @@ export const syncEmails = async (req: AuthRequest, res: Response): Promise<void>
             return;
         }
 
-          // Trigger incremental sync (fetches new candidates into EmailMessage staging DB)
-          const result = await incrementalSyncService.sync(accountId);
-
           // Start scoring + AI workers only after onboarding is completed.
           const intentProfile = await UserIntentProfileModel.findOne({ userId: uid }).select('onboardingCompleted').lean();
           const canRunAiPipeline = intentProfile?.onboardingCompleted === true;
@@ -638,6 +635,10 @@ export const syncEmails = async (req: AuthRequest, res: Response): Promise<void>
               logger.debug(`[SYNC] Onboarding not completed for user ${uid}. Staging only, AI workers deferred.`);
           }
 
+          // Trigger incremental sync (fetches new candidates into EmailMessage staging DB)
+          // Pass canRunAiPipeline as keepLock so the sync_state stays 'syncing' for the AI workers.
+          const result = await incrementalSyncService.sync(accountId, canRunAiPipeline);
+
           if (result.success && result.processed >= 0 && canRunAiPipeline) {
               (async () => {
                   try {
@@ -645,6 +646,8 @@ export const syncEmails = async (req: AuthRequest, res: Response): Promise<void>
                       await runAiProcessingWorker(uid, accountId);
                   } catch (err: any) {
                       logger.info('[BACKGROUND SEQUENCE FAIL from Sync]', err.message || err);
+                      const syncRepo = require('../db/repositories/syncCheckpointRepository');
+                      syncRepo.markSyncError(accountId, err.message || String(err));
                   }
               })();
           }

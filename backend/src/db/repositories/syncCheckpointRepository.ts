@@ -75,16 +75,21 @@ export function findOrCreate(accountId: string): SyncCheckpointRow {
   `).get(id) as SyncCheckpointRow;
 }
 
-export function updateSyncState(accountId: string, syncState: string, syncStartedAt?: number): void {
+export function updateSyncState(accountId: string, syncState: string, syncStartedAt?: number | null): void {
   const db = getDb();
   const now = Date.now();
+  
+  let finalSyncStartedAt = syncStartedAt;
+  if (finalSyncStartedAt === undefined) {
+    finalSyncStartedAt = syncState === 'idle' ? null : now;
+  }
   
   const stmt = db.prepare(`
     UPDATE sync_checkpoints
     SET sync_state = ?, sync_started_at = ?, updated_at = ?
     WHERE account_id = ?
   `);
-  stmt.run(syncState, syncStartedAt || now, now, accountId);
+  stmt.run(syncState, finalSyncStartedAt, now, accountId);
 }
 
 export function updateProgress(accountId: string, progressData: {
@@ -138,13 +143,25 @@ export function updateProgress(accountId: string, progressData: {
   stmt.run(...values);
 }
 
+export function updateCheckpoint(accountId: string, lastHistoryId: string | null, lastSyncTimestamp: number): void {
+  const db = getDb();
+  const now = Date.now();
+  
+  const stmt = db.prepare(`
+    UPDATE sync_checkpoints
+    SET last_history_id = ?, last_sync_timestamp = ?, updated_at = ?
+    WHERE account_id = ?
+  `);
+  stmt.run(lastHistoryId, lastSyncTimestamp, now, accountId);
+}
+
 export function markSyncError(accountId: string, errorMessage: string): void {
   const db = getDb();
   const now = Date.now();
 
   const stmt = db.prepare(`
     UPDATE sync_checkpoints
-    SET sync_state = ?, last_sync_error = ?, updated_at = ?
+    SET sync_state = ?, last_sync_error = ?, sync_started_at = NULL, updated_at = ?
     WHERE account_id = ?
   `);
   stmt.run("error", errorMessage, now, accountId);
@@ -198,7 +215,7 @@ export function acquireSyncLock(accountId: string, payload: StartSyncPayload): b
         processed_candidates = ?,
         last_progress_at = ?,
         updated_at = ?
-    WHERE account_id = ? AND sync_state = 'idle'
+    WHERE account_id = ? AND sync_state IN ('idle', 'error')
   `);
   const result = stmt.run(
     now,

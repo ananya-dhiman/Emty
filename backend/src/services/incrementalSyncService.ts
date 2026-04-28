@@ -31,7 +31,7 @@ import logger from '../utils/logger';
 
 const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT  ? parseInt(process.env.SYNC_LOCK_TIMEOUT): 3 * 60 * 1000;
 const TEST_MODE = true; // Set to false for production
-const MAX_EMAILS_TEST_MODE = 20;
+const MAX_EMAILS_TEST_MODE = 1;
 const MAX_FETCH_TEST_MODE = 50; // cap fetched candidate messages in test mode
 const MAX_RETRIES = process.env.MAX_RETRIES ? parseInt(process.env.MAX_RETRIES) : 5;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -385,7 +385,7 @@ export class IncrementalSyncService {
    * Main sync entry point
    * Handles: first-time sync, incremental sync, error recovery
    */
-  async sync(accountId: string): Promise<SyncResult> {
+  async sync(accountId: string, keepLock: boolean = false): Promise<SyncResult> {
     const errors: Array<{ messageId: string; reason: string }> = [];
     const objectIdAccountId = new (require("mongoose").Types.ObjectId)(
       accountId
@@ -537,7 +537,22 @@ export class IncrementalSyncService {
         }
       }
 
+      // After a timestamp or fullScan fetch, gmail.users.messages.list does NOT return a
+      // historyId. Call getProfile to capture the mailbox's current historyId.
+      // This represents "all events up to now are accounted for", so the NEXT
+      // sync can use the fast History API instead of a full scan again.
+      if (!newHistoryId) {
+        try {
+          const profileRes = await gmail.users.getProfile({ userId: 'me' });
+          newHistoryId = profileRes.data.historyId || null;
+          logger.debug(`[SYNC] Captured current historyId from profile: ${newHistoryId}`);
+        } catch (profileErr: any) {
+          logger.info(`[SYNC] Could not fetch mailbox historyId from profile: ${profileErr.message}`);
+        }
+      }
+
       // TEST_MODE: limit fetched candidate set to avoid heavy fetches
+
       if (TEST_MODE && candidates.length > MAX_FETCH_TEST_MODE) {
         logger.debug(
           `[SYNC] TEST_MODE fetch cap: limiting fetched candidates ${candidates.length} -> ${MAX_FETCH_TEST_MODE}`
@@ -669,20 +684,33 @@ export class IncrementalSyncService {
       }
 
       // ===== STEP 7: Release Lock & Update Checkpoint =====
-      await this.updateProgress(normalizedAccountId, {
-        progressPercent: 99,
-        progressStage: "finalizing",
-        progressMessage: "Finalizing sync...",
-        totalCandidates: totalToProcess,
-        processedCandidates: processed,
-      });
+      if (keepLock) {
+        if (newHistoryId) {
+          syncCheckpointRepository.updateCheckpoint(normalizedAccountId, newHistoryId, Date.now());
+        }
+        await this.updateProgress(normalizedAccountId, {
+          progressPercent: 99,
+          progressStage: "finalizing",
+          progressMessage: "Staging complete, background workers starting...",
+          totalCandidates: totalToProcess,
+          processedCandidates: processed,
+        });
+      } else {
+        await this.updateProgress(normalizedAccountId, {
+          progressPercent: 99,
+          progressStage: "finalizing",
+          progressMessage: "Finalizing sync...",
+          totalCandidates: totalToProcess,
+          processedCandidates: processed,
+        });
 
-      await this.releaseSyncLock(
-        normalizedAccountId,
-        newHistoryId,
-        new Date(),
-        { processed, succeeded, failed }
-      );
+        await this.releaseSyncLock(
+          normalizedAccountId,
+          newHistoryId,
+          new Date(),
+          { processed, succeeded, failed }
+        );
+      }
 
       logger.debug(
         `[SYNC] Complete: processed=${processed}, succeeded=${succeeded}, failed=${failed}`

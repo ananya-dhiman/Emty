@@ -10,6 +10,7 @@ import app from "./server";
 
 import logger from "./utils/logger";
 import { initializeDatabase, closeDatabase } from "./db/sqlite";
+import { autoPopulateFromMongo } from "./db/repositories/accountLocalRepository";
 
 /**
  * Main server entry point
@@ -32,8 +33,11 @@ try {
 // Connect to MongoDB
 mongoose
     .connect(MONGODB_URI)
-    .then(() => {
+    .then(async () => {
         logger.info("Connected to MongoDB");
+        
+        // Auto-sync accounts to local DB cache
+        await autoPopulateFromMongo();
 
         // Start server after successful DB connection
         app.listen(PORT, () => {

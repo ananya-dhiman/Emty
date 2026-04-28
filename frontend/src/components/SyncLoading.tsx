@@ -194,6 +194,15 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
             return;
         } else {
             console.log('[SyncLoading] Initiating sync call to backend for account:', currentUser.gmailAccountId);
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+                const { invoke } = await import('@tauri-apps/api/core');
+                await invoke('set_active_account', { accountId: currentUser.gmailAccountId });
+              }
+            } catch (e) {
+              console.warn('[SyncLoading] Failed to set active account in Tauri', e);
+            }
             const headers = await getAuthHeaders();
             const response = await axios.post(`${API_BASE_URL}/api/emails/sync`, {
               accountId: currentUser.gmailAccountId
