@@ -89,13 +89,16 @@ pub fn run() {
                 gpu_info.name
             );
 
+            // Fetch RAM size
+            let mut sys = sysinfo::System::new_all();
+            sys.refresh_memory();
+            let ram_gb = sys.total_memory() / (1024 * 1024 * 1024);
+
             // ---------------------------------------------------------------
             // Ollama Manager -- resolve and start
             // ---------------------------------------------------------------
-            let ollama_model =
-                std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama2".to_string());
             let ollama_manager =
-                Arc::new(OllamaManager::new(app_data_dir.clone(), ollama_model));
+                Arc::new(OllamaManager::new(app_data_dir.clone(), ram_gb, gpu_info.acceleration_likely));
 
             // Start Ollama asynchronously. It runs in parallel with the Node
             // sidecar startup so there is no additional delay.
@@ -143,6 +146,8 @@ pub fn run() {
                 }
             };
 
+            let target_model = ollama_manager.selected_model.lock().unwrap().clone();
+
             let (mut rx, _child) = app
                 .shell()
                 .sidecar("node")
@@ -154,6 +159,7 @@ pub fn run() {
                     app_data_dir.to_string_lossy().to_string(),
                 )
                 .env("OLLAMA_URL", &ollama_url_for_node)
+                .env("OLLAMA_MODEL", &target_model)
                 .spawn()
                 .expect("Failed to spawn node sidecar");
 

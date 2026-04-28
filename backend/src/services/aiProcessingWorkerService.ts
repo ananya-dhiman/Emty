@@ -6,12 +6,12 @@ import * as emailMessageRepository from "../db/repositories/emailMessageReposito
 import * as insightRepository from "../db/repositories/insightRepository";
 import * as processedEmailLogRepository from "../db/repositories/processedEmailLogRepository";
 import * as syncCheckpointRepository from "../db/repositories/syncCheckpointRepository";
-import * as labelVectorRepository from "../db/repositories/labelVectorRepository";
+
 import * as labelCandidateRepository from "../db/repositories/labelCandidateRepository";
 import { refreshAccessToken } from "./gmailAuth";
 import { processEmailDeep } from "./emailProcessingService";
 import { fetchFullEmailBody } from "./emailBodyService";
-import { generateEmbedding, rankLabelsForEmail } from "./embeddingService";
+
 import rulesEngine from "./rulesEngine";
 import classifyError from "./errorClassifier";
 import { 
@@ -95,6 +95,35 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
     logger.debug(
         `[AI WORKER] Provider attempts: ${aiContext.attempts.map(a => `${a.provider}:${a.model}:${a.source}`).join(" -> ")}`
     );
+
+    // BLOCKING SYNC WAIT: Ensure a valid chat model is fully pulled and ready before starting Deep Processing.
+    // This allows Tauri up to 30 minutes to download massive models like qwen2.5 seamlessly in the background.
+    let isModelReady = false;
+    const OLLAMA_URL = process.env.OLLAMA_URL?.trim() || "http://127.0.0.1:11434";
+    for (let attempt = 0; attempt < 180; attempt++) {
+        try {
+            const tagsRes = await fetch(`${OLLAMA_URL}/api/tags`);
+            if (tagsRes.ok) {
+                const data: any = await tagsRes.json();
+                const validModels = (data?.models || []).filter((m: any) => !m.name.includes('embed'));
+                if (validModels.length > 0) {
+                    isModelReady = true;
+                    break;
+                }
+            }
+        } catch (e) {
+            // Ignore connection errors during Ollama spin-up
+        }
+        if (attempt % 3 === 0) {
+            logger.debug(`[AI WORKER] Sync paused. Valid model not yet found. Waiting for Tauri to finish pulling models... (${attempt * 10}s)`);
+        }
+        await new Promise(r => setTimeout(r, 10000)); // 10 second polling interval
+    }
+
+    if (!isModelReady) {
+        logger.debug(`[AI WORKER] Sync aborted. No chat models became available within 30 minutes. Please check your internet connection or restart the app.`);
+        return; // Early exit without altering email processed status
+    }
 
     // Initialize sync checkpoint if needed  
     const syncCheckpoint = syncCheckpointRepository.findOrCreate(accountId);
@@ -417,6 +446,12 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
             } catch (err: any) {
                 logger.info(`[AI WORKER] Deep processing failed for ${messageId}:`, err.message || err);
                 
+                // Stop the entire run immediately if it's because Ollama isn't done pulling models yet
+                if (err?.message?.includes("AIPendingProvisioningError") || err?.message?.includes("try pulling it first")) {
+                    logger.debug(`[AI WORKER] Aborting batch early due to missing models. App is likely still provisioning Ollama.`);
+                    throw err;
+                }
+
                 // Handle retries
                 const errorType = classifyError(err);
                 const existing = await processedEmailLogRepository.findByMessageId(accountId, messageId);

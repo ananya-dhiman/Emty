@@ -68,29 +68,43 @@ impl GpuDetector {
 
     #[cfg(target_os = "windows")]
     fn detect_windows() -> GpuInfo {
-        // Use wmic to query GPU information
-        let output = std::process::Command::new("wmic")
-            .args(["path", "win32_videocontroller", "get", "name"])
+        // Use powershell to query GPU information because wmic is deprecated in Win 11
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"])
             .output();
 
         match output {
             Ok(out) if out.status.success() => {
                 let text = String::from_utf8_lossy(&out.stdout).to_string();
-                let gpu_name = text
-                    .lines()
-                    .skip(1) // Skip header "Name"
-                    .map(|l| l.trim())
-                    .find(|l| !l.is_empty())
-                    .unwrap_or("")
-                    .to_string();
+                let mut best_gpu_name = String::new();
+                let mut is_nvidia = false;
+                let mut is_amd = false;
 
-                if gpu_name.is_empty() {
-                    return GpuInfo::default();
+                // Evaluate all lines, prefer NVIDIA or AMD over Intel
+                for line in text.lines() {
+                    let l = line.trim();
+                    if l.is_empty() {
+                        continue;
+                    }
+                    let upper = l.to_uppercase();
+                    let current_is_nvidia = upper.contains("NVIDIA");
+                    let current_is_amd = upper.contains("AMD") || upper.contains("RADEON");
+
+                    if current_is_nvidia || current_is_amd {
+                        best_gpu_name = l.to_string();
+                        is_nvidia = current_is_nvidia;
+                        is_amd = current_is_amd;
+                        // Dedicated GPU found, we can stop searching
+                        break;
+                    } else if best_gpu_name.is_empty() {
+                        // Keep Integrated/fallback GPU if no dedicated found yet
+                        best_gpu_name = l.to_string();
+                    }
                 }
 
-                let is_nvidia = gpu_name.to_uppercase().contains("NVIDIA");
-                let is_amd = gpu_name.to_uppercase().contains("AMD")
-                    || gpu_name.to_uppercase().contains("RADEON");
+                if best_gpu_name.is_empty() {
+                    return GpuInfo::default();
+                }
 
                 let acceleration_likely = is_nvidia || is_amd;
 
@@ -109,12 +123,12 @@ impl GpuDetector {
 
                 let display_message = match (&driver_status, acceleration_likely) {
                     (DriverStatus::Available, true) => {
-                        format!("GPU acceleration available: {}", gpu_name)
+                        format!("GPU acceleration available: {}", best_gpu_name)
                     }
                     (DriverStatus::Missing, true) => {
                         format!(
                             "GPU detected: {}. Install drivers for faster AI performance.",
-                            gpu_name
+                            best_gpu_name
                         )
                     }
                     _ => {
@@ -124,14 +138,14 @@ impl GpuDetector {
 
                 GpuInfo {
                     detected: true,
-                    name: Some(gpu_name),
+                    name: Some(best_gpu_name),
                     acceleration_likely,
                     driver_status,
                     display_message,
                 }
             }
             _ => {
-                log::warn!("GPU detection via wmic failed");
+                log::warn!("GPU detection via PowerShell failed");
                 GpuInfo::default()
             }
         }
