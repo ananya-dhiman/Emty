@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import '../styles/LandingPage.css';
-import { Logo } from './Logo';
+import { Logo, LogoMark } from './Logo';
 
 interface LandingPageProps {
   theme: 'light' | 'dark';
@@ -265,7 +265,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme, onSignInClic
 
         <div className="lp-nav-right">
           <button className="lp-theme-toggle" onClick={toggle}>
-            <sp size={26} variant="full" /K'}</span>
+            {mode === 'dark' ? '☼ LIGHT' : '☾ DARK'}
           </button>
           <a className="lp-btn-primary" href="#" onClick={handleEarlyAccessClick}>Get early access</a>
         </div>
@@ -542,7 +542,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme, onSignInClic
           <div>
             <div className="lp-foot-logo">
               <LogoMark size={20} />
-              <span size={20} variant="full" /
+              <span className="lp-logo-text" style={{ fontSize: '18px' }}>emty</span>
+            </div>
             <div className="lp-foot-tagline">
               Keep it <span className="lp-o">emty.</span><br />
               Your inbox knows.<br />

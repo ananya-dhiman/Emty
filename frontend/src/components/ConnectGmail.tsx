@@ -12,7 +12,7 @@ export function ConnectGmail({ onConnect, loading }: ConnectGmailProps) {
         <div className="bar auth-bar">
           <div className="bar-logo" style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
             <div className="logo-block" style={{color: 'var(--accent-inv)'}}>
-              <Logo size={14} />
+              <Logo size={14} onAccent />
             </div>
             <span style={{color: 'var(--accent-inv)', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 600}}>Emty</span>
           </div>

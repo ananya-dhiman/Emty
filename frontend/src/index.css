@@ -136,6 +136,11 @@
   --action-card-hover:  #241414;
 }
 
+/* ───────────────── LOGO SWITCHING ───────────────── */
+.logo-mark-wrap img { display: none; }
+[data-mode="light"] .logo-mark-wrap .logo-img-light { display: block; }
+[data-mode="dark"] .logo-mark-wrap .logo-img-dark { display: block; }
+
 /* ══════════════════════════════════════════════
    SCROLLBAR STYLING (Theme-aware)
 ══════════════════════════════════════════════ */
