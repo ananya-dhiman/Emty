@@ -1,5 +1,6 @@
 import React from 'react';
 import '../styles/AppIntro.css';
+import { Logo } from './Logo';
 
 interface AppIntroProps {
   theme: 'light' | 'dark';
@@ -17,11 +18,7 @@ export const AppIntro: React.FC<AppIntroProps> = ({ theme, setTheme, onSignInCli
 
       <nav className="intro-nav">
         <div className="intro-logo">
-          <svg viewBox="0 0 28 28" fill="none">
-            <rect x="1.5" y="1.5" width="25" height="25" stroke="currentColor" strokeWidth="2.2" />
-            <polygon points="14,5 22,14 14,23 6,14" fill="none" stroke="currentColor" strokeWidth="2" />
-          </svg>
-          <span className="intro-logo-text">emty</span>
+          <Logo size={24} variant="full" />
         </div>
         <button className="intro-theme-toggle" onClick={toggleTheme}>
           {theme === 'dark' ? 'LIGHT' : 'DARK'} MODE

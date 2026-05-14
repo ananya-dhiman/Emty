@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import '../styles/Dashboard.css';
 import { CalendarSidebar } from './CalendarSidebar';
+import { Logo } from './Logo';
 import { API_BASE_URL } from '../utils/api';
 
 interface PriorityRankingScoreBreakdown {
@@ -534,8 +535,51 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   };
 
   const openSelectedInGmail = () => {
-    if (!selectedEmail?.gmailThreadId) return;
-    window.open(`https://mail.google.com/mail/u/0/#all/${selectedEmail.gmailThreadId}`, '_blank', 'noopener,noreferrer');
+    if (!selectedEmail?.gmailThreadId) {
+      console.warn('[Gmail Open] Missing gmailThreadId', { selectedEmail });
+      setNotification({
+        show: true,
+        type: 'error',
+        message: 'Cannot open in Gmail',
+        detail: 'Thread ID not available. Please try selecting the email again.',
+      });
+      setTimeout(() => setNotification(null), 5000);
+      return;
+    }
+    
+    try {
+      const threadId = selectedEmail.gmailThreadId.trim();
+      if (!threadId) {
+        throw new Error('Thread ID is empty after trim');
+      }
+      
+      const gmailUrl = `https://mail.google.com/mail/u/0/#all/${threadId}`;
+      console.log('[Gmail Open] Opening URL:', gmailUrl);
+      
+      const newTab = window.open(gmailUrl, '_blank', 'noopener,noreferrer');
+      
+      if (!newTab) {
+        console.warn('[Gmail Open] Popup blocked or failed to open');
+        setNotification({
+          show: true,
+          type: 'error',
+          message: 'Cannot open Gmail',
+          detail: 'Popup may be blocked by your browser. Try allowing popups for this site.',
+        });
+        setTimeout(() => setNotification(null), 5000);
+      } else {
+        console.log('[Gmail Open] Successfully opened Gmail thread');
+      }
+    } catch (err: any) {
+      console.error('[Gmail Open] Error:', err);
+      setNotification({
+        show: true,
+        type: 'error',
+        message: 'Error opening Gmail',
+        detail: err?.message || 'An unexpected error occurred.',
+      });
+      setTimeout(() => setNotification(null), 5000);
+    }
   };
 
   // Inline component rendered per-email to show thumbs feedback.
@@ -752,19 +796,13 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       )}
 
       {/* SHELL */}
-      <div className="shell-dash" style={{ gridTemplateColumns: `${sidebarCol ? '44px' : '176px'} ${calendarCol ? '280px' : '0px'} 1fr ${rightCol ? 'minmax(300px, 45vw)' : '0px'}` }}>
+      <div className="shell-dash" style={{ gridTemplateColumns: `${sidebarCol ? '44px' : '176px'} ${calendarCol ? (rightCol ? 'minmax(300px, 40vw)' : '1fr') : '0px'} ${calendarCol ? '0px' : '1fr'} ${rightCol ? 'minmax(300px, 40vw)' : '0px'}` }}>
         
         {/* BAR */}
         <div className="bar">
-          <div className="bar-logo" style={{margin: '0 16px'}}>
-            <div className="logo-block">
-              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                <rect x="1" y="1" width="9" height="1.8" fill="var(--accent-inv)"/>
-                <rect x="1" y="4.6" width="9" height="1.8" fill="var(--accent-inv)"/>
-                <rect x="1" y="8.2" width="5.5" height="1.8" fill="var(--accent-inv)"/>
-              </svg>
-            </div>
-            Emty
+          <div className="bar-logo" style={{margin: '0 16px', display: 'flex', alignItems: 'center', gap: '8px'}}>
+            <Logo size={24} />
+            <span style={{color: 'var(--text-1)', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 600}}>Emty</span>
           </div>
           <div className="bar-date" style={{ flex: 1 }}>SAT 21 MAR 2026</div>
           <div className="bar-r">

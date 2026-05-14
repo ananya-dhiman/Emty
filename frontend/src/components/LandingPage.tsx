@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import '../styles/LandingPage.css';
+import { Logo, LogoMark } from './Logo';
 
 interface LandingPageProps {
   theme: 'light' | 'dark';
@@ -18,21 +19,7 @@ interface LandingPageProps {
    - No new CSS variables introduced
 ════════════════════════════════════════════════ */
 
-/* ─── LOGO MARK SVG ─── */
-const LogoMark = ({ size = 26 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 28 28" fill="none">
-    <rect
-      x="1.5" y="1.5" width="25" height="25"
-      stroke="var(--text-1)" strokeWidth="2.2"
-    />
-    <polygon
-      points="14,5 22,14 14,23 6,14"
-      fill="none"
-      stroke="var(--text-1)"
-      strokeWidth="2"
-    />
-  </svg>
-);
+/* ─── LOGO MARK – Imported from Logo.tsx ─── */
 
 /* ─── TAPE DATA ─── */
 const TAPE_ITEMS = [
@@ -278,8 +265,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme, onSignInClic
 
         <div className="lp-nav-right">
           <button className="lp-theme-toggle" onClick={toggle}>
-            <span>{mode === 'dark' ? '☀' : '☾'}</span>
-            <span>{mode === 'dark' ? 'LIGHT' : 'DARK'}</span>
+            {mode === 'dark' ? '☼ LIGHT' : '☾ DARK'}
           </button>
           <a className="lp-btn-primary" href="#" onClick={handleEarlyAccessClick}>Get early access</a>
         </div>
@@ -556,7 +542,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme, onSignInClic
           <div>
             <div className="lp-foot-logo">
               <LogoMark size={20} />
-              <span className="lp-foot-logo-t">emty</span>
+              <span className="lp-logo-text" style={{ fontSize: '18px' }}>emty</span>
             </div>
             <div className="lp-foot-tagline">
               Keep it <span className="lp-o">emty.</span><br />

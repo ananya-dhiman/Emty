@@ -11,6 +11,7 @@ import { Onboarding } from './components/Onboarding'
 import { SyncLoading } from './components/SyncLoading'
 import  LandingPage  from './components/LandingPage'
 import { AppIntro } from './components/AppIntro'
+import { Logo } from './components/Logo'
 import { API_BASE_URL } from './utils/api'
 import MetricsDashboard from './pages/MetricsDashboard';
 
@@ -35,11 +36,25 @@ axios.interceptors.request.use(async (config) => {
   return config;
 }, (err) => Promise.reject(err));
 
+// Initialize theme from localStorage or system preference
+const initializeTheme = (): 'light' | 'dark' => {
+  const saved = localStorage.getItem('app-theme');
+  if (saved === 'light' || saved === 'dark') return saved;
+  
+  // Fallback to system preference
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return prefersDark ? 'dark' : 'light';
+  }
+  
+  return 'light';
+};
+
 function App() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setTheme] = useState<'light' | 'dark'>(initializeTheme);
   const [route, setRoute] = useState<'dashboard' | 'profile' | 'onboarding' | 'syncing' | 'metrics'>('dashboard');
   const [loggedOutView, setLoggedOutView] = useState<'landing' | 'signin'>('landing');
   
@@ -126,9 +141,10 @@ function App() {
     return () => unsubscribe();
   }, [user]); // Run on mount and react if `user` is modified
 
-  // Apply theme class to document
+  // Apply theme class to document and persist to localStorage
   useEffect(() => {
     document.documentElement.setAttribute('data-mode', theme);
+    localStorage.setItem('app-theme', theme);
   }, [theme]);
 
   /**
@@ -268,15 +284,9 @@ function App() {
 
       <div className="shell auth-shell">
         <div className="bar auth-bar">
-          <div className="bar-logo">
-            <div className="logo-block">
-              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                <rect x="1" y="1" width="9" height="1.8" fill="var(--accent-inv)" />
-                <rect x="1" y="4.6" width="9" height="1.8" fill="var(--accent-inv)" />
-                <rect x="1" y="8.2" width="5.5" height="1.8" fill="var(--accent-inv)" />
-              </svg>
-            </div>
-            Emty
+          <div className="bar-logo" style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+            <Logo size={20} />
+            <span style={{color: 'var(--text-1)', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 600}}>Emty</span>
           </div>
         </div>
 
