@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import '../styles/LandingPage.css';
-import { Logo, LogoMark } from './Logo';
+import { LogoMark } from './Logo';
 
 interface LandingPageProps {
   theme: 'light' | 'dark';

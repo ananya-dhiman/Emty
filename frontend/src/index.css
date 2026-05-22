@@ -22,37 +22,38 @@
   --glow-md: 0 0 12px rgba(0, 229, 255, 0.25);
 }
 
-/* ───────────────── LIGHT MODE ───────────────── */
+/* ───────────────── LIGHT MODE — Arctic Mist ───────────────── */
 [data-mode="light"] {
-  --bg:          #FFFFFF;
-  --panel:       #F3F4F6;
+  /* Backgrounds — tinted arctic blue, not flat white */
+  --bg:          #F0F4F8;
+  --panel:       #E2EAF4;
   --surface:     #FFFFFF;
-  --surface-2:   #F9FAFB;
+  --surface-2:   #EBF1F8;
 
-  /* SHARP borders */
-  --border:      #000000;
-  --border-lt:   #BFBFBF;
+  /* Borders — steel, not harsh black */
+  --border:      #1E3A5F;
+  --border-lt:   #B0C4D8;
 
-  /* HIGH contrast text */
-  --text-1:      #000000;
-  --text-2:      #404040;
-  --text-3:      #808080;
+  /* Text — deep navy, not pure black */
+  --text-1:      #0C1A2E;
+  --text-2:      #3D5166;
+  --text-3:      #7A96B0;
 
-  /* CYAN (strong but controlled) */
-  --accent:      #0b5a6c;
-  --accent-strong:#00E5FF;
+  /* Accent — sky blue (coherent with dark mode cyan family) */
+  --accent:      #0EA5E9;
+  --accent-strong:#38BDF8;
   --accent-inv:  #ffffff;
-  --accent-lt:   #E6FAFF;
-  --accent-border:#00A8CC;
+  --accent-lt:   #E0F2FE;
+  --accent-border:#0EA5E9;
 
   /* Sidebar */
-  --sb-text:     #000000;
-  --sb-text-2:   #666666;
+  --sb-text:     #0C1A2E;
+  --sb-text-2:   #3D5166;
   --sb-active:   #FFFFFF;
-  --sb-hover:    #EFEFEF;
-  --sb-div:      #CFCFCF;
+  --sb-hover:    #D4E0EE;
+  --sb-div:      #B0C4D8;
 
-  /* Semantic (crisper) */
+  /* Semantic — kept crisp */
   --red:         #E11D48;
   --red-bg:      #FFF1F2;
   --red-border:  #FDA4AF;
@@ -61,9 +62,9 @@
   --amber-bg:    #FFFBEB;
   --amber-border:#FCD34D;
 
-  --blue:        #05359c;
-  --blue-bg:     #EFF6FF;
-  --blue-border: #60A5FA;
+  --blue:        #0369A1;
+  --blue-bg:     #E0F2FE;
+  --blue-border: #7DD3FC;
 
   --green:       #15803D;
   --green-bg:    #F0FDF4;
@@ -72,6 +73,29 @@
   --purple:      #7E22CE;
   --purple-bg:   #FAF5FF;
   --purple-border:#C084FC;
+
+  /* Boards */
+  --focus-badge-text:  #15803D;
+  --focus-board-bg:    #F4FAF6;
+  --focus-board-hd:    #E8F5E9;
+  --focus-board-border:rgba(21, 128, 61, 0.2);
+  --focus-card-bg:     #FFFFFF;
+  --focus-card-hover:  #F1F9F3;
+  --focus-bar:         var(--green);
+  --focus-label:       var(--green);
+  --focus-badge-border:var(--green-border);
+  --focus-badge-bg:    var(--green-bg);
+
+  --action-badge-text:  #E11D48;
+  --action-board-bg:    #FFF5F6;
+  --action-board-hd:    #FFF0F1;
+  --action-board-border:rgba(225, 29, 72, 0.2);
+  --action-card-bg:     #FFFFFF;
+  --action-card-hover:  #FFEBEE;
+  --action-bar:         var(--red);
+  --action-label:       var(--red);
+  --action-badge-border:var(--red-border);
+  --action-badge-bg:    var(--red-bg);
 }
 /* ───────────────── DARK MODE ───────────────── */
 [data-mode="dark"] {
@@ -127,6 +151,10 @@
   --focus-board-border:#123A22;
   --focus-card-bg:     #0F1A14;
   --focus-card-hover:  #14241C;
+  --focus-bar:         var(--green);
+  --focus-label:       var(--green);
+  --focus-badge-border:var(--green-border);
+  --focus-badge-bg:    var(--green-bg);
 
   --action-badge-text:  #FFFFFF;
   --action-board-bg:    #050505;
@@ -134,6 +162,10 @@
   --action-board-border:#3A1414;
   --action-card-bg:     #1A0F0F;
   --action-card-hover:  #241414;
+  --action-bar:         var(--red);
+  --action-label:       var(--red);
+  --action-badge-border:var(--red-border);
+  --action-badge-bg:    var(--red-bg);
 }
 
 /* ───────────────── LOGO SWITCHING ───────────────── */
@@ -147,18 +179,17 @@
 
 /* Light Mode Scrollbar */
 [data-mode="light"] ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 [data-mode="light"] ::-webkit-scrollbar-track {
-  background: var(--surface);
+  background: transparent;
 }
 
 [data-mode="light"] ::-webkit-scrollbar-thumb {
   background: var(--border-lt);
-  border-radius: 4px;
-  border: 2px solid var(--surface);
+  border-radius: 10px;
 }
 
 [data-mode="light"] ::-webkit-scrollbar-thumb:hover {
@@ -167,23 +198,22 @@
 
 /* Dark Mode Scrollbar */
 [data-mode="dark"] ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 [data-mode="dark"] ::-webkit-scrollbar-track {
-  background: var(--surface);
+  background: transparent;
 }
 
 [data-mode="dark"] ::-webkit-scrollbar-thumb {
-  background: var(--accent);
-  border-radius: 4px;
-  box-shadow: 0 0 8px rgba(0, 229, 255, 0.3);
+  background: var(--border-lt);
+  border-radius: 10px;
 }
 
 [data-mode="dark"] ::-webkit-scrollbar-thumb:hover {
-  background: var(--accent-strong);
-  box-shadow: 0 0 12px rgba(0, 229, 255, 0.5);
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.3);
 }
 
 /* Firefox Scrollbar (Limited Support) */

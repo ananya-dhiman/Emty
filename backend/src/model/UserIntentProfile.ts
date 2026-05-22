@@ -87,12 +87,17 @@ export const UserIntentProfile = {
     create: Record<string, any>;
     update: Record<string, any>;
   }) {
-    const existing = await UserIntentProfileModel.findOne({ userId: args.where.userId });
-    if (!existing) {
-      return UserIntentProfileModel.create(args.create);
-    }
-    Object.assign(existing, args.update || {});
-    await existing.save();
-    return existing;
+    return UserIntentProfileModel.findOneAndUpdate(
+      { userId: args.where.userId },
+      { 
+        $set: args.update || {},
+        $setOnInsert: args.create || {} 
+      },
+      { 
+        upsert: true, 
+        new: true, 
+        runValidators: true 
+      }
+    ).lean<IUserIntentProfile>();
   },
 };

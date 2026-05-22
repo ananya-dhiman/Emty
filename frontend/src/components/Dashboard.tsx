@@ -5,6 +5,37 @@ import { CalendarSidebar } from './CalendarSidebar';
 import { Logo } from './Logo';
 import { API_BASE_URL } from '../utils/api';
 
+/* ── Collapsible section used in the detail panel body ── */
+const DetCollapsible: React.FC<{
+  label: string;
+  count: number;
+  defaultOpen: boolean;
+  children: React.ReactNode;
+}> = ({ label, count, defaultOpen, children }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  useEffect(() => { setOpen(defaultOpen); }, [defaultOpen]);
+  return (
+    <div className="det-section">
+      <button
+        className="det-section-hd"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+      >
+        <svg
+          className={`det-section-chev ${open ? 'open' : ''}`}
+          width="12" height="12" viewBox="0 0 16 16" fill="none"
+        >
+          <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        <span className="det-section-lbl">{label}</span>
+        {count > 0 && <span className="det-section-ct">{count}</span>}
+      </button>
+      {open && <div className="det-section-body">{children}</div>}
+    </div>
+  );
+};
+
+
 interface PriorityRankingScoreBreakdown {
   baseScore: number;
   dynamicScore: number;
@@ -204,6 +235,8 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [selectedLowPriorityMessageId, setSelectedLowPriorityMessageId] = useState<string | null>(null);
   const [selectedSourceMessageId, setSelectedSourceMessageId] = useState<string | null>(null);
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
+  const [isFocusOpen, setIsFocusOpen] = useState(false);
+  const [isActionOpen, setIsActionOpen] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -327,6 +360,14 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         if (!isBackground) setLoading(false);
       }
     };
+
+  useEffect(() => {
+    setIsFocusOpen(focusItems.length > 0);
+  }, [focusItems.length]);
+
+  useEffect(() => {
+    setIsActionOpen(actionItems.length > 0);
+  }, [actionItems.length]);
 
   useEffect(() => {
     fetchInsights(false);
@@ -535,8 +576,11 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   };
 
   const openSelectedInGmail = () => {
-    if (!selectedEmail?.gmailThreadId) {
-      console.warn('[Gmail Open] Missing gmailThreadId', { selectedEmail });
+    const threadId = selectedEmail?.gmailThreadId?.trim();
+    const messageId = selectedEmail?.messageId?.trim();
+    
+    if (!threadId && !messageId) {
+      console.warn('[Gmail Open] Missing gmailThreadId and messageId', { selectedEmail });
       setNotification({
         show: true,
         type: 'error',
@@ -548,12 +592,8 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     }
     
     try {
-      const threadId = selectedEmail.gmailThreadId.trim();
-      if (!threadId) {
-        throw new Error('Thread ID is empty after trim');
-      }
-      
-      const gmailUrl = `https://mail.google.com/mail/u/0/#all/${threadId}`;
+      const idToUse = threadId || messageId;
+      const gmailUrl = `https://mail.google.com/mail/u/0/#all/${idToUse}`;
       console.log('[Gmail Open] Opening URL:', gmailUrl);
       
       const newTab = window.open(gmailUrl, '_blank', 'noopener,noreferrer');
@@ -765,7 +805,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     : null;
 
   return (
-    <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <>
 
       {/* NOTIFICATION */}
       {notification && notification.show && (
@@ -796,13 +836,13 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       )}
 
       {/* SHELL */}
-      <div className="shell-dash" style={{ gridTemplateColumns: `${sidebarCol ? '44px' : '176px'} ${calendarCol ? (rightCol ? 'minmax(300px, 40vw)' : '1fr') : '0px'} ${calendarCol ? '0px' : '1fr'} ${rightCol ? 'minmax(300px, 40vw)' : '0px'}` }}>
+      <div className="shell-dash" style={{ gridTemplateColumns: `${sidebarCol ? '44px' : '176px'} ${calendarCol ? '1fr' : '0px'} ${calendarCol ? '0px' : '1fr'} ${rightCol ? 'minmax(300px, 40vw)' : '0px'}` }}>
         
         {/* BAR */}
         <div className="bar">
-          <div className="bar-logo" style={{margin: '0 16px', display: 'flex', alignItems: 'center', gap: '8px'}}>
-            <Logo size={24} />
-            <span style={{color: 'var(--text-1)', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 600}}>Emty</span>
+          <div className="bar-logo" style={{margin: '0 20px', display: 'flex', alignItems: 'center', gap: '12px'}}>
+            <Logo size={28} />
+            <span style={{color: 'var(--text-1)', fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700}}>Emty</span>
           </div>
           <div className="bar-date" style={{ flex: 1 }}>SAT 21 MAR 2026</div>
           <div className="bar-r">
@@ -812,13 +852,14 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               <button className={`tgl-btn ${theme === 'dark' ? 'on' : ''}`} onClick={() => setTheme('dark')}>Dark</button>
             </div>
             <button 
-              className="sync-pill" 
+              className={`sync-pill ${isSyncing ? 'syncing' : ''}`}
               onClick={handleSync} 
               disabled={isSyncing}
+              aria-label={isSyncing ? 'Syncing inbox, please wait' : 'Sync inbox now'}
               style={{ cursor: isSyncing ? 'default' : 'pointer', background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--text-1)' }}
             >
-              <div className={`sdot ${isSyncing ? 'pulse' : ''}`} style={isSyncing ? { background: 'var(--amber)' } : {}}></div>
-              {isSyncing ? 'Syncing Inbox...' : 'Sync'}
+              <div className={`sdot ${isSyncing ? 'sdot--pulse' : ''}`} style={isSyncing ? { background: 'var(--amber)' } : {}}></div>
+              {isSyncing ? 'Syncing...' : 'Sync'}
             </button>
             <div className="bar-av" onClick={() => onNavigate('profile')}>{user?.name ? user.name.charAt(0).toUpperCase() : 'U'}</div>
           </div>
@@ -922,50 +963,9 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
           )}
           {/* BOARDS */}
           <div className="boards">
-            {/* FOCUS BOARD */}
-            <div className="board focus">
-              <div className="board-hd">
-                <div className="board-bar"></div>
-                <span className="board-name">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6, verticalAlign: 'text-bottom'}}><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
-                  Focus Board
-                </span>
-                <span className="board-desc">&nbsp;— pinned · most relevant today</span>
-                <span className="board-badge">{loading ? '...' : `${focusItems.length} items`}</span>
-              </div>
-              <div className="track">
-                {loading && <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>Loading insights...</div>}
-                {!loading && focusItems.length === 0 && (
-                   <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '13px', lineHeight: 1.5 }}>
-                     {isSyncing ? 'Evaluating emails in the background. Your most important emails will pop up here shortly...' : 'Inbox zero. Great job!'}
-                   </div>
-                )}
-                {!loading && focusItems.map((item) => (
-                  <div
-                    className={`kard ${selectedInsightId === item.insightId ? 'sel' : ''}`}
-                    key={item.insightId}
-                    onClick={() => selectEmail(item)}
-                  >
-                    <div className="kard-top">
-                      <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
-                    </div>
-                    <div className="ks">{item.summary.shortSnippet || "No summary available"}</div>
-                    <div className="kard-tags">
-                      {item.matchedLabels.slice(0, 2).map(lbl => (
-                        <span className="tag" key={lbl}>{lbl}</span>
-                      ))}
-                      <span className="kt">
-                        {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
             {/* ACTION BOARD */}
             <div className="board action">
-              <div className="board-hd">
+              <div className="board-hd" onClick={() => setIsActionOpen(!isActionOpen)} style={{ cursor: 'pointer', userSelect: 'none' }}>
                 <div className="board-bar"></div>
                 <span className="board-name">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6, verticalAlign: 'text-bottom'}}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
@@ -973,34 +973,99 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                 </span>
                 <span className="board-desc">&nbsp;— requires your response</span>
                 <span className="board-badge">{loading ? '...' : `${actionItems.length} urgent`}</span>
+                <span style={{ marginLeft: '12px', color: 'var(--text-3)', transition: 'transform 0.2s', transform: isActionOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </span>
               </div>
-              <div className="track">
-                {loading && <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>Loading tasks...</div>}
-                {!loading && actionItems.length === 0 && (
-                   <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>No urgent actions required.</div>
-                )}
-                {!loading && actionItems.map((item) => (
-                  <div
-                    className={`kard ${selectedInsightId === item.insightId ? 'sel' : ''}`}
-                    key={item.insightId}
-                    onClick={() => selectEmail(item)}
-                  >
-                    <div className="kard-top">
-                      <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
+              {isActionOpen && (
+                <div className="track">
+                  {loading && [0,1,2].map(i => (
+                    <div className="kard kard-skeleton" key={i}>
+                      <div className="skel-line skel-line--sender" />
+                      <div className="skel-line skel-line--snip" />
+                      <div className="skel-line skel-line--snip skel-line--short" />
+                      <div className="skel-tags"><div className="skel-tag" /><div className="skel-tag skel-tag--wide" /></div>
                     </div>
-                    <div className="ks">{item.summary.shortSnippet || "Action required"}</div>
-                    <div className="kard-tags">
-                      <span className="tag tr">Action Required</span>
-                      {item.matchedLabels.slice(0, 1).map(lbl => (
-                        <span className="tag tn" key={lbl}>{lbl}</span>
-                      ))}
-                      <span className="kt">
-                        {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
-                      </span>
+                  ))}
+                  {!loading && actionItems.length === 0 && (
+                     <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>No urgent actions required.</div>
+                  )}
+                  {!loading && actionItems.map((item) => (
+                    <div
+                      className={`kard ${selectedInsightId === item.insightId ? 'sel' : ''}`}
+                      key={item.insightId}
+                      onClick={() => selectEmail(item)}
+                    >
+                      <div className="kard-top">
+                        <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
+                      </div>
+                      <div className="ks">{item.summary.shortSnippet || "Action required"}</div>
+                      <div className="kard-tags">
+                        <span className="tag tr">Action Required</span>
+                        {item.matchedLabels.slice(0, 1).map(lbl => (
+                          <span className="tag tn" key={lbl}>{lbl}</span>
+                        ))}
+                        <span className="kt">
+                          {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* FOCUS BOARD */}
+            <div className="board focus">
+              <div className="board-hd" onClick={() => setIsFocusOpen(!isFocusOpen)} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                <div className="board-bar"></div>
+                <span className="board-name">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6, verticalAlign: 'text-bottom'}}><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+                  Focus Board
+                </span>
+                <span className="board-desc">&nbsp;— pinned · most relevant today</span>
+                <span className="board-badge">{loading ? '...' : `${focusItems.length} items`}</span>
+                <span style={{ marginLeft: '12px', color: 'var(--text-3)', transition: 'transform 0.2s', transform: isFocusOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </span>
               </div>
+              {isFocusOpen && (
+                <div className="track">
+                  {loading && [0,1,2].map(i => (
+                    <div className="kard kard-skeleton" key={i}>
+                      <div className="skel-line skel-line--sender" />
+                      <div className="skel-line skel-line--snip" />
+                      <div className="skel-line skel-line--snip skel-line--short" />
+                      <div className="skel-tags"><div className="skel-tag" /><div className="skel-tag skel-tag--wide" /></div>
+                    </div>
+                  ))}
+                  {!loading && focusItems.length === 0 && (
+                     <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '13px', lineHeight: 1.5 }}>
+                       {isSyncing ? 'Evaluating emails in the background. Your most important emails will pop up here shortly...' : 'Inbox zero. Great job!'}
+                     </div>
+                  )}
+                  {!loading && focusItems.map((item) => (
+                    <div
+                      className={`kard ${selectedInsightId === item.insightId ? 'sel' : ''}`}
+                      key={item.insightId}
+                      onClick={() => selectEmail(item)}
+                    >
+                      <div className="kard-top">
+                        <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
+                      </div>
+                      <div className="ks">{item.summary.shortSnippet || "No summary available"}</div>
+                      <div className="kard-tags">
+                        {item.matchedLabels.slice(0, 2).map(lbl => (
+                          <span className="tag" key={lbl}>{lbl}</span>
+                        ))}
+                        <span className="kt">
+                          {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -1048,10 +1113,10 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                   onClick={() => setIsLowPriorityOpen((prev) => !prev)}
                 >
                   <span className="low-priority-title">
-                    {filteredLowPriorityItems.length}+ low priority emails
+                    Low Priority Inbox
                   </span>
                   <span className="low-priority-desc">
-                    below score 0.4, not processed by AI
+                    filtered out - <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{filteredLowPriorityItems.length} emails</span>
                   </span>
                   <span className={`low-priority-toggle ${isLowPriorityOpen ? 'open' : ''}`}>
                     <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1088,240 +1153,303 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
         {/* DETAIL */}
         <div className={`detail ${!rightCol ? 'col' : ''}`}>
-          <div className="det-top" style={{ position: 'relative' }}>
-            <button 
-              onClick={() => setRightCol(false)}
-              style={{ position: 'absolute', top: '16px', right: '16px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M2 2L10 10M10 2L2 10" />
-              </svg>
-            </button>
-            <div className="det-from">
-              {selectedEmail ? (selectedEmail.from.name || selectedEmail.from.email) : 'Select an email'}
+
+          {/* ── HEADER ── */}
+          <div className="det-top">
+            <div className="det-top-row">
+              <div className="det-from">
+                {selectedEmail ? (selectedEmail.from.name || selectedEmail.from.email) : 'Select an email'}
+              </div>
+              <button
+                className="det-close"
+                onClick={() => setRightCol(false)}
+                aria-label="Close detail panel"
+              >
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M2 2L10 10M10 2L2 10" />
+                </svg>
+              </button>
             </div>
             <div className="det-domain">{selectedEmail ? selectedDomain : 'No email selected'}</div>
             {selectedEmail && (
-              <div className="det-badge"><div className="badge-sq"></div>{selectedEmail.isActionRequired ? 'ACTION REQUIRED' : 'INFORMATION'}</div>
+              <div className="det-meta-row">
+                <div className="det-badge">
+                  <div className="badge-sq"></div>
+                  {selectedEmail.isActionRequired ? 'ACTION REQUIRED' : 'INFORMATION'}
+                </div>
+                {selectedEmail.matchedLabels.slice(0, 2).map(lbl => (
+                  <span className="tag tn" key={lbl}>{lbl}</span>
+                ))}
+              </div>
             )}
           </div>
 
+
+          {/* ── BODY ── */}
           <div className="det-body">
-            <div className="det-blk">
-              <span className="blk-lbl">Summary</span>
-              <div className="blk-txt">{summaryText}</div>
-            </div>
 
-            <div className="det-blk">
-              <span className="blk-lbl">Labels</span>
-              <div className="ar-tags">
-                {selectedEmail?.matchedLabels.length ? (
-                  selectedEmail.matchedLabels.map((lbl) => (
-                    <span className="tag tn" key={lbl}>{lbl}</span>
-                  ))
-                ) : (
-                  <div className="blk-txt">No labels available.</div>
-                )}
-              </div>
-            </div>
-
-            <div className="det-blk">
-              <span className="blk-lbl">Last Signal</span>
-              <div className="blk-txt">{selectedDateLabel}</div>
-            </div>
-
-            {selectedDates.length > 0 && (
-              <div className="det-blk">
-                <span className="blk-lbl">Dates</span>
-                <div className="timeline">
-                  <div className="tl-line"></div>
-                  {selectedDates.map((item, idx) => (
-                    <TimelineItem
-                      key={`${item.type}-${item.date}-${idx}`}
-                      item={item}
-                      isFirst={idx === 0}
-                      selectedEmail={selectedEmail}
-                      onSourceClick={(id: string) => setSelectedSourceMessageId(id)}
-                    />
-                  ))}
+            {!selectedEmail && (
+              <div className="det-empty-state">
+                <div className="det-empty-icon">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="4" width="20" height="16" rx="2"/>
+                    <polyline points="2,4 12,13 22,4"/>
+                  </svg>
                 </div>
-              </div>
-            )}
-
-            <div className="det-blk">
-              <span className="blk-lbl">Important Links</span>
-              {selectedLinkGroups.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {selectedLinkGroups.map(({ sourceId, links }) => {
-                    const context = selectedEmail?.emailContextById?.[sourceId];
-                    const sourceTitle = context?.subject || sourceId;
-                    return (
-                      <div className="link-group" key={sourceId}>
-                        {sourceId !== 'unknown' && (
-                          <div
-                            className="link-group-title"
-                            onClick={() => setSelectedSourceMessageId(sourceId)}
-                            style={{ cursor: 'pointer' }}
-                            title="Show source email context"
-                          >
-                            {sourceTitle}
-                          </div>
-                        )}
-                        <div className="link-list">
-                          {links.map((link, idx) => {
-                            let host = '';
-                            try {
-                              host = new URL(link.url).hostname;
-                            } catch {
-                              host = 'link';
-                            }
-                            return (
-                              <a
-                                className="link-item"
-                                key={`${sourceId}-${link.url}-${idx}`}
-                                href={link.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={link.url}
-                              >
-                                <div className="link-main">
-                                  <div className="link-label">{link.label || host}</div>
-                                  <div className="link-url">{link.url}</div>
-                                </div>
-                                <div className="link-meta">
-                                  {link.reason && <span className="link-badge">{link.reason}</span>}
-                                  {link.inferred && <span className="link-badge inf">inferred</span>}
-                                </div>
-                              </a>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="blk-txt">No important links detected.</div>
-              )}
-            </div>
-
-            <div className="det-blk">
-              <span className="blk-lbl">Action Checklist</span>
-              {selectedChecklistItems.length > 0 ? (
-                <div className="task-list">
-                  {selectedChecklistItems.map((item, idx) => {
-                    const dueDateLabel = item.dueDate
-                      ? new Date(item.dueDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-                      : null;
-                    const sourceTitle = item.sourceEmailId
-                      ? (selectedEmail?.emailContextById?.[item.sourceEmailId]?.subject || item.sourceEmailId)
-                      : null;
-                    return (
-                      <div className="task-item" key={`${item.task}-${idx}`}>
-                        <div className="task-dot" />
-                        <div className="task-content">
-                          <div className="task-text">{item.task}</div>
-                          <div className="task-meta">
-                            {dueDateLabel && <span className="task-chip due">Due {dueDateLabel}</span>}
-                            {item.inferred && <span className="task-chip inf">Inferred</span>}
-                            {sourceTitle && (
-                              <span
-                                className="task-chip src"
-                                onClick={() => setSelectedSourceMessageId(item.sourceEmailId || null)}
-                                style={{ cursor: 'pointer' }}
-                              >
-                                {sourceTitle}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="blk-txt">No action checklist detected for this thread.</div>
-              )}
-            </div>
-
-            {selectedAttachments.length > 0 && (
-              <div className="det-blk">
-                <span className="blk-lbl">Attachments</span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                  {Object.entries(attachmentsByEmail).map(([sourceId, atts], groupIdx) => {
-                    const emailContext = selectedEmail?.emailContextById?.[sourceId];
-                    const emailTitle = emailContext?.subject || sourceId;
-                    return (
-                      <div key={sourceId || groupIdx} className="att-group">
-                        {sourceId !== 'unknown' && (
-                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-1)', paddingBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', borderBottom: '1px solid var(--border-lt)' }}>
-                            {emailTitle}
-                          </div>
-                        )}
-                        <div className="attachments-grid">
-                          {atts.map((attachment, idx) => {
-                            const ext = attachment.filename.split('.').pop()?.toUpperCase() || 'FILE';
-                            return (
-                              <div
-                                className="att-card"
-                                key={`${attachment.filename}-${idx}`}
-                                onClick={() => setSelectedSourceMessageId(attachment.sourceEmailId || null)}
-                              >
-                                <div className="att-icon">
-                                  <svg viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <rect x="0.5" y="0.5" width="35" height="43" rx="4" fill="var(--surface-2)" stroke="var(--border)"/>
-                                    <rect x="4" y="30" width="28" height="3" rx="1.5" fill="var(--accent)"/>
-                                    <rect x="4" y="35" width="18" height="3" rx="1.5" fill="var(--border-lt)"/>
-                                    <rect x="4" y="10" width="28" height="14" rx="2" fill="var(--surface-2)"/>
-                                    <text x="18" y="20" textAnchor="middle" fontSize="7" fontWeight="600" fill="var(--text-3)" fontFamily="var(--font-mono)">{ext.substring(0, 4)}</text>
-                                  </svg>
-                                </div>
-                                <div className="att-name">{attachment.filename}</div>
-                                <div className="att-size">{typeof attachment.size === 'number' ? `${Math.max(1, Math.round(attachment.size / 1024))} KB` : '-'}</div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {selectedSourceContext && (
-              <div className="det-blk">
-                <span className="blk-lbl">Source Email</span>
-                <div className="blk-txt" style={{ marginBottom: '6px' }}>
-                  {selectedSourceContext.subject || 'No subject'}
-                </div>
-                <div className="blk-txt" style={{ fontSize: '11px', opacity: 0.8 }}>
-                  {selectedSourceContext.from?.name || selectedSourceContext.from?.email || 'Unknown sender'}
-                  {selectedSourceContext.internalDate
-                    ? ` • ${new Date(selectedSourceContext.internalDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
-                    : ''}
-                </div>
+                <div className="det-empty-title">No email selected</div>
+                <div className="det-empty-desc">Click any email in the list to view its details, action items, and important links here.</div>
               </div>
             )}
 
             {selectedEmail && (
-              <div className="det-blk">
-                <span className="blk-lbl">Feedback</span>
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)', margin: '0 0 8px' }}>
-                  Tell us if this email is relevant to you.
-                </p>
-                <FeedbackButtons insightId={selectedEmail.insightId} messageId={selectedEmail.messageId} alwaysVisible />
-              </div>
+              <>
+                {/* Summary — always visible */}
+                <div className="det-blk">
+                  <span className="blk-lbl">Summary</span>
+                  <div className="blk-txt">{summaryText}</div>
+                </div>
+
+                {/* Last Signal */}
+                <div className="det-blk det-blk--inline">
+                  <span className="blk-lbl">Last Signal</span>
+                  <div className="blk-txt blk-txt--mono">{selectedDateLabel}</div>
+                </div>
+
+                {/* Action Checklist — only shown if items exist, else plain not-found */}
+                {selectedChecklistItems.length > 0 ? (
+                  <DetCollapsible
+                    label="Action Checklist"
+                    count={selectedChecklistItems.length}
+                    defaultOpen={true}
+                  >
+                    <div className="task-list">
+                      {selectedChecklistItems.map((item, idx) => {
+                        const dueDateLabel = item.dueDate
+                          ? new Date(item.dueDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+                          : null;
+                        const sourceTitle = item.sourceEmailId
+                          ? (selectedEmail?.emailContextById?.[item.sourceEmailId]?.subject || item.sourceEmailId)
+                          : null;
+                        return (
+                          <div className="task-item" key={`${item.task}-${idx}`}>
+                            <div className="task-dot" />
+                            <div className="task-content">
+                              <div className="task-text">{item.task}</div>
+                              <div className="task-meta">
+                                {dueDateLabel && <span className="task-chip due">Due {dueDateLabel}</span>}
+                                {item.inferred && <span className="task-chip inf">Inferred</span>}
+                                {sourceTitle && (
+                                  <span
+                                    className="task-chip src"
+                                    onClick={() => setSelectedSourceMessageId(item.sourceEmailId || null)}
+                                    style={{ cursor: 'pointer' }}
+                                  >
+                                    {sourceTitle}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </DetCollapsible>
+                ) : (
+                  <div className="det-blk">
+                    <span className="blk-lbl">Action Checklist</span>
+                    <div className="det-not-found">No action items found for this thread.</div>
+                  </div>
+                )}
+
+                {/* Dates & Deadlines — only shown if items exist */}
+                {selectedDates.length > 0 ? (
+                  <DetCollapsible
+                    label="Dates & Deadlines"
+                    count={selectedDates.length}
+                    defaultOpen={true}
+                  >
+                    <div className="timeline">
+                      <div className="tl-line"></div>
+                      {selectedDates.map((item, idx) => (
+                        <TimelineItem
+                          key={`${item.type}-${item.date}-${idx}`}
+                          item={item}
+                          isFirst={idx === 0}
+                          selectedEmail={selectedEmail}
+                          onSourceClick={(id: string) => setSelectedSourceMessageId(id)}
+                        />
+                      ))}
+                    </div>
+                  </DetCollapsible>
+                ) : (
+                  <div className="det-blk">
+                    <span className="blk-lbl">Dates &amp; Deadlines</span>
+                    <div className="det-not-found">No dates or deadlines found.</div>
+                  </div>
+                )}
+
+                {/* Important Links — only shown if items exist */}
+                {selectedLinkGroups.length > 0 ? (
+                  <DetCollapsible
+                    label="Important Links"
+                    count={selectedLinkGroups.reduce((n, g) => n + g.links.length, 0)}
+                    defaultOpen={true}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {selectedLinkGroups.map(({ sourceId, links }) => {
+                        const context = selectedEmail?.emailContextById?.[sourceId];
+                        const sourceTitle = context?.subject || sourceId;
+                        return (
+                          <div className="link-group" key={sourceId}>
+                            {sourceId !== 'unknown' && (
+                              <div
+                                className="link-group-title"
+                                onClick={() => setSelectedSourceMessageId(sourceId)}
+                                style={{ cursor: 'pointer' }}
+                                title="Show source email context"
+                              >
+                                {sourceTitle}
+                              </div>
+                            )}
+                            <div className="link-list">
+                              {links.map((link, idx) => {
+                                let host = '';
+                                try { host = new URL(link.url).hostname; } catch { host = 'link'; }
+                                return (
+                                  <a
+                                    className="link-item"
+                                    key={`${sourceId}-${link.url}-${idx}`}
+                                    href={link.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={link.url}
+                                  >
+                                    <div className="link-main">
+                                      <div className="link-label">{link.label || host}</div>
+                                      <div className="link-url">{link.url}</div>
+                                    </div>
+                                    <div className="link-meta">
+                                      {link.reason && <span className="link-badge">{link.reason}</span>}
+                                      {link.inferred && <span className="link-badge inf">inferred</span>}
+                                    </div>
+                                  </a>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </DetCollapsible>
+                ) : (
+                  <div className="det-blk">
+                    <span className="blk-lbl">Important Links</span>
+                    <div className="det-not-found">No important links detected.</div>
+                  </div>
+                )}
+
+                {/* Attachments — only shown if items exist */}
+                {selectedAttachments.length > 0 ? (
+                  <DetCollapsible
+                    label="Attachments"
+                    count={selectedAttachments.length}
+                    defaultOpen={true}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                      {Object.entries(attachmentsByEmail).map(([sourceId, atts], groupIdx) => {
+                        const emailContext = selectedEmail?.emailContextById?.[sourceId];
+                        const emailTitle = emailContext?.subject || sourceId;
+                        return (
+                          <div key={sourceId || groupIdx} className="att-group">
+                            {sourceId !== 'unknown' && (
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-1)', paddingBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', borderBottom: '1px solid var(--border-lt)' }}>
+                                {emailTitle}
+                              </div>
+                            )}
+                            <div className="attachments-grid">
+                              {atts.map((attachment, idx) => {
+                                const ext = attachment.filename.split('.').pop()?.toUpperCase() || 'FILE';
+                                return (
+                                  <div
+                                    className="att-card"
+                                    key={`${attachment.filename}-${idx}`}
+                                    onClick={() => setSelectedSourceMessageId(attachment.sourceEmailId || null)}
+                                  >
+                                    <div className="att-icon">
+                                      <svg viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <rect x="0.5" y="0.5" width="35" height="43" rx="4" fill="var(--surface-2)" stroke="var(--border)"/>
+                                        <rect x="4" y="30" width="28" height="3" rx="1.5" fill="var(--accent)"/>
+                                        <rect x="4" y="35" width="18" height="3" rx="1.5" fill="var(--border-lt)"/>
+                                        <rect x="4" y="10" width="28" height="14" rx="2" fill="var(--surface-2)"/>
+                                        <text x="18" y="20" textAnchor="middle" fontSize="7" fontWeight="600" fill="var(--text-3)" fontFamily="var(--font-mono)">{ext.substring(0, 4)}</text>
+                                      </svg>
+                                    </div>
+                                    <div className="att-name">{attachment.filename}</div>
+                                    <div className="att-size">{typeof attachment.size === 'number' ? `${Math.max(1, Math.round(attachment.size / 1024))} KB` : '-'}</div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </DetCollapsible>
+                ) : (
+                  <div className="det-blk">
+                    <span className="blk-lbl">Attachments</span>
+                    <div className="det-not-found">No attachments in this thread.</div>
+                  </div>
+                )}
+
+                {selectedSourceContext && (
+                  <div className="det-blk">
+                    <span className="blk-lbl">Source Email</span>
+                    <div className="blk-txt" style={{ marginBottom: '6px' }}>{selectedSourceContext.subject || 'No subject'}</div>
+                    <div className="blk-txt" style={{ fontSize: '11px', opacity: 0.8 }}>
+                      {selectedSourceContext.from?.name || selectedSourceContext.from?.email || 'Unknown sender'}
+                      {selectedSourceContext.internalDate
+                        ? ` • ${new Date(selectedSourceContext.internalDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
+                        : ''}
+                    </div>
+                  </div>
+                )}
+
+                {/* Feedback — always at bottom */}
+                <div className="det-blk det-feedback-row">
+                  <span className="blk-lbl" style={{ marginBottom: 0 }}>Feedback</span>
+                  <FeedbackButtons insightId={selectedEmail.insightId} messageId={selectedEmail.messageId} alwaysVisible />
+                </div>
+              </>
             )}
           </div>
 
+          {/* -- BOTTOM ACTIONS -- */}
           <div className="det-actions">
-            <button className="det-btn" onClick={() => setRightCol(false)}>Dismiss</button>
-            <button className="det-btn pri" onClick={openSelectedInGmail} disabled={!selectedEmail}>Open in Gmail</button>
+            <button
+              className="det-btn"
+              onClick={() => setRightCol(false)}
+              aria-label="Dismiss and close detail panel"
+            >
+              Dismiss
+            </button>
+            <button
+              className="det-btn pri"
+              onClick={openSelectedInGmail}
+              disabled={!selectedEmail}
+              aria-label="Open this thread in Gmail"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}>
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                <polyline points="15 3 21 3 21 9"/>
+                <line x1="10" y1="14" x2="21" y2="3"/>
+              </svg>
+              Open in Gmail
+            </button>
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

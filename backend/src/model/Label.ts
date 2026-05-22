@@ -114,30 +114,41 @@ export const Label = {
         update: Record<string, any>;
     }) {
         const composite = args.where.userId_accountId_nameNormalized;
-        const existing = await LabelModel.findOne({
+        const filter = {
             userId: composite.userId,
             accountId: composite.accountId,
             nameNormalized: composite.nameNormalized,
-        });
-        if (!existing) {
-            return LabelModel.create(args.create);
-        }
+        };
 
-        const updatePayload: Record<string, any> = {};
+        const update: any = { $set: {} };
         for (const [key, value] of Object.entries(args.update || {})) {
             if (value && typeof value === "object" && "increment" in value) {
-                updatePayload[key] = (existing as any)[key] + Number((value as any).increment || 0);
-                continue;
+                if (!update.$inc) update.$inc = {};
+                update.$inc[key] = (value as any).increment;
+            } else if (value && typeof value === "object" && "push" in value) {
+                if (!update.$push) update.$push = {};
+                update.$push[key] = (value as any).push;
+            } else {
+                update.$set[key] = value;
             }
-            if (value && typeof value === "object" && "push" in value) {
-                const current = Array.isArray((existing as any)[key]) ? (existing as any)[key] : [];
-                updatePayload[key] = [...current, (value as any).push];
-                continue;
-            }
-            updatePayload[key] = value;
         }
-        Object.assign(existing, updatePayload);
-        await existing.save();
-        return existing;
+
+        // For upsert, we need to ensure the 'create' fields are present if it's a new document
+        // Use $setOnInsert for fields in 'create' that aren't in 'update'
+        const setOnInsert: any = {};
+        for (const [key, value] of Object.entries(args.create || {})) {
+            if (!(key in (args.update || {})) && !(key in filter)) {
+                setOnInsert[key] = value;
+            }
+        }
+        if (Object.keys(setOnInsert).length > 0) {
+            update.$setOnInsert = setOnInsert;
+        }
+
+        return LabelModel.findOneAndUpdate(filter, update, {
+            upsert: true,
+            new: true,
+            runValidators: true,
+        }).lean<ILabel>();
     },
 };
