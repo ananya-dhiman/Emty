@@ -575,11 +575,12 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     setRightCol(true);
   };
 
-  const openSelectedInGmail = () => {
+  const handleGmailClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     const threadId = selectedEmail?.gmailThreadId?.trim();
     const messageId = selectedEmail?.messageId?.trim();
     
     if (!threadId && !messageId) {
+      e.preventDefault();
       console.warn('[Gmail Open] Missing gmailThreadId and messageId', { selectedEmail });
       setNotification({
         show: true,
@@ -588,37 +589,8 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         detail: 'Thread ID not available. Please try selecting the email again.',
       });
       setTimeout(() => setNotification(null), 5000);
-      return;
-    }
-    
-    try {
-      const idToUse = threadId || messageId;
-      const gmailUrl = `https://mail.google.com/mail/u/0/#all/${idToUse}`;
-      console.log('[Gmail Open] Opening URL:', gmailUrl);
-      
-      const newTab = window.open(gmailUrl, '_blank', 'noopener,noreferrer');
-      
-      if (!newTab) {
-        console.warn('[Gmail Open] Popup blocked or failed to open');
-        setNotification({
-          show: true,
-          type: 'error',
-          message: 'Cannot open Gmail',
-          detail: 'Popup may be blocked by your browser. Try allowing popups for this site.',
-        });
-        setTimeout(() => setNotification(null), 5000);
-      } else {
-        console.log('[Gmail Open] Successfully opened Gmail thread');
-      }
-    } catch (err: any) {
-      console.error('[Gmail Open] Error:', err);
-      setNotification({
-        show: true,
-        type: 'error',
-        message: 'Error opening Gmail',
-        detail: err?.message || 'An unexpected error occurred.',
-      });
-      setTimeout(() => setNotification(null), 5000);
+    } else {
+      console.log('[Gmail Open] Opening thread in browser...');
     }
   };
 
@@ -1433,11 +1405,26 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             >
               Dismiss
             </button>
-            <button
+            <a
               className="det-btn pri"
-              onClick={openSelectedInGmail}
-              disabled={!selectedEmail}
+              href={
+                selectedEmail
+                  ? `https://mail.google.com/mail/u/0/#all/${selectedEmail.gmailThreadId?.trim() || selectedEmail.messageId?.trim() || ''}`
+                  : undefined
+              }
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={handleGmailClick}
               aria-label="Open this thread in Gmail"
+              style={{
+                textDecoration: 'none',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                pointerEvents: !selectedEmail ? 'none' : 'auto',
+                opacity: !selectedEmail ? 0.6 : 1,
+                cursor: !selectedEmail ? 'not-allowed' : 'pointer',
+              }}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}>
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
@@ -1445,7 +1432,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                 <line x1="10" y1="14" x2="21" y2="3"/>
               </svg>
               Open in Gmail
-            </button>
+            </a>
           </div>
         </div>
       </div>
