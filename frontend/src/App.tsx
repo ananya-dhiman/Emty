@@ -9,7 +9,6 @@ import { Dashboard } from './components/Dashboard'
 import { Profile } from './components/Profile'
 import { Onboarding } from './components/Onboarding'
 import { SyncLoading } from './components/SyncLoading'
-import  LandingPage  from './components/LandingPage'
 import { AppIntro } from './components/AppIntro'
 import { Logo } from './components/Logo'
 import { API_BASE_URL } from './utils/api'
@@ -246,11 +245,8 @@ function App() {
   }
 
   if (loggedOutView === 'landing') {
-    const isDesktop = typeof window !== 'undefined' && typeof (window as any).__TAURI_INTERNALS__ !== 'undefined';
-    const DesktopOrLanding = isDesktop ? AppIntro : LandingPage;
-    
     return (
-      <DesktopOrLanding
+      <AppIntro
         theme={theme}
         setTheme={setTheme}
         onSignInClick={() => {
