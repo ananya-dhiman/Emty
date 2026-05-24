@@ -245,6 +245,15 @@ pub fn run() {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
                             } else {
+                                if let Ok(Some(monitor)) = window.current_monitor() {
+                                    let size = monitor.size();
+                                    let scale = monitor.scale_factor();
+                                    let physical_width = (340.0 * scale) as u32;
+                                    let physical_height = (480.0 * scale) as u32;
+                                    let y = size.height.saturating_sub(physical_height + (50.0 * scale) as u32);
+                                    let x = size.width.saturating_sub(physical_width + (20.0 * scale) as u32);
+                                    let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+                                }
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }

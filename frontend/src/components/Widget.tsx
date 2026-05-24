@@ -101,7 +101,10 @@ export function WidgetApp() {
         
         // Remove duplicates by insightId just in case
         const uniqueItems = Array.from(new Map(combined.map(item => [item.insightId, item])).values());
-        setFilteredCount(uniqueItems.length + (rankingRes.data.others?.length || 0));
+        
+        const lowPriorityCount = rankingRes.data.lowPriorityEmails?.length || 0;
+        const othersCount = rankingRes.data.others?.length || 0;
+        setFilteredCount(lowPriorityCount + othersCount);
 
         const mapped: WidgetCardData[] = uniqueItems.map(item => {
           // Parse due date

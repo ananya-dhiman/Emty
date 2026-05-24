@@ -13,7 +13,7 @@ body.widget-mode {
 .w-widget {
   font-family: 'IBM Plex Sans', sans-serif;
   /* Glassmorphic aesthetic */
-  background: rgba(17, 17, 17, 0.75);
+  background: rgba(17, 17, 17, 0.88);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -32,6 +32,8 @@ body.widget-mode {
   flex-shrink: 0;
   /* Make header draggable via Tauri */
   cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .w-hd:active {
