@@ -17,6 +17,17 @@
         "height": 800,
         "resizable": true,
         "fullscreen": false
+      },
+      {
+        "label": "widget",
+        "title": "Emty Widget",
+        "width": 340,
+        "height": 480,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "transparent": true,
+        "visible": false
       }
     ],
     "security": {

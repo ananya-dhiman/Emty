@@ -210,9 +210,10 @@ pub fn run() {
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let sync_i = MenuItem::with_id(app, "sync", "Sync Now", true, None::<&str>)?;
             let status_i = MenuItem::with_id(app, "status", "Last synced: —", false, None::<&str>)?;
+            let toggle_widget_i = MenuItem::with_id(app, "toggle_widget", "Toggle Widget", true, None::<&str>)?;
             let open_i = MenuItem::with_id(app, "open", "Open Emty", true, None::<&str>)?;
             
-            let menu = Menu::with_items(app, &[&open_i, &status_i, &sync_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&open_i, &toggle_widget_i, &status_i, &sync_i, &quit_i])?;
             
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -237,6 +238,16 @@ pub fn run() {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
+                        }
+                    }
+                    "toggle_widget" => {
+                        if let Some(window) = app.get_webview_window("widget") {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
                         }
                     }
                     _ => {}

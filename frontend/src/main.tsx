@@ -6,12 +6,24 @@ import App from './App.tsx'
 import { initApi, API_BASE_URL } from './utils/api';
 import { useState, useEffect } from 'react';
 import { SystemLoader } from './components/SystemLoader';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { WidgetApp } from './components/Widget';
 
 function AppLauncher() {
   const [apiReady, setApiReady] = useState(false);
   const [backendReady, setBackendReady] = useState(false);
+  const [isWidget, setIsWidget] = useState(false);
 
   useEffect(() => {
+    try {
+      const windowLabel = getCurrentWindow().label;
+      if (windowLabel === 'widget') {
+        setIsWidget(true);
+      }
+    } catch (e) {
+      console.warn("Could not get Tauri window label", e);
+    }
+    
     initApi().finally(() => {
       setApiReady(true);
     });
@@ -41,6 +53,10 @@ function AppLauncher() {
 
   if (!backendReady) {
     return <SystemLoader />;
+  }
+
+  if (isWidget) {
+    return <WidgetApp />;
   }
 
   return <App />;
