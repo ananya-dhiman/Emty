@@ -249,7 +249,7 @@ pub fn run() {
                                     let size = monitor.size();
                                     let scale = monitor.scale_factor();
                                     let physical_width = (340.0 * scale) as u32;
-                                    let physical_height = (480.0 * scale) as u32;
+                                    let physical_height = (240.0 * scale) as u32;
                                     let y = size.height.saturating_sub(physical_height + (50.0 * scale) as u32);
                                     let x = size.width.saturating_sub(physical_width + (20.0 * scale) as u32);
                                     let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));

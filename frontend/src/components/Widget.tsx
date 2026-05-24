@@ -102,9 +102,13 @@ export function WidgetApp() {
         // Remove duplicates by insightId just in case
         const uniqueItems = Array.from(new Map(combined.map(item => [item.insightId, item])).values());
         
-        const lowPriorityCount = rankingRes.data.lowPriorityEmails?.length || 0;
-        const othersCount = rankingRes.data.others?.length || 0;
-        setFilteredCount(lowPriorityCount + othersCount);
+        console.log('[Widget] API response keys:', Object.keys(rankingRes.data));
+        console.log('[Widget] lowPriorityEmails count:', rankingRes.data.lowPriorityEmails?.length);
+        console.log('[Widget] others count:', rankingRes.data.others?.length);
+
+        // "filtered out" matches the main dashboard Low Priority Inbox count
+        const lowPriorityCount = rankingRes.data.lowPriorityEmails?.length ?? 0;
+        setFilteredCount(lowPriorityCount);
 
         const mapped: WidgetCardData[] = uniqueItems.map(item => {
           // Parse due date
@@ -288,14 +292,16 @@ export function WidgetApp() {
 
   return (
     <div className="w-widget">
-      <div className="w-hd" data-tauri-drag-region>
+      <div className="w-hd">
+        {/* Dedicated drag region - covers the header area, sits behind interactive elements */}
+        <div className="w-drag-region" data-tauri-drag-region />
         <div className="w-hd-top">
           <span className="w-today-lbl">
             TODAY<span style={{color:'rgba(255,255,255,0.1)', margin:'0 4px'}}>/</span>
             <span style={{color:'var(--text-2, #A3A3A3)', fontSize:'11px'}}>{getDisplayDate()}</span>
           </span>
           <div className="w-hd-right">
-            <span className="w-filtered-lbl">{filteredCount} emails filtered</span>
+            <span className="w-filtered-lbl">{filteredCount} filtered out</span>
             <div style={{display:'flex', alignItems:'center', gap:'6px'}}>
               <button className="w-sync-btn" onClick={doSync} aria-label="Sync">
                 <svg 

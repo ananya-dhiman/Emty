@@ -30,17 +30,30 @@ body.widget-mode {
   padding: 10px 12px 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   flex-shrink: 0;
-  /* Make header draggable via Tauri */
+  position: relative;
+}
+
+/* Transparent overlay that is the actual drag target.
+   It sits in the normal flow but behind button z-index,
+   covering the entire header so you can drag from any
+   empty area while buttons remain clickable above it. */
+.w-drag-region {
+  position: absolute;
+  inset: 0;
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
+  z-index: 0;
 }
 
-.w-hd:active {
+.w-drag-region:active {
   cursor: grabbing;
 }
 
+/* Ensure interactive children sit above the drag overlay */
 .w-hd-top {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
