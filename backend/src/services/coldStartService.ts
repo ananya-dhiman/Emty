@@ -164,7 +164,6 @@ export async function runAndPersistColdStart(
     where: { userId },
     create: {
       userId,
-      ...setPayload,
     },
     update: {
       ...setPayload,

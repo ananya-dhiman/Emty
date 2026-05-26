@@ -29,10 +29,10 @@ import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService
 
 import logger from '../utils/logger';
 
-const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT  ? parseInt(process.env.SYNC_LOCK_TIMEOUT): 3 * 60 * 1000;
+const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT ? parseInt(process.env.SYNC_LOCK_TIMEOUT) : 3 * 60 * 1000;
 const TEST_MODE = true; // Set to false for production
-const MAX_EMAILS_TEST_MODE = 1;
-const MAX_FETCH_TEST_MODE = 50; // cap fetched candidate messages in test mode
+const MAX_EMAILS_TEST_MODE = 200;
+const MAX_FETCH_TEST_MODE = 500; // cap fetched candidate messages in test mode
 const MAX_RETRIES = process.env.MAX_RETRIES ? parseInt(process.env.MAX_RETRIES) : 5;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -439,10 +439,10 @@ export class IncrementalSyncService {
       const isExpired =
         gmailAccount.tokenExpiry &&
         Date.now() >=
-          (typeof gmailAccount.tokenExpiry === "number"
-            ? gmailAccount.tokenExpiry
-            : gmailAccount.tokenExpiry.getTime()) -
-            60_000;
+        (typeof gmailAccount.tokenExpiry === "number"
+          ? gmailAccount.tokenExpiry
+          : gmailAccount.tokenExpiry.getTime()) -
+        60_000;
 
       if (isExpired && gmailAccount.refreshToken) {
         const tokens = await refreshAccessToken(
@@ -596,7 +596,7 @@ export class IncrementalSyncService {
       // We no longer filter emails before staging them.
       // All fetched metadata is inserted into EmailMessage for the async 
       // Scoring Worker to evaluate against the UserIntentProfile.
-      
+
       // Limit emails in test mode
       const emailsToProcess = TEST_MODE
         ? metadataList.slice(0, MAX_EMAILS_TEST_MODE)
@@ -635,47 +635,47 @@ export class IncrementalSyncService {
       for (const email of emailsToProcess) {
         processed++;
         if (totalToProcess > 0 && (processed % 5 === 0 || processed === totalToProcess)) {
-           const ratio = processed / totalToProcess;
-           await this.updateProgress(normalizedAccountId, {
-             progressPercent: 40 + Math.floor(ratio * 55),
-             progressStage: "processing_emails",
-             progressMessage: "Saving features directly to staging...",
-             totalCandidates: totalToProcess,
-             processedCandidates: processed,
-           });
+          const ratio = processed / totalToProcess;
+          await this.updateProgress(normalizedAccountId, {
+            progressPercent: 40 + Math.floor(ratio * 55),
+            progressStage: "processing_emails",
+            progressMessage: "Saving features directly to staging...",
+            totalCandidates: totalToProcess,
+            processedCandidates: processed,
+          });
         }
         try {
-           const filterResult = rulesEngine.shouldProcessEmail(email, preferences);
-           
-           if (!filterResult.process) {
-             logger.debug(`[SYNC] Stage 1 skip: ${email.messageId} - ${filterResult.reason}`);
-             // // continue; // Skip staging this email
-           }
+          const filterResult = rulesEngine.shouldProcessEmail(email, preferences);
 
-           const relevantLabels = rulesEngine.getRelevantLabels(
-              `${email.subject}\n${email.snippet}`,
-              labelCandidates
-           );
+          if (!filterResult.process) {
+            logger.debug(`[SYNC] Stage 1 skip: ${email.messageId} - ${filterResult.reason}`);
+            // // continue; // Skip staging this email
+          }
 
-           emailMessageRepository.upsertMessage({
-             user_id: gmailAccount.userId,
-             account_id: normalizedAccountId,
-             message_id: email.messageId,
-             thread_id: email.threadId || email.messageId,
-             from: email.from,
-             subject: email.subject,
-             snippet: email.snippet,
-             internal_date: parseInt(email.internalDate) || 0,
-             has_attachments: email.hasAttachments ? 1 : 0,
-             extracted_features: JSON.stringify(relevantLabels.map(l => l.name)),
-             score: null,
-             ai_processed: 0,
-             priority_state: 'pending',
-             embedding: null,
-             embedding_model: null,
-           });
-           
-           succeeded++;
+          const relevantLabels = rulesEngine.getRelevantLabels(
+            `${email.subject}\n${email.snippet}`,
+            labelCandidates
+          );
+
+          emailMessageRepository.upsertMessage({
+            user_id: gmailAccount.userId,
+            account_id: normalizedAccountId,
+            message_id: email.messageId,
+            thread_id: email.threadId || email.messageId,
+            from: email.from,
+            subject: email.subject,
+            snippet: email.snippet,
+            internal_date: parseInt(email.internalDate) || 0,
+            has_attachments: email.hasAttachments ? 1 : 0,
+            extracted_features: JSON.stringify(relevantLabels.map(l => l.name)),
+            score: null,
+            ai_processed: 0,
+            priority_state: 'pending',
+            embedding: null,
+            embedding_model: null,
+          });
+
+          succeeded++;
         } catch (error: any) {
           logger.info(`[SYNC] Error saving staging email ${email.messageId}: ${error.message}`);
           failed++;

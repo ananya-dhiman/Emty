@@ -59,6 +59,7 @@ export const upsertIntentProfile = async (
   }
 
   const {
+    profileType,
     includeKeywords,
     preferredDomains,
     excludeKeywords,
@@ -71,6 +72,7 @@ export const upsertIntentProfile = async (
   // Build update object — only include fields that were sent
   const update: Record<string, any> = { lastUpdated: new Date() };
 
+  if (profileType !== undefined) update.profileType = profileType;
   if (Array.isArray(includeKeywords)) update.includeKeywords = includeKeywords;
   if (Array.isArray(preferredDomains)) update.preferredDomains = preferredDomains;
   if (Array.isArray(excludeKeywords)) update.excludeKeywords = excludeKeywords;

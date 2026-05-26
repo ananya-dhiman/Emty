@@ -6,10 +6,7 @@ import { htmlToText } from 'html-to-text';
 const cleanEmailText = (text: string): string => {
     let result = text;
     
-    // 1. Strip URLs (they cost a lot of tokens)
-    result = result.replace(/https?:\/\/[^\s]+/g, '[URL]');
-    
-    // 2. Strip common email reply headers (e.g., "On [Date], [User] wrote:")
+    // 1. Strip common email reply headers (e.g., "On [Date], [User] wrote:")
     const replyHeaderRegex = /(On\s+.*?wrote:|From:.*?\r?\nSent:.*?\r?\nTo:.*?\r?\nSubject:)/s;
     const replyMatch = result.match(replyHeaderRegex);
     if (replyMatch && replyMatch.index !== undefined) {
@@ -45,7 +42,7 @@ export const extractEmailBody = (payload: any): string => {
             return cleanEmailText(htmlToText(htmlContent, {
                 wordwrap: false,
                 selectors: [
-                    { selector: 'a', options: { ignoreHref: true } },
+                    { selector: 'a', options: { ignoreHref: false, noLinkBrackets: false } },
                     { selector: 'img', format: 'skip' },
                     { selector: 'script', format: 'skip' },
                     { selector: 'style', format: 'skip' },
@@ -73,7 +70,7 @@ export const extractEmailBody = (payload: any): string => {
             return cleanEmailText(htmlToText(rawBody, {
                 wordwrap: false,
                 selectors: [
-                    { selector: 'a', options: { ignoreHref: true } },
+                    { selector: 'a', options: { ignoreHref: false, noLinkBrackets: false } },
                     { selector: 'img', format: 'skip' },
                     { selector: 'script', format: 'skip' },
                     { selector: 'style', format: 'skip' },

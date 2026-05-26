@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import '../styles/Widget.css';
-import { API_BASE_URL } from '../utils/api';
+import { API_BASE_URL, initApi } from '../utils/api';
 import type { PriorityRankingItem } from './Dashboard';
-
 
 const normalizeDateValue = (raw: any): Date | null => {
   if (!raw) return null;
@@ -23,7 +22,6 @@ const normalizeDateValue = (raw: any): Date | null => {
   return null;
 };
 
-// Extracted card mapping type
 interface WidgetCardData {
   id: string;
   initials: string;
@@ -44,13 +42,17 @@ export function WidgetApp() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncText, setLastSyncText] = useState('synced just now');
   const [filteredCount, setFilteredCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [widgetError, setWidgetError] = useState<string | null>(null);
+
+  // Resolved after initApi() runs — shared across fetchData and doSync
+  const gmailAccountIdRef = useRef<string | null>(null);
+  const apiReadyRef = useRef(false);
 
   const loadSubmitted = () => {
     try {
       const stored = localStorage.getItem('emty-widget-submitted');
-      if (stored) {
-        setSubmitted(new Set(JSON.parse(stored)));
-      }
+      if (stored) setSubmitted(new Set(JSON.parse(stored)));
     } catch (e) {
       console.warn('Failed to load submitted tasks', e);
     }
@@ -61,136 +63,265 @@ export function WidgetApp() {
     localStorage.setItem('emty-widget-submitted', JSON.stringify(Array.from(newSet)));
   };
 
+  /**
+   * Returns the freshest available token.
+   * The main window's Axios interceptor writes the latest Firebase token to
+   * localStorage every request, so reading it here is a reliable fallback
+   * for the widget window which does not have the Firebase SDK loaded.
+   */
+  const getToken = (): string | null => localStorage.getItem('firebaseToken');
+
+  /**
+   * Resolve the gmailAccountId once and cache it.
+   * Correct endpoint: GET /api/auth/verify (not /api/auth/me which does not exist).
+   */
+  const resolveAccountId = async (): Promise<string | null> => {
+    if (gmailAccountIdRef.current) return gmailAccountIdRef.current;
+
+    const token = getToken();
+    if (!token) {
+      console.warn('[Widget] No firebaseToken in localStorage — user may not be logged in');
+      return null;
+    }
+
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/auth/verify`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const accountId = res.data?.user?.gmailAccountId
+        ? String(res.data.user.gmailAccountId)
+        : null;
+      if (!accountId) {
+        console.warn('[Widget] gmailAccountId missing from /api/auth/verify response', res.data);
+      }
+      gmailAccountIdRef.current = accountId;
+      return accountId;
+    } catch (e: any) {
+      console.error('[Widget] Could not resolve gmailAccountId via /api/auth/verify:', e?.response?.status, e?.message);
+      return null;
+    }
+  };
+
+  const mapItems = (rankingData: any): WidgetCardData[] => {
+    const topPriority = rankingData.topPriority || [];
+    const actionRequired = rankingData.actionRequired || [];
+    const combined = [...topPriority, ...actionRequired];
+    const uniqueItems = Array.from(
+      new Map(combined.map((item: any) => [item.insightId, item])).values()
+    );
+
+    const mapped: WidgetCardData[] = uniqueItems.map((item: any) => {
+      let due: Date | null = null;
+      if (Array.isArray(item.dates)) {
+        const deadline = item.dates.find((d: any) => d.type === 'deadline');
+        if (deadline) due = normalizeDateValue(deadline.date);
+      }
+
+      const fromName = item.from?.name || item.from?.email || '';
+      const initials = fromName
+        .split(' ')
+        .map((w: string) => w[0])
+        .join('')
+        .substring(0, 2)
+        .toUpperCase();
+
+      const hasAttach = Array.isArray(item.attachments) && item.attachments.length > 0;
+      const hasLink =
+        item.importantLinksByEmail && Object.keys(item.importantLinksByEmail).length > 0;
+
+      return {
+        id: item.insightId,
+        initials: initials || '?',
+        from: fromName,
+        title:
+          item.summary?.intent ||
+          item.emailContextById?.[item.gmailThreadId]?.subject ||
+          'Action Required',
+        summary: item.summary?.shortSnippet || '',
+        due,
+        label: item.matchedLabels?.[0] || 'Task',
+        hasAttach,
+        hasLink,
+        needsReply: item.isActionRequired,
+        originalItem: item,
+      };
+    });
+
+    // Sort: closest deadline first, then by score
+    mapped.sort((a, b) => {
+      if (a.due && b.due) return a.due.getTime() - b.due.getTime();
+      if (a.due && !b.due) return -1;
+      if (!a.due && b.due) return 1;
+      return (
+        (b.originalItem.score?.totalScore || 0) -
+        (a.originalItem.score?.totalScore || 0)
+      );
+    });
+
+    return mapped;
+  };
+
+  const fetchData = async () => {
+    const token = getToken();
+    if (!token) {
+      setWidgetError('Not logged in. Open the main Emty window first.');
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      setWidgetError(null);
+      const accountId = await resolveAccountId();
+      if (!accountId) {
+        setWidgetError('No Gmail account found. Connect Gmail in the main Emty window.');
+        setIsLoading(false);
+        return;
+      }
+
+      const rankingRes = await axios.get(
+        `${API_BASE_URL}/api/emails/priority-ranking?accountId=${accountId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (rankingRes.data.success) {
+        setFilteredCount(rankingRes.data.lowPriorityEmails?.length ?? 0);
+        setItems(mapItems(rankingRes.data));
+      } else {
+        setWidgetError('Failed to load emails from server.');
+      }
+    } catch (err: any) {
+      console.error('[Widget] Failed to fetch data', err);
+      setWidgetError(`Error: ${err?.response?.status ?? ''} ${err?.message ?? 'Network error'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * Poll sync-progress until the backend reports completed or error.
+   * Mirrors the same logic used by the Dashboard's handleSync.
+   */
+  const pollUntilComplete = async (accountId: string): Promise<void> => {
+    const token = getToken();
+    const MAX_WAIT_MS = 5 * 60 * 1000;
+    const POLL_INTERVAL_MS = 2500;
+    const startedAt = Date.now();
+
+    return new Promise<void>((resolve) => {
+      const poll = async () => {
+        try {
+          const { data } = await axios.get(
+            `${API_BASE_URL}/api/emails/sync-progress?accountId=${accountId}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          const stage = data?.progressStage;
+          if (stage === 'completed' || stage === 'error') {
+            resolve();
+            return;
+          }
+        } catch {
+          // non-blocking, keep polling
+        }
+
+        if (Date.now() - startedAt > MAX_WAIT_MS) {
+          resolve();
+          return;
+        }
+
+        setTimeout(poll, POLL_INTERVAL_MS);
+      };
+
+      void poll();
+    });
+  };
+
+  const doSync = async () => {
+    setIsSyncing(true);
+    setLastSyncText('syncing...');
+
+    try {
+      const token = getToken();
+      if (!token) return;
+
+      const accountId = await resolveAccountId();
+      if (!accountId) return;
+
+      await axios.post(
+        `${API_BASE_URL}/api/emails/sync`,
+        { accountId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Wait for AI workers to complete (same as Dashboard)
+      await pollUntilComplete(accountId);
+
+      // Refresh cards after sync is truly done
+      await fetchData();
+      setLastSyncText('synced just now');
+    } catch (e) {
+      console.error('[Widget] Sync error', e);
+      setLastSyncText('sync failed');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   useEffect(() => {
     document.body.classList.add('widget-mode');
     const root = document.getElementById('root');
     if (root) root.classList.add('widget-mode');
 
     loadSubmitted();
-    fetchData();
+
+    // Ensure the API URL is resolved via Tauri IPC before any requests
+    const bootstrap = async () => {
+      if (!apiReadyRef.current) {
+        await initApi();
+        apiReadyRef.current = true;
+      }
+      await fetchData();
+    };
+
+    void bootstrap();
+
+    // Background polling — refresh widget cards while a sync is active
+    // This mirrors the Dashboard's background progress polling
+    let pollInterval: ReturnType<typeof setInterval>;
+    let isPolling = false;
+
+    const bgPoll = async () => {
+      if (isPolling) return;
+      isPolling = true;
+      try {
+        const token = getToken();
+        const accountId = gmailAccountIdRef.current;
+        if (!token || !accountId) return;
+
+        const { data } = await axios.get(
+          `${API_BASE_URL}/api/emails/sync-progress?accountId=${accountId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (data?.success && data.progressStage && data.progressStage !== 'completed') {
+          // A sync is running in main window — silently refresh cards
+          await fetchData();
+        }
+      } catch {
+        // non-blocking
+      } finally {
+        isPolling = false;
+      }
+    };
+
+    pollInterval = setInterval(bgPoll, 5000);
 
     return () => {
       document.body.classList.remove('widget-mode');
       if (root) root.classList.remove('widget-mode');
+      clearInterval(pollInterval);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const fetchData = async () => {
-    const token = localStorage.getItem('firebaseToken');
-    // Fetch user from auth/session or localstorage. Since we share localstorage we might need to get gmailAccountId
-    // Normally Dashboard gets user from App.tsx. We can fetch user profile first if needed, but let's assume we can get it from an endpoint.
-    if (!token) return;
-
-    try {
-      // First get current user to find gmailAccountId
-      const userRes = await axios.get(`${API_BASE_URL}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      const gmailAccountId = userRes.data?.user?.gmailAccountId;
-      if (!gmailAccountId) return;
-
-      const rankingRes = await axios.get(`${API_BASE_URL}/api/emails/priority-ranking?accountId=${gmailAccountId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      if (rankingRes.data.success) {
-        const topPriority = rankingRes.data.topPriority || [];
-        const actionRequired = rankingRes.data.actionRequired || [];
-        const combined = [...topPriority, ...actionRequired];
-        
-        // Remove duplicates by insightId just in case
-        const uniqueItems = Array.from(new Map(combined.map(item => [item.insightId, item])).values());
-        
-        console.log('[Widget] API response keys:', Object.keys(rankingRes.data));
-        console.log('[Widget] lowPriorityEmails count:', rankingRes.data.lowPriorityEmails?.length);
-        console.log('[Widget] others count:', rankingRes.data.others?.length);
-
-        // "filtered out" matches the main dashboard Low Priority Inbox count
-        const lowPriorityCount = rankingRes.data.lowPriorityEmails?.length ?? 0;
-        setFilteredCount(lowPriorityCount);
-
-        const mapped: WidgetCardData[] = uniqueItems.map(item => {
-          // Parse due date
-          let due: Date | null = null;
-          if (Array.isArray(item.dates)) {
-            const deadline = item.dates.find((d: any) => d.type === 'deadline');
-            if (deadline) {
-              due = normalizeDateValue(deadline.date);
-            }
-          }
-
-          // Initials
-          const fromName = item.from.name || item.from.email || '';
-          const initials = fromName.split(' ').map((w: string) => w[0]).join('').substring(0, 2).toUpperCase();
-
-          // Attachments
-          const hasAttach = Array.isArray(item.attachments) && item.attachments.length > 0;
-          
-          // Links
-          const hasLink = item.importantLinksByEmail && Object.keys(item.importantLinksByEmail).length > 0;
-
-          return {
-            id: item.insightId,
-            initials: initials || '?',
-            from: fromName,
-            title: item.summary.intent || item.emailContextById?.[item.gmailThreadId]?.subject || 'Action Required',
-            summary: item.summary.shortSnippet,
-            due,
-            label: item.matchedLabels?.[0] || 'Task',
-            hasAttach,
-            hasLink,
-            needsReply: item.isActionRequired,
-            originalItem: item
-          };
-        });
-
-        // Sort: items with deadline closest to now first, then no deadline
-        mapped.sort((a, b) => {
-          if (a.due && b.due) {
-            return a.due.getTime() - b.due.getTime();
-          }
-          if (a.due && !b.due) return -1;
-          if (!a.due && b.due) return 1;
-          // Both no deadline, sort by score or keep original order
-          return (b.originalItem.score?.totalScore || 0) - (a.originalItem.score?.totalScore || 0);
-        });
-
-        setItems(mapped);
-      }
-    } catch (err) {
-      console.error('Failed to fetch widget data', err);
-    }
-  };
-
-  const doSync = async () => {
-    setIsSyncing(true);
-    setLastSyncText('syncing...');
-    
-    try {
-      const token = localStorage.getItem('firebaseToken');
-      const userRes = await axios.get(`${API_BASE_URL}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const gmailAccountId = userRes.data?.user?.gmailAccountId;
-      
-      if (gmailAccountId && token) {
-        await axios.post(
-          `${API_BASE_URL}/api/emails/sync`,
-          { accountId: gmailAccountId },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        // Let's just wait 1.5s for visual feedback since AI sync happens in background
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        await fetchData();
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsSyncing(false);
-      setLastSyncText('synced just now');
-    }
-  };
 
   const toggleSubmit = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -221,25 +352,24 @@ export function WidgetApp() {
     return `${dayName} ${dayNum} ${month}`;
   };
 
-  // Render cards sorted properly: overdue -> today -> week -> no deadline. Submitted at bottom.
   const renderCards = () => {
     const sorted = [...items].sort((a, b) => {
       const aDone = submitted.has(a.id);
       const bDone = submitted.has(b.id);
       if (aDone && !bDone) return 1;
       if (!aDone && bDone) return -1;
-      
       const tierOrder = { overdue: 0, today: 1, week: 2 };
       const aTier = getTimeLeftTier(a.due).tier as keyof typeof tierOrder;
       const bTier = getTimeLeftTier(b.due).tier as keyof typeof tierOrder;
-      return tierOrder[aTier] - tierOrder[bTier];
+      return (tierOrder[aTier] ?? 3) - (tierOrder[bTier] ?? 3);
     });
 
-    return sorted.map(d => {
+    return sorted.map((d) => {
       const t = getTimeLeftTier(d.due);
       const isDone = submitted.has(d.id);
       const tierCls = isDone ? 'submitted' : t.tier;
-      const avCls = t.tier === 'overdue' ? 'w-av-red' : t.tier === 'today' ? 'w-av-amber' : 'w-av-muted';
+      const avCls =
+        t.tier === 'overdue' ? 'w-av-red' : t.tier === 'today' ? 'w-av-amber' : 'w-av-muted';
 
       return (
         <div key={d.id} className={`w-dcard ${tierCls}`}>
@@ -275,7 +405,7 @@ export function WidgetApp() {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
               </button>
             )}
-            <button 
+            <button
               className={`w-ibtn ${isDone ? 'w-submit-active' : ''}`}
               onClick={(e) => toggleSubmit(d.id, e)}
               title={isDone ? 'Undo' : 'Mark submitted'}
@@ -288,31 +418,46 @@ export function WidgetApp() {
     });
   };
 
-  const pendingCount = items.filter(d => !submitted.has(d.id)).length;
+  const pendingCount = items.filter((d) => !submitted.has(d.id)).length;
 
   return (
     <div className="w-widget">
       <div className="w-hd">
-        {/* Dedicated drag region - covers the header area, sits behind interactive elements */}
         <div className="w-drag-region" data-tauri-drag-region />
         <div className="w-hd-top">
           <div className="w-hd-left-group">
             <span className="w-today-lbl">
-              TODAY<span style={{color:'rgba(255,255,255,0.1)', margin:'0 4px'}}></span>
-              <span style={{color:'var(--text-2, #A3A3A3)', fontSize:'12px'}}>{getDisplayDate()}</span>
+              TODAY<span style={{ color: 'rgba(255,255,255,0.1)', margin: '0 4px' }}></span>
+              <span style={{ color: 'var(--text-2, #A3A3A3)', fontSize: '12px' }}>
+                {getDisplayDate()}
+              </span>
             </span>
             <span className="w-filtered-lbl">{filteredCount} filtered out</span>
           </div>
           <div className="w-hd-right">
-            <div style={{display:'flex', alignItems:'center', gap:'6px'}}>
-              <button className="w-sync-btn" onClick={doSync} aria-label="Sync">
-                <svg 
-                  className={isSyncing ? "spin" : ""}
-                  width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button
+                className="w-sync-btn"
+                onClick={doSync}
+                disabled={isSyncing}
+                aria-label="Sync"
+              >
+                <svg
+                  className={isSyncing ? 'spin' : ''}
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                 >
-                  <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                  <polyline points="23 4 23 10 17 10"/>
+                  <polyline points="1 20 1 14 7 14"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                 </svg>
-                SYNC
+                {isSyncing ? 'SYNCING' : 'SYNC'}
               </button>
             </div>
             <span className="w-sync-time">{lastSyncText}</span>
@@ -326,9 +471,35 @@ export function WidgetApp() {
           <span className="w-sec-count">{pendingCount} pending</span>
         </div>
         <div id="w-deadline-list">
-          {items.length === 0 ? (
+          {isLoading ? (
             <div className="w-empty-msg">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-empty-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-empty-icon spin">
+                <polyline points="23 4 23 10 17 10"/>
+                <polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+              </svg>
+              <span>Loading...</span>
+            </div>
+          ) : widgetError ? (
+            <div className="w-empty-msg">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-empty-icon" style={{ color: '#FF4D4D' }}>
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              <span style={{ color: '#FF4D4D', textAlign: 'center', lineHeight: '1.5' }}>{widgetError}</span>
+            </div>
+          ) : items.length === 0 ? (
+            <div className="w-empty-msg">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-empty-icon"
+              >
                 <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
                 <polyline points="22 4 12 14.01 9 11.01" />
               </svg>

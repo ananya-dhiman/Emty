@@ -118,7 +118,7 @@ Label candidates:
 ${candidatesText}
 
 Body:
-${emailContent.body.split(/\s+/).slice(0, 150).join(' ')}
+${emailContent.body.split(/\s+/).slice(0, 600).join(' ')}
 
 Extract and return a JSON object with:
 1. intent: One of 'action_required', 'event', 'opportunity', 'information', 'waiting', 'noise'
@@ -286,7 +286,7 @@ const extractWithOllama = async (
       model,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.3,
-      max_tokens: 280,
+      max_tokens: 600,
       stream: true,
       options: {
         num_ctx: 8192

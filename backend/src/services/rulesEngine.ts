@@ -43,10 +43,10 @@ export class RulesEngine {
     domain = domain.replace(/^["']|["']$/g, '').trim();
 
     // Include rules based on domain
-    const preferred = preferences?.preferredDomains?.length 
-      ? preferences.preferredDomains 
+    const preferred = preferences?.preferredDomains?.length
+      ? preferences.preferredDomains
       : [".edu", "linkedin.com", "indeed.com", "glassdoor.com"];
-    
+
     if (preferred.some(d => domain.includes(d.toLowerCase()))) {
       return true;
     }
@@ -58,8 +58,8 @@ export class RulesEngine {
 
     // Include based on keywords in subject/snippet
     const text = `${subject} ${snippet}`.toLowerCase();
-    const keywords = preferences?.includeKeywords?.length 
-      ? preferences.includeKeywords 
+    const keywords = preferences?.includeKeywords?.length
+      ? preferences.includeKeywords
       : ["job", "interview", "application", "deadline", "event", "opportunity"];
 
     if (keywords.some(kw => text.includes(kw.toLowerCase()))) {
@@ -103,8 +103,8 @@ export class RulesEngine {
 
     // Exclude newsletters and promotions
     const text = `${subject} ${snippet}`.toLowerCase();
-    const exclusions = preferences?.excludeKeywords?.length 
-      ? preferences.excludeKeywords 
+    const exclusions = preferences?.excludeKeywords?.length
+      ? preferences.excludeKeywords
       : ["weekly digest", "newsletter", "promotion", "unsubscribe"];
 
     if (exclusions.some(ex => text.includes(ex.toLowerCase()))) {
@@ -179,7 +179,7 @@ export class RulesEngine {
       return { process: false, score: 0, reason: exclusionReason || 'Excluded' };
     }
 
-    if (score < 0.3) {
+    if (score < 0.2) {
       return { process: false, score, reason: 'Below relevance threshold (0.3)' };
     }
 

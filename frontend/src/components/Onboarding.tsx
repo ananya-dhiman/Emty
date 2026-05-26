@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useRef, useEffect } from 'react';
+import { GraduationCap, Briefcase, Settings } from 'lucide-react';
 import axios from 'axios';
 import '../styles/Dashboard.css';
 import { API_BASE_URL } from '../utils/api';
@@ -174,17 +175,20 @@ function SectionBox({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProps) {
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [profileType, setProfileType] = useState<'student' | 'working_professional' | 'custom' | null>(null);
 
-  // Step 1 state
+  // Step 2 state (previously Step 1)
   const [keywords, setKeywords] = useState<string[]>([]);
+  const [excludeKeywords, setExcludeKeywords] = useState<string[]>([]);
   const [senders, setSenders] = useState<string[]>([]);
+  const [blockedDomains, setBlockedDomains] = useState<string[]>([]);
   const [labelChips, setLabelChips] = useState<string[]>([]);
   const [intentBoxes, setIntentBoxes] = useState<string[]>(['']);
   const [loadingProfile, setLoadingProfile] = useState(true);
-  const [savingStep1, setSavingStep1] = useState(false);
+  const [savingStep2, setSavingStep2] = useState(false);
 
-  // Step 2 state (existing label priority)
+  // Step 3 state (previously Step 2 - existing label priority)
   const [labels, setLabels] = useState<LabelItem[]>([]);
   const [loadingLabels, setLoadingLabels] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -205,8 +209,11 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
         const { data } = await axios.get(`${API_BASE_URL}/api/intent/profile`, { headers });
         if (data.success && data.profile) {
           const p = data.profile;
+          if (p.profileType) setProfileType(p.profileType);
           setKeywords([...new Set([...(p.includeKeywords || [])])]);
+          setExcludeKeywords([...new Set([...(p.excludeKeywords || [])])]);
           setSenders([...new Set([...(p.preferredDomains || [])])]);
+          setBlockedDomains([...new Set([...(p.blockedDomains || [])])]);
           setLabelChips([...new Set([...(p.inferredLabels || [])])]);
           if (p.userPrompt && p.userPrompt.length > 0) {
             setIntentBoxes(p.userPrompt);
@@ -222,7 +229,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load label priorities for step 2
+  // Load label priorities for step 3
   useEffect(() => {
     const fetchPriorities = async () => {
       if (!user?.gmailAccountId || !token) { setLoadingLabels(false); return; }
@@ -250,6 +257,83 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
+  // ─── Handlers ───────────────────────────────────────────────────────────────
+
+  const handleProfileSelect = (type: 'student' | 'working_professional' | 'custom') => {
+    setProfileType(type);
+    let newKeywords: string[] = [];
+    let newExcludeKeywords: string[] = [];
+    let newSenders: string[] = [];
+    let newBlockedDomains: string[] = [];
+    let newLabels: string[] = [];
+
+    const emailDomain = user?.email?.split('@')[1];
+
+    if (type === 'student') {
+      newSenders = [
+        'internshala.com', 'unstop.com', 'naukri.com', 'linkedin.com', 'wellfound.com', 'glassdoor.co.in',
+        'geeksforgeeks.org', 'hackerrank.com', 'leetcode.com', 'hackerearth.com', 'codechef.com', 'codeforces.com',
+        'github.com', 'stackoverflow.com', 'udemy.com', 'coursera.org', 'nptel.ac.in',
+        'devfolio.co', 'mlh.io', 'aicte-india.org', 'ugc.ac.in', 'mygov.in'
+      ];
+      newKeywords = [
+        'internship', 'placement', 'job opportunity', 'hiring', 'recruitment', 'interview', 'application', 'shortlisted', 'selected', 'offer letter',
+        'assignment', 'submission', 'deadline', 'exam', 'result', 'grade', 'project', 'semester',
+        'hackathon', 'competition', 'workshop', 'webinar', 'conference', 'scholarship', 'fellowship',
+        'action required', 'urgent', 'important', 'verify', 'confirm'
+      ];
+      newExcludeKeywords = [
+        'casino', 'betting', 'lottery', 'prize won', 'congratulations you won', 'click here to claim', 'limited time offer', 'buy now', 'shop now',
+        'personal loan', 'credit card offer', 'instant loan', 'easy money',
+        'dating', 'singles near you', 'meet singles',
+        'unsubscribe here', 'stop receiving', 'mlm', 'multi-level marketing'
+      ];
+      newBlockedDomains = ['*.casino', '*.betting', '*.loan', '*.dating'];
+      newLabels = ['Needs Action', 'Opportunities', 'Academic'];
+    } else if (type === 'working_professional') {
+      newSenders = [
+        'slack.com', 'teams.microsoft.com', 'zoom.us', 'meet.google.com', 'webex.com',
+        'atlassian.com', 'asana.com', 'monday.com', 'trello.com', 'notion.so', 'clickup.com',
+        'linkedin.com', 'github.com', 'gitlab.com',
+        'adp.com', 'workday.com', 'greythr.com', 'darwinbox.com', 'razorpay.com', 'stripe.com',
+        'aws.amazon.com', 'azure.microsoft.com', 'cloud.google.com', 'vercel.com', 'netlify.com',
+        'calendly.com', 'cal.com'
+      ];
+      newKeywords = [
+        'meeting', 'call scheduled', 'calendar invite', 'reschedule',
+        'deadline', 'due date', 'action required', 'urgent', 'priority', 'approval needed', 'review required', 'sign off',
+        'project update', 'status report', 'milestone', 'deliverable', 'sprint', 'standup',
+        'payroll', 'leave', 'attendance', 'timesheet', 'expense', 'reimbursement',
+        'invoice', 'payment', 'contract', 'agreement', 'NDA', 'policy',
+        'training', 'certification', 'performance review', 'feedback'
+      ];
+      newExcludeKeywords = [
+        'unsubscribe', 'promotional', 'newsletter', 'weekly digest', 'marketing', 'advertisement',
+        'sale', 'discount', 'offer', 'deal', 'coupon', 'shop now',
+        'earn money', 'work from home opportunity', 'side hustle', 'make money online', 'casino', 'lottery', 'prize'
+      ];
+      newBlockedDomains = ['*.promotional', '*.marketing', 'noreply@offers'];
+      newLabels = ['Needs Action', 'Meetings', 'Projects', 'HR & Admin'];
+    } else if (type === 'custom') {
+      newSenders = [];
+      newKeywords = ['urgent', 'action required', 'deadline', 'important'];
+      newExcludeKeywords = ['casino', 'lottery', 'betting', 'you won', 'claim prize'];
+      newBlockedDomains = [];
+      newLabels = ['Needs Action'];
+    }
+
+    if (emailDomain && !newSenders.includes(emailDomain)) {
+      newSenders.unshift(emailDomain);
+    }
+
+    setKeywords(newKeywords);
+    setExcludeKeywords(newExcludeKeywords);
+    setSenders(newSenders);
+    setBlockedDomains(newBlockedDomains);
+    setLabelChips(newLabels);
+    setStep(2);
+  };
+
   // ─── Step 1 handlers ───────────────────────────────────────────────────────
 
   const addIntentBox = () => setIntentBoxes((prev) => [...prev, '']);
@@ -260,15 +344,18 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
   const updateIntentBox = (idx: number, val: string) =>
     setIntentBoxes((prev) => prev.map((v, i) => (i === idx ? val : v)));
 
-  const saveStep1AndContinue = async () => {
-    setSavingStep1(true);
+  const saveStep2AndContinue = async () => {
+    setSavingStep2(true);
     try {
       const filledPrompts = intentBoxes.filter((b) => b.trim().length > 0);
       await axios.post(
         `${API_BASE_URL}/api/intent/profile`,
         {
+          profileType,
           includeKeywords: keywords,
+          excludeKeywords,
           preferredDomains: senders,
+          blockedDomains,
           inferredLabels: labelChips,
           userPrompt: filledPrompts,
         },
@@ -277,13 +364,13 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     } catch (err) {
       console.error('[Onboarding] Failed to save intent profile:', err);
     } finally {
-      setSavingStep1(false);
-      setStep(2);
+      setSavingStep2(false);
+      setStep(3);
     }
   };
 
-  const skipStep1 = async () => {
-    setStep(2);
+  const skipStep2 = async () => {
+    setStep(3);
   };
 
   // ─── Step 2 handlers (unchanged from original) ─────────────────────────────
@@ -295,8 +382,6 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
       _labels.splice(dragOverItem.current, 0, dragged);
       setLabels(_labels);
     }
-    dragItem.current = null;
-    dragOverItem.current = null;
   };
 
   const handleAddLabel = async (e: React.FormEvent) => {
@@ -390,33 +475,33 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
 
   const StepIndicator = () => (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '28px' }}>
-      {[1, 2].map((s) => (
+      {[1, 2, 3].map((s) => (
         <div key={s} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div
             style={{
               width: '22px',
               height: '22px',
               borderRadius: '50%',
-              background: step === s ? 'var(--text-1)' : 'var(--surface-2)',
-              border: `1px solid ${step === s ? 'var(--text-1)' : 'var(--border)'}`,
+              background: step >= s ? 'var(--text-1)' : 'var(--surface-2)',
+              border: `1px solid ${step >= s ? 'var(--text-1)' : 'var(--border)'}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: '10px',
               fontWeight: 700,
               fontFamily: 'var(--font-mono)',
-              color: step === s ? 'var(--bg)' : 'var(--text-3)',
+              color: step >= s ? 'var(--bg)' : 'var(--text-3)',
             }}
           >
             {s}
           </div>
-          {s < 2 && (
-            <div style={{ width: '24px', height: '1px', background: 'var(--border)' }} />
+          {s < 3 && (
+            <div style={{ width: '24px', height: '1px', background: step > s ? 'var(--text-1)' : 'var(--border)' }} />
           )}
         </div>
       ))}
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)', marginLeft: '4px' }}>
-        Step {step} of 2
+        Step {step} of 3
       </span>
     </div>
   );
@@ -424,6 +509,87 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
   // ─── Step 1 render ─────────────────────────────────────────────────────────
 
   if (step === 1) {
+    return (
+      <div style={{ minHeight: '100vh', width: '100vw', background: 'var(--bg)', color: 'var(--text-1)', display: 'flex', flexDirection: 'column' }}>
+        <Header />
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', padding: '48px 20px', overflowY: 'auto' }}>
+          <div style={{ width: '100%', maxWidth: '640px' }}>
+            <StepIndicator />
+
+            <h1 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '6px' }}>
+              Choose your profile
+            </h1>
+            <p style={{ color: 'var(--text-3)', fontSize: '13px', marginBottom: '32px', lineHeight: 1.6 }}>
+              Select a profile to start with sensible defaults for your inbox organization.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div 
+                onClick={() => handleProfileSelect('student')}
+                style={{ 
+                  padding: '24px', border: '1px solid var(--border)', borderRadius: '12px', 
+                  display: 'flex', alignItems: 'center', gap: '20px', cursor: 'pointer',
+                  background: 'var(--surface)', transition: 'all 0.2s'
+                }}
+                onMouseOver={(e) => e.currentTarget.style.borderColor = 'var(--text-1)'}
+                onMouseOut={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
+              >
+                <div style={{ padding: '12px', background: 'var(--surface-2)', borderRadius: '50%' }}>
+                  <GraduationCap size={24} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 4px 0' }}>Student</h3>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-3)' }}>Optimized for internships, placements, academic emails</p>
+                </div>
+              </div>
+
+              <div 
+                onClick={() => handleProfileSelect('working_professional')}
+                style={{ 
+                  padding: '24px', border: '1px solid var(--border)', borderRadius: '12px', 
+                  display: 'flex', alignItems: 'center', gap: '20px', cursor: 'pointer',
+                  background: 'var(--surface)', transition: 'all 0.2s'
+                }}
+                onMouseOver={(e) => e.currentTarget.style.borderColor = 'var(--text-1)'}
+                onMouseOut={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
+              >
+                <div style={{ padding: '12px', background: 'var(--surface-2)', borderRadius: '50%' }}>
+                  <Briefcase size={24} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 4px 0' }}>Working Professional</h3>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-3)' }}>Focus on meetings, projects, work communications</p>
+                </div>
+              </div>
+
+              <div 
+                onClick={() => handleProfileSelect('custom')}
+                style={{ 
+                  padding: '24px', border: '1px solid var(--border)', borderRadius: '12px', 
+                  display: 'flex', alignItems: 'center', gap: '20px', cursor: 'pointer',
+                  background: 'var(--surface)', transition: 'all 0.2s'
+                }}
+                onMouseOver={(e) => e.currentTarget.style.borderColor = 'var(--text-1)'}
+                onMouseOut={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
+              >
+                <div style={{ padding: '12px', background: 'var(--surface-2)', borderRadius: '50%' }}>
+                  <Settings size={24} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 4px 0' }}>Custom Setup</h3>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-3)' }}>Start fresh, we'll learn from your email patterns</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Step 2 render (previously Step 1) ─────────────────────────────────────
+
+  if (step === 2) {
     return (
       <div style={{ minHeight: '100vh', width: '100vw', background: 'var(--bg)', color: 'var(--text-1)', display: 'flex', flexDirection: 'column' }}>
         <Header />
@@ -443,42 +609,6 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
                 </span>
               )}
             </p>
-
-            <SectionBox
-              title="Topics and keywords we noticed"
-              subtitle="These show up often in your emails. Keep the ones that matter to you."
-            >
-              <ChipInput
-                chips={keywords}
-                onAdd={(v) => setKeywords((k) => [...k, v])}
-                onRemove={(v) => setKeywords((k) => k.filter((x) => x !== v))}
-                placeholder="e.g. invoice"
-              />
-            </SectionBox>
-
-            <SectionBox
-              title="Senders we think matter"
-              subtitle="These domains send you frequent emails. Remove any that are not important."
-            >
-              <ChipInput
-                chips={senders}
-                onAdd={(v) => setSenders((s) => [...s, v])}
-                onRemove={(v) => setSenders((s) => s.filter((x) => x !== v))}
-                placeholder="e.g. company.com"
-              />
-            </SectionBox>
-
-            <SectionBox
-              title="Labels you care about"
-              subtitle="Labels from your inbox we saw being used. Adjust to fit your workflow."
-            >
-              <ChipInput
-                chips={labelChips}
-                onAdd={(v) => setLabelChips((l) => [...l, v])}
-                onRemove={(v) => setLabelChips((l) => l.filter((x) => x !== v))}
-                placeholder="e.g. Action Required"
-              />
-            </SectionBox>
 
             <SectionBox
               title="Add specific instructions (optional)"
@@ -539,9 +669,47 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
               </div>
             </SectionBox>
 
+            <SectionBox
+              title="Topics and keywords we noticed"
+              subtitle="These show up often in your emails. Keep the ones that matter to you."
+            >
+              <ChipInput
+                chips={keywords}
+                onAdd={(v) => setKeywords((k) => [...k, v])}
+                onRemove={(v) => setKeywords((k) => k.filter((x) => x !== v))}
+                placeholder="e.g. invoice"
+              />
+            </SectionBox>
+
+            <SectionBox
+              title="Senders we think matter"
+              subtitle="These domains send you frequent emails. Remove any that are not important."
+            >
+              <ChipInput
+                chips={senders}
+                onAdd={(v) => setSenders((s) => [...s, v])}
+                onRemove={(v) => setSenders((s) => s.filter((x) => x !== v))}
+                placeholder="e.g. company.com"
+              />
+            </SectionBox>
+
+            <SectionBox
+              title="Labels you care about"
+              subtitle="Labels from your inbox we saw being used. Adjust to fit your workflow."
+            >
+              <ChipInput
+                chips={labelChips}
+                onAdd={(v) => setLabelChips((l) => [...l, v])}
+                onRemove={(v) => setLabelChips((l) => l.filter((x) => x !== v))}
+                placeholder="e.g. Action Required"
+              />
+            </SectionBox>
+
+
+
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
               <button
-                onClick={skipStep1}
+                onClick={skipStep2}
                 style={{
                   background: 'transparent',
                   border: 'none',
@@ -556,8 +724,8 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
                 Skip for now
               </button>
               <button
-                onClick={saveStep1AndContinue}
-                disabled={savingStep1}
+                onClick={saveStep2AndContinue}
+                disabled={savingStep2}
                 style={{
                   background: 'var(--text-1)',
                   color: 'var(--bg)',
@@ -566,11 +734,11 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
                   fontSize: '13px',
                   fontWeight: 600,
                   fontFamily: 'var(--font-ui)',
-                  cursor: savingStep1 ? 'not-allowed' : 'pointer',
-                  opacity: savingStep1 ? 0.7 : 1,
+                  cursor: savingStep2 ? 'not-allowed' : 'pointer',
+                  opacity: savingStep2 ? 0.7 : 1,
                 }}
               >
-                {savingStep1 ? 'Saving...' : 'Save and continue'}
+                {savingStep2 ? 'Saving...' : 'Save and continue'}
               </button>
             </div>
           </div>
@@ -579,7 +747,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     );
   }
 
-  // ─── Step 2 render (label priority — original content) ─────────────────────
+  // ─── Step 3 render (label priority — original Step 2 content) ──────────────
 
   return (
     <div style={{ minHeight: '100vh', width: '100vw', background: 'var(--bg)', color: 'var(--text-1)', display: 'flex', flexDirection: 'column' }}>
@@ -605,10 +773,37 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
                 <div
                   key={lbl.id}
                   draggable
-                  onDragStart={(e) => { dragItem.current = index; e.currentTarget.style.opacity = '0.5'; }}
-                  onDragEnter={() => { dragOverItem.current = index; }}
-                  onDragEnd={(e) => { e.currentTarget.style.opacity = '1'; handleSort(); }}
-                  onDragOver={(e) => e.preventDefault()}
+                  onDragStart={(e) => {
+                    dragItem.current = index;
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', index.toString());
+                    const el = e.currentTarget as HTMLElement;
+                    requestAnimationFrame(() => {
+                      el.style.opacity = '0.4';
+                    });
+                  }}
+                  onDragEnter={(e) => {
+                    e.preventDefault();
+                    if (dragItem.current !== null && dragItem.current !== index) {
+                      dragOverItem.current = index;
+                      handleSort();
+                      dragItem.current = index; // Update dragItem current to new position after sort
+                    }
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDragEnd={(e) => {
+                    e.currentTarget.style.opacity = '1';
+                    dragItem.current = null;
+                    dragOverItem.current = null;
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    dragItem.current = null;
+                    dragOverItem.current = null;
+                  }}
                   style={{
                     display: 'flex', alignItems: 'center', padding: '16px 20px',
                     borderBottom: index === labels.length - 1 ? 'none' : '1px solid var(--border-lt)',

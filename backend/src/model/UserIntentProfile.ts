@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export interface IUserIntentProfile extends Document {
   userId: string;
+  profileType?: string; // student, working_professional, custom
 
   // Positive signals (what user wants)
   includeKeywords: string[];
@@ -37,6 +38,7 @@ export interface IUserIntentProfile extends Document {
 const UserIntentProfileSchema = new Schema<IUserIntentProfile>(
   {
     userId: { type: String, required: true, unique: true },
+    profileType: { type: String },
 
     includeKeywords: { type: [String], default: [] },
     preferredDomains: { type: [String], default: [] },
@@ -87,11 +89,21 @@ export const UserIntentProfile = {
     create: Record<string, any>;
     update: Record<string, any>;
   }) {
+    // Prevent MongoDB path conflicts by filtering out keys in 'create' ($setOnInsert) that are already present in 'update' ($set)
+    const setOnInsert: Record<string, any> = {};
+    if (args.create) {
+      for (const [key, value] of Object.entries(args.create)) {
+        if (!args.update || !(key in args.update)) {
+          setOnInsert[key] = value;
+        }
+      }
+    }
+
     return UserIntentProfileModel.findOneAndUpdate(
       { userId: args.where.userId },
       { 
         $set: args.update || {},
-        $setOnInsert: args.create || {} 
+        $setOnInsert: setOnInsert
       },
       { 
         upsert: true, 
