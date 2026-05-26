@@ -29,7 +29,7 @@ export const getIntentProfile = async (
     const profile = await UserIntentProfileModel.findOneAndUpdate(
       { userId },
       { $setOnInsert: { userId } },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: "after" }
     );
 
     res.status(200).json({ success: true, profile });
@@ -89,7 +89,7 @@ export const upsertIntentProfile = async (
     const profile = await UserIntentProfileModel.findOneAndUpdate(
       { userId },
       { $set: update },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: "after" }
     );
 
     // Trigger background sequence only when onboarding transitions false -> true.
@@ -164,7 +164,7 @@ export const recordFeedback = async (
     const profile = await UserIntentProfileModel.findOneAndUpdate(
       { userId },
       { ...update, $set: { lastUpdated: new Date() } },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: "after" }
     );
 
     // Telemetry logging

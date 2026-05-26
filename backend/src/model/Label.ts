@@ -147,7 +147,7 @@ export const Label = {
 
         return LabelModel.findOneAndUpdate(filter, update, {
             upsert: true,
-            new: true,
+            returnDocument: "after",
             runValidators: true,
         }).lean<ILabel>();
     },

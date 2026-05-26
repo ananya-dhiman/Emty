@@ -296,12 +296,14 @@ export function WidgetApp() {
         {/* Dedicated drag region - covers the header area, sits behind interactive elements */}
         <div className="w-drag-region" data-tauri-drag-region />
         <div className="w-hd-top">
-          <span className="w-today-lbl">
-            TODAY<span style={{color:'rgba(255,255,255,0.1)', margin:'0 4px'}}>/</span>
-            <span style={{color:'var(--text-2, #A3A3A3)', fontSize:'11px'}}>{getDisplayDate()}</span>
-          </span>
-          <div className="w-hd-right">
+          <div className="w-hd-left-group">
+            <span className="w-today-lbl">
+              TODAY<span style={{color:'rgba(255,255,255,0.1)', margin:'0 4px'}}></span>
+              <span style={{color:'var(--text-2, #A3A3A3)', fontSize:'12px'}}>{getDisplayDate()}</span>
+            </span>
             <span className="w-filtered-lbl">{filteredCount} filtered out</span>
+          </div>
+          <div className="w-hd-right">
             <div style={{display:'flex', alignItems:'center', gap:'6px'}}>
               <button className="w-sync-btn" onClick={doSync} aria-label="Sync">
                 <svg 
@@ -324,7 +326,17 @@ export function WidgetApp() {
           <span className="w-sec-count">{pendingCount} pending</span>
         </div>
         <div id="w-deadline-list">
-          {renderCards()}
+          {items.length === 0 ? (
+            <div className="w-empty-msg">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-empty-icon">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+              <span>No actionable emails found</span>
+            </div>
+          ) : (
+            renderCards()
+          )}
         </div>
       </div>
     </div>

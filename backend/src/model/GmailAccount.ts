@@ -53,7 +53,7 @@ export const GmailAccount = {
         const updated = await GmailAccountModel.findByIdAndUpdate(
             args.where.id,
             { $set: args.data },
-            { new: true, lean: true }
+            { returnDocument: "after", lean: true }
         );
         if (updated) {
             userLocalRepository.upsert(updated.userId);

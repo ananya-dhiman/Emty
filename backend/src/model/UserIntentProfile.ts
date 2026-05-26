@@ -95,7 +95,7 @@ export const UserIntentProfile = {
       },
       { 
         upsert: true, 
-        new: true, 
+        returnDocument: "after", 
         runValidators: true 
       }
     ).lean<IUserIntentProfile>();

@@ -71,7 +71,7 @@ export const LabelPriorityConfig = {
     return LabelPriorityConfigModel.findOneAndUpdate(
       { userId: composite.userId, accountId: composite.accountId },
       { $set: args.data },
-      { new: true }
+      { returnDocument: "after" }
     );
   },
 };
