@@ -4,7 +4,7 @@
  */
 
 import { google } from 'googleapis';
-import { fetchFullEmailBody, extractEmailBody, extractAttachmentMetadata } from './emailBodyService';
+import { fetchFullEmailBody, extractEmailBody, extractAttachmentMetadata, PreExtractedLink } from './emailBodyService';
 import { extractInsightsFromEmail, AIInsightExtraction, AIParsingError } from './aiService';
 import { AIResolvedContext } from './aiProviderService';
 import logger from '../utils/logger';
@@ -66,7 +66,7 @@ export const processEmailDeep = async (
         userId?: string;
         aiContext?: AIResolvedContext;
         stage2Candidates?: Array<{ name: string; similarityScore: number; labelMode: string }>;
-        prefetchedBody?: { body: string; payload: any; headers: any[] };
+        prefetchedBody?: { body: string; payload: any; headers: any[]; preExtractedLinks?: PreExtractedLink[] };
         onFallback?: (notice: {
             usedSharedFallback: boolean;
             reason: string;
@@ -81,17 +81,20 @@ export const processEmailDeep = async (
         let body = '';
         let payload = null;
         let headers: any[] = [];
+        let preExtractedLinks: PreExtractedLink[] = [];
 
         if (options.prefetchedBody) {
             body = options.prefetchedBody.body;
             payload = options.prefetchedBody.payload;
             headers = options.prefetchedBody.headers;
+            preExtractedLinks = options.prefetchedBody.preExtractedLinks || [];
         } else {
             // Fetch full message if not prefetched
             const fullMessageResult = await fetchFullEmailBody(gmail, messageId);
             body = fullMessageResult.body;
             payload = fullMessageResult.payload;
             headers = fullMessageResult.headers;
+            preExtractedLinks = fullMessageResult.preExtractedLinks;
         }
 
         // Extract fields
@@ -108,6 +111,7 @@ export const processEmailDeep = async (
             body,
             internalDate,
             relevantLabels,
+            preExtractedLinks,
         }, {
             userId: options.userId,
             context: options.aiContext,

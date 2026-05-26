@@ -384,6 +384,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     // eslint-disable-next-line prefer-const
     let pollInterval: ReturnType<typeof setInterval>;
     let isCurrentlyPolling = false;
+    let lastStage = 'completed';
 
     const checkBackgroundProgress = async () => {
       if (isCurrentlyPolling) return;
@@ -394,21 +395,28 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             { headers: { Authorization: `Bearer ${token}` } }
           );
         
-          if (data?.success && data.progressStage && data.progressStage !== 'completed') {
-            // If a background sync is happening, fetch latest inbox items silently
-            setIsSyncing(true);
-            await fetchInsights(true);
-          } else if (data?.success && data.progressStage === 'completed') {
-             setIsSyncing(false);
-             if (data.aiFallbackCount > 0) {
-               setNotification({
-                 show: true,
-                 type: 'info',
-                 message: 'AI fallback used',
-                 detail: data.aiFallbackMessage || 'Some emails used shared AI key due to key/model errors.',
-               });
-             }
-             clearInterval(pollInterval);
+          if (data?.success && data.progressStage) {
+            if (data.progressStage !== 'completed') {
+              // If a background sync is happening, fetch latest inbox items silently
+              setIsSyncing(true);
+              await fetchInsights(true);
+            } else {
+               if (lastStage !== 'completed') {
+                 // Final fetch to reflect completed state
+                 await fetchInsights(true);
+               }
+               setIsSyncing(false);
+               if (data.aiFallbackCount > 0) {
+                 setNotification({
+                   show: true,
+                   type: 'info',
+                   message: 'AI fallback used',
+                   detail: data.aiFallbackMessage || 'Some emails used shared AI key due to key/model errors.',
+                 });
+               }
+               // Removed clearInterval so we keep polling for future syncs triggered externally
+            }
+            lastStage = data.progressStage;
           }
         } catch (err) {
         console.warn('[Dashboard] Background progress poll failed', err);

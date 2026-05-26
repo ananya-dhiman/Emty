@@ -288,13 +288,24 @@ export function WidgetApp() {
     // This mirrors the Dashboard's background progress polling
     let pollInterval: ReturnType<typeof setInterval>;
     let isPolling = false;
+    let lastStage = 'completed';
 
     const bgPoll = async () => {
       if (isPolling) return;
       isPolling = true;
       try {
         const token = getToken();
-        const accountId = gmailAccountIdRef.current;
+        let accountId = gmailAccountIdRef.current;
+        
+        // Recover if we started up before app was logged in
+        if (token && !accountId) {
+          accountId = await resolveAccountId();
+          if (accountId) {
+             // Successfully recovered, fetch initial data
+             await fetchData();
+          }
+        }
+
         if (!token || !accountId) return;
 
         const { data } = await axios.get(
@@ -302,9 +313,17 @@ export function WidgetApp() {
           { headers: { Authorization: `Bearer ${token}` } }
         );
 
-        if (data?.success && data.progressStage && data.progressStage !== 'completed') {
-          // A sync is running in main window — silently refresh cards
-          await fetchData();
+        if (data?.success && data.progressStage) {
+          if (data.progressStage !== 'completed') {
+            // A sync is running in main window — silently refresh cards
+            await fetchData();
+          } else {
+            if (lastStage !== 'completed') {
+              // Final fetch to reflect completed state
+              await fetchData();
+            }
+          }
+          lastStage = data.progressStage;
         }
       } catch {
         // non-blocking

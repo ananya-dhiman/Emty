@@ -1,5 +1,6 @@
 import { inferActionIntelligence } from "./insightInference";
 import { AIResolvedContext, resolveAIContextForUser } from "./aiProviderService";
+import { PreExtractedLink } from "./emailBodyService";
 import logger from '../utils/logger';
 
 const OLLAMA_URL = process.env.OLLAMA_URL?.trim() || "http://127.0.0.1:11434";
@@ -92,6 +93,7 @@ const buildPrompt = (emailContent: {
   internalDate?: string;
   relevantLabels?: Array<{ name: string; description?: string }>;
   stage2Candidates?: Array<{ name: string; similarityScore: number; labelMode: string }>;
+  preExtractedLinks?: PreExtractedLink[];
 }): string => {
   let candidatesText = "- Needs Action: Emails that require a response, deadline, or task\n- Finance: Bills, transactions, payments";
   
@@ -108,6 +110,13 @@ const buildPrompt = (emailContent: {
         .join("\n");
   }
 
+  const linksBlock = emailContent.preExtractedLinks && emailContent.preExtractedLinks.length > 0
+    ? `\nPre-extracted links found in this email (includes links from quoted/reply sections):\n` +
+      emailContent.preExtractedLinks
+        .map((l, i) => `${i + 1}. URL: ${l.url}${l.anchorText ? ` | Anchor: "${l.anchorText}"` : ''}${l.context ? ` | Context: "${l.context}"` : ''}`)
+        .join('\n')
+    : `\nNo links were pre-extracted from this email.`;
+
   return `You are an email insight extraction AI. Analyze the following email and extract structured insights.
 
 From: ${emailContent.from}
@@ -116,9 +125,10 @@ Date: ${emailContent.internalDate || "Unknown"}
 
 Label candidates:
 ${candidatesText}
+${linksBlock}
 
 Body:
-${emailContent.body.split(/\s+/).slice(0, 600).join(' ')}
+${emailContent.body.split(/\s+/).slice(0, 900).join(' ')}
 
 Extract and return a JSON object with:
 1. intent: One of 'action_required', 'event', 'opportunity', 'information', 'waiting', 'noise'
@@ -130,7 +140,11 @@ Extract and return a JSON object with:
 7. labelReason: Short internal reason.
 8. dates: Array of max 2 dates (type: 'deadline', 'event', 'followup', date: ISO string).
 9. importanceScore: Number 0.0 to 1.0.
-10. importantLinks: Array of max 2 URLs.
+10. importantLinks: Review ONLY the pre-extracted links listed above. For each link, include it if ANY positive signal applies:
+    INCLUDE if: the surrounding context tells the recipient to act on it (click, join, review, pay, submit, approve, sign, confirm, download, fill); OR the URL path names a specific resource (/invoice, /join, /docs, /calendar, /form, /approve, /file, /download, /meeting, /event, /pay); OR it is explicitly referenced or described in the body (not just in a footer or boilerplate).
+    EXCLUDE if: it appears in a footer block (unsubscribe, manage preferences, privacy policy, terms of service, view in browser, update email preferences); OR the anchor text is generic branding (Visit our website, Follow us, View online, Learn more); OR the URL path is only a hash or short token with no meaningful path; OR the domain is a social media profile (twitter.com, linkedin.com, facebook.com, instagram.com, youtube.com).
+    For each included link return: url, label (use anchor text if available, otherwise infer from URL path), reason (one sentence: why the recipient specifically needs this link).
+    Return empty array if no links qualify. Do NOT invent or modify URLs.
 11. checklist: Array of max 2 tasks { task, status: "pending" }.
 
 Return ONLY valid JSON, no markdown code blocks.`;
@@ -385,6 +399,7 @@ export const extractInsightsFromEmail = async (
     body: string;
     internalDate?: string;
     relevantLabels?: Array<{ name: string; description?: string }>;
+    preExtractedLinks?: PreExtractedLink[];
   },
   options: ExtractInsightOptions = {}
 ): Promise<AIInsightExtraction> => {

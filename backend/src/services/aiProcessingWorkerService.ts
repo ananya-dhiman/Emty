@@ -170,7 +170,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
             const messageId = email.message_id;
             try {
                 // --- STAGE 2: PRE-FETCH BODY ---
-                let parsedBodyResult: { body: string; payload: any; headers: any[] } | undefined;
+                let parsedBodyResult: { body: string; payload: any; headers: any[]; preExtractedLinks: import('./emailBodyService').PreExtractedLink[] } | undefined;
                 
                 try {
                     parsedBodyResult = await fetchFullEmailBody(gmail, messageId);
