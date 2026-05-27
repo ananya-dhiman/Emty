@@ -9,6 +9,7 @@ import { runAndPersistColdStart } from "../services/coldStartService";
 import { runScoringWorker } from "../services/scoringWorkerService";
 import { runAiProcessingWorker } from "../services/aiProcessingWorkerService";
 import * as trainingDatasetRepository from "../db/repositories/trainingDatasetRepository";
+import { encryptApiKey } from '../utils/cryptoService';
 import logger from '../utils/logger';
 
 // ─── GET /api/intent/profile ─────────────────────────────────────────────────
@@ -32,7 +33,11 @@ export const getIntentProfile = async (
       { upsert: true, returnDocument: "after" }
     );
 
-    res.status(200).json({ success: true, profile });
+    // Strip encrypted key before sending — frontend only needs connection status
+    const safeProfile = profile?.toObject ? profile.toObject() : profile;
+    if (safeProfile) delete (safeProfile as any).groqApiKey;
+
+    res.status(200).json({ success: true, profile: safeProfile });
   } catch (err: any) {
     logger.info("[Intent] Error fetching profile:", err.message);
     res
@@ -67,6 +72,8 @@ export const upsertIntentProfile = async (
     inferredLabels,
     userPrompt,
     onboardingCompleted,
+    groqApiKey,
+    aiProvider,
   } = req.body;
 
   // Build update object — only include fields that were sent
@@ -81,6 +88,24 @@ export const upsertIntentProfile = async (
   if (Array.isArray(userPrompt)) update.userPrompt = userPrompt;
   if (typeof onboardingCompleted === "boolean")
     update.onboardingCompleted = onboardingCompleted;
+
+  // Groq API key — encrypt before storing, never log the raw value
+  if (typeof groqApiKey === 'string' && groqApiKey.trim()) {
+    try {
+      update.groqApiKey = encryptApiKey(groqApiKey.trim());
+      update.aiProvider = 'groq';
+    } catch (cryptoErr: any) {
+      logger.info('[Intent] Failed to encrypt Groq API key:', cryptoErr.message);
+      res.status(500).json({ success: false, message: 'Failed to secure API key' });
+      return;
+    }
+  }
+
+  // Explicit provider override (e.g. null to reset to Ollama-only mode)
+  if (aiProvider === null) {
+    update.aiProvider  = null;
+    update.groqApiKey  = null;
+  }
 
   try {
     const existingProfile = await UserIntentProfileModel.findOne({ userId })

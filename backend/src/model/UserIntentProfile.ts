@@ -30,6 +30,15 @@ export interface IUserIntentProfile extends Document {
     feedback: number;
   };
 
+  // AI provider configuration
+  aiProvider:     string | null; // 'groq' | 'ollama' | null
+  groqApiKey:     string | null; // AES-256-GCM encrypted, never stored plaintext
+  groqRateLimits: {
+    remaining:   number;
+    limit:       number;
+    lastUpdated: number;         // Unix ms timestamp
+  } | null;
+
   // Metadata
   onboardingCompleted: boolean;
   lastUpdated: Date;
@@ -58,6 +67,14 @@ const UserIntentProfileSchema = new Schema<IUserIntentProfile>(
       keyword: { type: Number, default: 10 },
       domain: { type: Number, default: 20 },
       feedback: { type: Number, default: 50 },
+    },
+
+    aiProvider:     { type: String,  default: null },
+    groqApiKey:     { type: String,  default: null },
+    groqRateLimits: {
+      remaining:   { type: Number },
+      limit:       { type: Number },
+      lastUpdated: { type: Number },
     },
 
     onboardingCompleted: { type: Boolean, default: false },

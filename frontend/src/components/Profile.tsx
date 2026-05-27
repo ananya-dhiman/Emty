@@ -510,6 +510,79 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
     loadOllamaInfo();
   }, [loadOllamaInfo]);
 
+  // Groq API key status
+  const [groqStatus, setGroqStatus] = useState<{
+    connected: boolean;
+    rateLimits: { remaining: number; limit: number; lastUpdated: number } | null;
+  }>({ connected: false, rateLimits: null });
+  const [showGroqKeyInput, setShowGroqKeyInput] = useState(false);
+  const [groqKeyDraft, setGroqKeyDraft]         = useState('');
+  const [groqKeyError, setGroqKeyError]         = useState<string | null>(null);
+  const [groqKeyVerifying, setGroqKeyVerifying] = useState(false);
+  const [groqKeySaved, setGroqKeySaved]         = useState(false);
+
+  const token = localStorage.getItem('firebaseToken');
+
+  // Load Groq status from profile on mount
+  useEffect(() => {
+    const load = async () => {
+      if (!token) return;
+      try {
+        const { data } = await axios.get(`${API_BASE_URL}/api/intent/profile`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (data.success && data.profile) {
+          setGroqStatus({
+            connected:  data.profile.aiProvider === 'groq',
+            rateLimits: data.profile.groqRateLimits || null,
+          });
+        }
+      } catch {
+        // Non-blocking
+      }
+    };
+    void load();
+  }, [token]);
+
+  const handleVerifyAndUpdateGroqKey = async () => {
+    const trimmed = groqKeyDraft.trim();
+    if (!trimmed) return;
+    setGroqKeyVerifying(true);
+    setGroqKeyError(null);
+    try {
+      const verifyRes = await fetch('https://api.groq.com/openai/v1/models', {
+        headers: { Authorization: `Bearer ${trimmed}` },
+      });
+      if (!verifyRes.ok) {
+        setGroqKeyError('Invalid key — please check and try again');
+        return;
+      }
+      await axios.post(
+        `${API_BASE_URL}/api/intent/profile`,
+        { groqApiKey: trimmed },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setGroqStatus(prev => ({ ...prev, connected: true }));
+      setGroqKeySaved(true);
+      setGroqKeyDraft('');
+      setTimeout(() => { setGroqKeySaved(false); setShowGroqKeyInput(false); }, 1500);
+    } catch {
+      setGroqKeyError('Verification failed — check your connection and try again');
+    } finally {
+      setGroqKeyVerifying(false);
+    }
+  };
+
+  const timeAgo = (ms: number): string => {
+    const diff = Date.now() - ms;
+    const mins = Math.floor(diff / 60_000);
+    if (mins < 1)  return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24)  return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  };
+
   const handleRestartOllama = async () => {
     if (!isTauri) return;
     try {
@@ -974,6 +1047,154 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
               </div>
             </div>
           )}
+
+          {/* Groq Cloud AI Status Card */}
+          <div
+            id="groq-api-section"
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              overflow: 'hidden',
+              marginTop: '20px',
+            }}
+          >
+            <div
+              style={{
+                padding: '12px 20px',
+                borderBottom: '1px solid var(--border-lt)',
+                background: 'var(--panel)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-2)' }}>
+                Cloud AI (Groq)
+              </span>
+            </div>
+
+            <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+
+              {/* Connection status */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '9px', color: groqStatus.connected ? 'var(--green)' : 'var(--text-3)' }}>
+                  {groqStatus.connected ? 'CONNECTED' : 'NOT CONNECTED'}
+                </span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: groqStatus.connected ? 'var(--text-1)' : 'var(--text-3)' }}>
+                  {groqStatus.connected
+                    ? 'Groq API active — Llama 3.3 70B'
+                    : 'Running in local-only mode.'}
+                </span>
+              </div>
+
+              {/* Rate limits — only shown when connected and data exists */}
+              {groqStatus.connected && groqStatus.rateLimits && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-2)' }}>
+                    Requests remaining today: {groqStatus.rateLimits.remaining} / {groqStatus.rateLimits.limit}
+                  </span>
+                  <div style={{ height: '4px', background: 'var(--surface-2)', borderRadius: '2px', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${Math.min(100, ((groqStatus.rateLimits.limit - groqStatus.rateLimits.remaining) / groqStatus.rateLimits.limit) * 100)}%`,
+                        background: 'var(--accent)',
+                        borderRadius: '2px',
+                        transition: 'width 0.4s ease',
+                      }}
+                    />
+                  </div>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)' }}>
+                    Last updated: {timeAgo(groqStatus.rateLimits.lastUpdated)}
+                  </span>
+                </div>
+              )}
+
+              {/* Add key prompt when not connected */}
+              {!groqStatus.connected && (
+                <a
+                  href="https://console.groq.com/keys"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-3)' }}
+                >
+                  Get a free key at console.groq.com/keys
+                </a>
+              )}
+
+              {/* Update / Add API key button */}
+              <div>
+                <button
+                  id="groq-update-key-btn"
+                  onClick={() => { setShowGroqKeyInput(v => !v); setGroqKeyError(null); }}
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    fontFamily: 'var(--font-ui)',
+                    background: 'var(--surface)',
+                    color: 'var(--text-2)',
+                    border: '1px solid var(--border-lt)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {groqStatus.connected ? 'Update API Key' : 'Add API Key'}
+                </button>
+              </div>
+
+              {/* Inline key input form */}
+              {showGroqKeyInput && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <input
+                    id="groq-key-update-input"
+                    type="password"
+                    value={groqKeyDraft}
+                    onChange={(e) => { setGroqKeyDraft(e.target.value); setGroqKeyError(null); }}
+                    placeholder="gsk_..."
+                    disabled={groqKeyVerifying || groqKeySaved}
+                    style={{
+                      background: 'var(--bg)',
+                      border: `1px solid ${groqKeyError ? 'var(--red)' : 'var(--border)'}`,
+                      padding: '8px 12px',
+                      fontSize: '12px',
+                      fontFamily: 'var(--font-mono)',
+                      color: 'var(--text-1)',
+                    }}
+                  />
+                  {groqKeyError && (
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--red)' }}>
+                      {groqKeyError}
+                    </span>
+                  )}
+                  {groqKeySaved && (
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--green)' }}>
+                      Key updated successfully
+                    </span>
+                  )}
+                  <button
+                    id="groq-key-save-btn"
+                    onClick={handleVerifyAndUpdateGroqKey}
+                    disabled={!groqKeyDraft.trim() || groqKeyVerifying || groqKeySaved}
+                    style={{
+                      alignSelf: 'flex-start',
+                      padding: '6px 16px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      fontFamily: 'var(--font-ui)',
+                      background: 'var(--text-1)',
+                      color: 'var(--bg)',
+                      border: '1px solid var(--text-1)',
+                      cursor: (!groqKeyDraft.trim() || groqKeyVerifying || groqKeySaved) ? 'not-allowed' : 'pointer',
+                      opacity: (!groqKeyDraft.trim() || groqKeyVerifying || groqKeySaved) ? 0.6 : 1,
+                    }}
+                  >
+                    {groqKeyVerifying ? 'Verifying...' : groqKeySaved ? 'Saved' : 'Verify & Save'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
         </div>
       </div>
     </div>

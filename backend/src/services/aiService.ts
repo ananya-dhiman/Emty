@@ -1,6 +1,7 @@
 import { inferActionIntelligence } from "./insightInference";
 import { AIResolvedContext, resolveAIContextForUser } from "./aiProviderService";
 import { PreExtractedLink } from "./emailBodyService";
+import { UserIntentProfileModel } from '../model/UserIntentProfile';
 import logger from '../utils/logger';
 
 const OLLAMA_URL = process.env.OLLAMA_URL?.trim() || "http://127.0.0.1:11434";
@@ -24,6 +25,7 @@ export interface AIInsightExtraction {
     label?: string;
     reason?: string;
     inferred?: boolean;
+    id?: string;
   }>;
   checklist: Array<{
     task: string;
@@ -49,6 +51,8 @@ export interface AIFallbackNotice {
 export interface ExtractInsightOptions {
   userId?: string;
   context?: AIResolvedContext;
+  useGroq?: boolean;     // true = route to Groq cloud API
+  groqApiKey?: string;   // decrypted key, only present when useGroq=true
   stage2Candidates?: Array<{ name: string; similarityScore: number; labelMode: string }>;
   onFallback?: (notice: AIFallbackNotice) => Promise<void> | void;
 }
@@ -94,6 +98,7 @@ const buildPrompt = (emailContent: {
   relevantLabels?: Array<{ name: string; description?: string }>;
   stage2Candidates?: Array<{ name: string; similarityScore: number; labelMode: string }>;
   preExtractedLinks?: PreExtractedLink[];
+  promptLinks?: Array<{ id: string; anchorText: string }>;
 }): string => {
   let candidatesText = "- Needs Action: Emails that require a response, deadline, or task\n- Finance: Bills, transactions, payments";
   
@@ -110,10 +115,10 @@ const buildPrompt = (emailContent: {
         .join("\n");
   }
 
-  const linksBlock = emailContent.preExtractedLinks && emailContent.preExtractedLinks.length > 0
-    ? `\nPre-extracted links found in this email (includes links from quoted/reply sections):\n` +
-      emailContent.preExtractedLinks
-        .map((l, i) => `${i + 1}. URL: ${l.url}${l.anchorText ? ` | Anchor: "${l.anchorText}"` : ''}${l.context ? ` | Context: "${l.context}"` : ''}`)
+  const linksBlock = emailContent.promptLinks && emailContent.promptLinks.length > 0
+    ? `\nPre-extracted links found in this email:\n` +
+      emailContent.promptLinks
+        .map((l) => `${l.id} is "${l.anchorText}"`)
         .join('\n')
     : `\nNo links were pre-extracted from this email.`;
 
@@ -128,7 +133,7 @@ ${candidatesText}
 ${linksBlock}
 
 Body:
-${emailContent.body.split(/\s+/).slice(0, 900).join(' ')}
+${emailContent.body.split(/\s+/).slice(0, 600).join(' ')}
 
 Extract and return a JSON object with:
 1. intent: One of 'action_required', 'event', 'opportunity', 'information', 'waiting', 'noise'
@@ -141,10 +146,10 @@ Extract and return a JSON object with:
 8. dates: Array of max 2 dates (type: 'deadline', 'event', 'followup', date: ISO string).
 9. importanceScore: Number 0.0 to 1.0.
 10. importantLinks: Review ONLY the pre-extracted links listed above. For each link, include it if ANY positive signal applies:
-    INCLUDE if: the surrounding context tells the recipient to act on it (click, join, review, pay, submit, approve, sign, confirm, download, fill); OR the URL path names a specific resource (/invoice, /join, /docs, /calendar, /form, /approve, /file, /download, /meeting, /event, /pay); OR it is explicitly referenced or described in the body (not just in a footer or boilerplate).
-    EXCLUDE if: it appears in a footer block (unsubscribe, manage preferences, privacy policy, terms of service, view in browser, update email preferences); OR the anchor text is generic branding (Visit our website, Follow us, View online, Learn more); OR the URL path is only a hash or short token with no meaningful path; OR the domain is a social media profile (twitter.com, linkedin.com, facebook.com, instagram.com, youtube.com).
-    For each included link return: url, label (use anchor text if available, otherwise infer from URL path), reason (one sentence: why the recipient specifically needs this link).
-    Return empty array if no links qualify. Do NOT invent or modify URLs.
+    INCLUDE if: the surrounding context tells the recipient to act on it (click, join, review, pay, submit, approve, sign, confirm, download, fill); OR it is explicitly referenced or described in the body (not just in a footer or boilerplate).
+    EXCLUDE if: it appears in a footer block (unsubscribe, manage preferences, privacy policy, terms of service, view in browser, update email preferences); OR the anchor text is generic branding (Visit our website, Follow us, View online, Learn more).
+    For each included link return: id (the exact ID like L1), reason (one sentence: why the recipient specifically needs this link).
+    Return empty array if no links qualify. Do NOT return urls, only the ID and reason.
 11. checklist: Array of max 2 tasks { task, status: "pending" }.
 
 Return ONLY valid JSON, no markdown code blocks.`;
@@ -209,6 +214,18 @@ const normalizeLinksAndChecklist = (insights: AIInsightExtraction): AIInsightExt
 
   const dedupedLinks = new Map<string, AIInsightExtraction["importantLinks"][number]>();
   for (const raw of (insights as any).importantLinks) {
+    if (raw?.id && typeof raw.id === "string") {
+      const idKey = raw.id.trim().toUpperCase();
+      if (!dedupedLinks.has(idKey)) {
+        dedupedLinks.set(idKey, {
+          id: idKey,
+          url: "", // placeholder, will be replaced during resolution
+          reason: typeof raw?.reason === "string" ? raw.reason.trim().slice(0, 160) : undefined,
+          inferred: raw?.inferred === true,
+        });
+      }
+      continue;
+    }
     const normalizedUrl = normalizeUrl(raw?.url ?? raw);
     if (!normalizedUrl) continue;
     if (!dedupedLinks.has(normalizedUrl)) {
@@ -290,23 +307,32 @@ const extractWithOllama = async (
   model: string,
   attemptFallback = true
 ): Promise<AIInsightExtraction> => {
-  const response = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(OLLAMA_API_KEY ? { Authorization: `Bearer ${OLLAMA_API_KEY}` } : {}),
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.3,
-      max_tokens: 600,
-      stream: true,
-      options: {
-        num_ctx: 8192
-      }
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2-minute hard timeout
+
+  let response: Response;
+  try {
+    response = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(OLLAMA_API_KEY ? { Authorization: `Bearer ${OLLAMA_API_KEY}` } : {}),
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3,
+        max_tokens: 600,
+        stream: true,
+        options: {
+          num_ctx: 8192
+        }
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const txt = await response.text();
@@ -385,6 +411,98 @@ const extractWithOllama = async (
   return insights;
 };
 
+const GROQ_URL   = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
+
+/**
+ * Calls the Groq cloud API (OpenAI-compatible endpoint).
+ * Captures rate-limit headers and persists them back to the user profile.
+ */
+const extractWithGroq = async (
+  prompt: string,
+  groqApiKey: string,
+  userId?: string
+): Promise<AIInsightExtraction> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120_000);
+
+  let response: Response;
+  try {
+    response = await fetch(GROQ_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${groqApiKey}`,
+      },
+      body: JSON.stringify({
+        model:       GROQ_MODEL,
+        messages:    [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens:  600,
+        stream:      true,
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!response.ok) {
+    const txt = await response.text();
+    throw new Error(`Groq API error: ${response.status} ${txt.slice(0, 400)}`);
+  }
+
+  // Capture rate-limit headers before streaming body
+  const remaining = parseInt(response.headers.get('x-ratelimit-remaining-requests') || '-1', 10);
+  const limit     = parseInt(response.headers.get('x-ratelimit-limit-requests')     || '-1', 10);
+
+  // Persist rate limits back to MongoDB asynchronously (non-blocking)
+  if (userId && remaining >= 0 && limit > 0) {
+    UserIntentProfileModel.updateOne(
+      { userId },
+      { $set: { groqRateLimits: { remaining, limit, lastUpdated: Date.now() } } }
+    ).catch((err: any) => logger.debug('[Groq] Failed to persist rate limits:', err.message));
+  }
+
+  // Stream response body (same reader pattern as extractWithOllama)
+  let extractedText = '';
+  if (response.body) {
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed === 'data: [DONE]') continue;
+        if (trimmed.startsWith('data: ')) {
+          try {
+            const payload = JSON.parse(trimmed.slice(6));
+            const delta   = payload.choices?.[0]?.delta?.content;
+            if (delta) extractedText += delta;
+          } catch {
+            // Fragmented chunk — wait for next
+          }
+        }
+      }
+    }
+  }
+
+  if (!extractedText) throw new Error('No content in Groq response');
+
+  const insights = parseAIResponse(extractedText);
+  normalizeDates(insights);
+  normalizeLinksAndChecklist(insights);
+  validateInsights(insights);
+  return insights;
+};
+
 const runAttempt = async (
   attempt: AIResolvedContext["attempts"][number],
   prompt: string
@@ -403,22 +521,75 @@ export const extractInsightsFromEmail = async (
   },
   options: ExtractInsightOptions = {}
 ): Promise<AIInsightExtraction> => {
-  const prompt = buildPrompt({ ...emailContent, stage2Candidates: options.stage2Candidates });
+  const linkMap = new Map<string, string>();
+  const linkMapAnchors = new Map<string, string>();
+  const promptLinks: Array<{ id: string; anchorText: string }> = [];
+  
+  const noiseRegex = /unsubscribe|report a problem|terms and conditions|privacy policy|security advice|view online|manage preferences|get app/i;
+  let idCounter = 1;
+
+  for (const link of emailContent.preExtractedLinks || []) {
+    const anchor = link.anchorText || '';
+    if (noiseRegex.test(anchor)) continue;
+    
+    const id = `L${idCounter++}`;
+    linkMap.set(id, link.url);
+    linkMapAnchors.set(id, anchor);
+    promptLinks.push({ id, anchorText: anchor });
+  }
+
+  const prompt = buildPrompt({ ...emailContent, stage2Candidates: options.stage2Candidates, promptLinks });
   const context =
     options.context || (options.userId ? await resolveAIContextForUser(options.userId) : null);
 
   if (!context || context.attempts.length === 0) {
-    throw new Error("No AI providers configured (neither user key nor shared key available)");
+    throw new Error('No AI providers configured (neither user key nor shared key available)');
   }
 
   logger.debug(
-    `[AI] Starting extraction | user=${options.userId || context.userId} | attempts=${context.attempts.length} | promptChars=${prompt.length}`
+    `[AI] Starting extraction | user=${options.userId || context.userId} | attempts=${context.attempts.length} | promptChars=${prompt.length} | useGroq=${!!options.useGroq}`
   );
+  logger.debug(`[AI] Raw prompt being sent:\n${prompt}`);
   logger.debug(
     `[AI] Attempt chain: ${context.attempts
       .map((a) => `${a.provider}:${a.model}:${a.source}`)
-      .join(" -> ")}`
+      .join(' -> ')}`
   );
+
+  const resolveLinks = (insights: AIInsightExtraction) => {
+    const resolvedLinks: AIInsightExtraction["importantLinks"] = [];
+    for (const link of insights.importantLinks) {
+      if (link.id) {
+        const originalUrl = linkMap.get(link.id);
+        if (originalUrl) {
+          resolvedLinks.push({
+            url: originalUrl,
+            label: linkMapAnchors.get(link.id) || undefined,
+            reason: link.reason,
+            inferred: link.inferred,
+          });
+        }
+      } else if (link.url) {
+        resolvedLinks.push(link);
+      }
+    }
+    insights.importantLinks = resolvedLinks;
+    return insights;
+  };
+
+  // Route to Groq cloud first if enabled for this email
+  if (options.useGroq && options.groqApiKey) {
+    try {
+      logger.debug(`[AI] Routing to Groq | model=${GROQ_MODEL}`);
+      const result   = await extractWithGroq(prompt, options.groqApiKey, options.userId);
+      const enriched = applyInferenceFallback(result, emailContent);
+      logger.debug('[AI] Groq extraction succeeded');
+      return resolveLinks(enriched);
+    } catch (groqErr: any) {
+      logger.info(`[AI] Groq attempt failed (${groqErr?.message}), falling back to Ollama`);
+      // Fall through to the Ollama chain below
+    }
+  }
 
   let firstFailure: { provider: string; model: string; message: string } | null = null;
   let finalError: any = null;
@@ -434,7 +605,7 @@ export const extractInsightsFromEmail = async (
       );
       const enriched = applyInferenceFallback(result, emailContent);
       logger.debug(`[AI] Extraction completed successfully`);
-      return enriched;
+      return resolveLinks(enriched);
     } catch (err: any) {
       logger.debug(
         `[AI] Attempt failed provider=${attempt.provider} model=${attempt.model} source=${attempt.source} reason=${err?.message || err}`

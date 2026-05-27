@@ -175,7 +175,7 @@ function SectionBox({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProps) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [profileType, setProfileType] = useState<'student' | 'working_professional' | 'custom' | null>(null);
 
   // Step 2 state (previously Step 1)
@@ -188,7 +188,13 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingStep2, setSavingStep2] = useState(false);
 
-  // Step 3 state (previously Step 2 - existing label priority)
+  // Step 3 state — Groq API key
+  const [groqApiKey, setGroqApiKey]         = useState('');
+  const [groqVerifying, setGroqVerifying]   = useState(false);
+  const [groqError, setGroqError]           = useState<string | null>(null);
+  const [groqVerified, setGroqVerified]     = useState(false);
+
+  // Step 4 state (previously Step 3 — label priority)
   const [labels, setLabels] = useState<LabelItem[]>([]);
   const [loadingLabels, setLoadingLabels] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -365,15 +371,57 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
       console.error('[Onboarding] Failed to save intent profile:', err);
     } finally {
       setSavingStep2(false);
-      setStep(3);
+      setStep(3); // advance to Groq key step
     }
   };
 
   const skipStep2 = async () => {
-    setStep(3);
+    setStep(3); // skip preferences, still show Groq step
   };
 
-  // ─── Step 2 handlers (unchanged from original) ─────────────────────────────
+  // ─── Step 3 handlers (Groq key) ────────────────────────────────────────────
+
+  const handleVerifyAndSaveGroqKey = async () => {
+    const trimmed = groqApiKey.trim();
+    if (!trimmed) return;
+    setGroqVerifying(true);
+    setGroqError(null);
+    try {
+      // Verify with Groq — just a model-list call, zero email data sent
+      const verifyRes = await fetch('https://api.groq.com/openai/v1/models', {
+        headers: { Authorization: `Bearer ${trimmed}` },
+      });
+      if (!verifyRes.ok) {
+        setGroqError('Invalid key — please check and try again');
+        return;
+      }
+      // Persist encrypted key to backend
+      await axios.post(
+        `${API_BASE_URL}/api/intent/profile`,
+        { groqApiKey: trimmed },
+        { headers }
+      );
+      setGroqVerified(true);
+      setTimeout(() => setStep(4), 800); // brief success pause before advancing
+    } catch {
+      setGroqError('Verification failed — check your connection and try again');
+    } finally {
+      setGroqVerifying(false);
+    }
+  };
+
+  const handleSkipGroq = async () => {
+    try {
+      await axios.post(
+        `${API_BASE_URL}/api/intent/profile`,
+        { aiProvider: null },
+        { headers }
+      );
+    } catch {
+      // Non-blocking — skip silently
+    }
+    setStep(4);
+  };
 
   const handleSort = () => {
     if (dragItem.current !== null && dragOverItem.current !== null && dragItem.current !== dragOverItem.current) {
@@ -475,7 +523,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
 
   const StepIndicator = () => (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '28px' }}>
-      {[1, 2, 3].map((s) => (
+      {[1, 2, 3, 4].map((s) => (
         <div key={s} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div
             style={{
@@ -495,13 +543,13 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
           >
             {s}
           </div>
-          {s < 3 && (
+          {s < 4 && (
             <div style={{ width: '24px', height: '1px', background: step > s ? 'var(--text-1)' : 'var(--border)' }} />
           )}
         </div>
       ))}
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)', marginLeft: '4px' }}>
-        Step {step} of 3
+        Step {step} of 4
       </span>
     </div>
   );
@@ -747,7 +795,123 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     );
   }
 
-  // ─── Step 3 render (label priority — original Step 2 content) ──────────────
+  // ─── Step 3 render — Groq API key ──────────────────────────────────────────
+
+  if (step === 3) {
+    return (
+      <div style={{ minHeight: '100vh', width: '100vw', background: 'var(--bg)', color: 'var(--text-1)', display: 'flex', flexDirection: 'column' }}>
+        <Header />
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', padding: '48px 20px', overflowY: 'auto' }}>
+          <div style={{ width: '100%', maxWidth: '640px' }}>
+            <StepIndicator />
+
+            <h1 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '6px' }}>
+              Enable Cloud AI Analysis
+            </h1>
+            <p style={{ color: 'var(--text-3)', fontSize: '13px', marginBottom: '8px', lineHeight: 1.6 }}>
+              Add a free Groq API key to unlock faster, higher-quality email analysis using
+              Llama 3.3 70B (14,400 free requests/day).
+            </p>
+            <p style={{ color: 'var(--text-3)', fontSize: '12px', marginBottom: '28px', lineHeight: 1.6 }}>
+              Sensitive emails containing financial, medical, or legal content are always
+              processed locally and never sent to any cloud service.
+            </p>
+
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', marginBottom: '20px' }}>
+              <label
+                htmlFor="groq-key-input"
+                style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-2)', display: 'block', marginBottom: '10px' }}
+              >
+                Groq API Key
+              </label>
+              <input
+                id="groq-key-input"
+                type="password"
+                value={groqApiKey}
+                onChange={(e) => { setGroqApiKey(e.target.value); setGroqError(null); }}
+                placeholder="gsk_..."
+                disabled={groqVerifying || groqVerified}
+                style={{
+                  width: '100%',
+                  background: 'var(--bg)',
+                  border: `1px solid ${groqError ? 'var(--red)' : 'var(--border)'}`,
+                  padding: '10px 14px',
+                  fontSize: '13px',
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--text-1)',
+                  boxSizing: 'border-box',
+                }}
+              />
+
+              <div style={{ marginTop: '10px' }}>
+                <a
+                  href="https://console.groq.com/keys"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-3)' }}
+                >
+                  Get your free Groq API key at console.groq.com/keys
+                </a>
+              </div>
+
+              {groqError && (
+                <p style={{ marginTop: '10px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--red)' }}>
+                  {groqError}
+                </p>
+              )}
+
+              {groqVerified && (
+                <p style={{ marginTop: '10px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--green)' }}>
+                  Key verified and saved successfully
+                </p>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <button
+                id="groq-skip-btn"
+                onClick={handleSkipGroq}
+                disabled={groqVerifying}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-3)',
+                  fontFamily: 'var(--font-ui)',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: groqVerifying ? 'not-allowed' : 'pointer',
+                  padding: '8px 0',
+                  opacity: groqVerifying ? 0.5 : 1,
+                }}
+              >
+                Skip for now — use local AI only
+              </button>
+              <button
+                id="groq-verify-btn"
+                onClick={handleVerifyAndSaveGroqKey}
+                disabled={!groqApiKey.trim() || groqVerifying || groqVerified}
+                style={{
+                  background: 'var(--text-1)',
+                  color: 'var(--bg)',
+                  border: '1px solid var(--text-1)',
+                  padding: '10px 24px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  fontFamily: 'var(--font-ui)',
+                  cursor: (!groqApiKey.trim() || groqVerifying || groqVerified) ? 'not-allowed' : 'pointer',
+                  opacity: (!groqApiKey.trim() || groqVerifying || groqVerified) ? 0.6 : 1,
+                }}
+              >
+                {groqVerifying ? 'Verifying...' : groqVerified ? 'Verified' : 'Verify & Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Step 4 render (label priority — original Step 3 content) ──────────────
 
   return (
     <div style={{ minHeight: '100vh', width: '100vw', background: 'var(--bg)', color: 'var(--text-1)', display: 'flex', flexDirection: 'column' }}>
