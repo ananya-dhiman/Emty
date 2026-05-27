@@ -98,7 +98,7 @@ const buildPrompt = (emailContent: {
   relevantLabels?: Array<{ name: string; description?: string }>;
   stage2Candidates?: Array<{ name: string; similarityScore: number; labelMode: string }>;
   preExtractedLinks?: PreExtractedLink[];
-  promptLinks?: Array<{ id: string; anchorText: string }>;
+  promptLinks?: Array<{ id: string; displayString: string }>;
 }): string => {
   let candidatesText = "- Needs Action: Emails that require a response, deadline, or task\n- Finance: Bills, transactions, payments";
   
@@ -118,7 +118,7 @@ const buildPrompt = (emailContent: {
   const linksBlock = emailContent.promptLinks && emailContent.promptLinks.length > 0
     ? `\nPre-extracted links found in this email:\n` +
       emailContent.promptLinks
-        .map((l) => `${l.id} is "${l.anchorText}"`)
+        .map((l) => `${l.id}: ${l.displayString}`)
         .join('\n')
     : `\nNo links were pre-extracted from this email.`;
 
@@ -523,7 +523,7 @@ export const extractInsightsFromEmail = async (
 ): Promise<AIInsightExtraction> => {
   const linkMap = new Map<string, string>();
   const linkMapAnchors = new Map<string, string>();
-  const promptLinks: Array<{ id: string; anchorText: string }> = [];
+  const promptLinks: Array<{ id: string; displayString: string }> = [];
   
   const noiseRegex = /unsubscribe|report a problem|terms and conditions|privacy policy|security advice|view online|manage preferences|get app/i;
   let idCounter = 1;
@@ -535,7 +535,15 @@ export const extractInsightsFromEmail = async (
     const id = `L${idCounter++}`;
     linkMap.set(id, link.url);
     linkMapAnchors.set(id, anchor);
-    promptLinks.push({ id, anchorText: anchor });
+    
+    const displayParts = [];
+    if (anchor) displayParts.push(`Anchor: "${anchor}"`);
+    if (link.context) displayParts.push(`Context: "${link.context}"`);
+    
+    promptLinks.push({ 
+      id, 
+      displayString: displayParts.length > 0 ? displayParts.join(' | ') : 'No anchor or context available'
+    });
   }
 
   const prompt = buildPrompt({ ...emailContent, stage2Candidates: options.stage2Candidates, promptLinks });

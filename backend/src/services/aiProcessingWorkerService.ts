@@ -9,7 +9,7 @@ import * as syncCheckpointRepository from "../db/repositories/syncCheckpointRepo
 
 import * as labelCandidateRepository from "../db/repositories/labelCandidateRepository";
 import { refreshAccessToken } from "./gmailAuth";
-import { processEmailDeep } from "./emailProcessingService";
+import { processEmailDeep, classifyEmail } from "./emailProcessingService";
 import { fetchFullEmailBody } from "./emailBodyService";
 
 import rulesEngine from "./rulesEngine";
@@ -139,6 +139,15 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         await updateProgressComplete(accountId);
         return;
     }
+
+    // Sort candidates to offload sensitive ones to the end of the batch
+    candidates.sort((a, b) => {
+        const classA = classifyEmail(a.from || '', a.subject || '', a.snippet || '');
+        const classB = classifyEmail(b.from || '', b.subject || '', b.snippet || '');
+        const weightA = classA === 'sensitive' ? 1 : 0;
+        const weightB = classB === 'sensitive' ? 1 : 0;
+        return weightA - weightB;
+    });
 
     logger.debug(`[AI WORKER] Found ${candidates.length} emails to process with AI`);
 

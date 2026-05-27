@@ -56,7 +56,7 @@ const parseEmailAddress = (
 
 // ─── Email Classifier ─────────────────────────────────────────────────────────
 
-type EmailClass = 'routine' | 'sensitive' | 'normal';
+export type EmailClass = 'routine' | 'sensitive' | 'normal';
 
 const SENSITIVE_KEYWORDS = [
   'bank account', 'password', 'otp', 'transaction', 'credit card',
@@ -65,7 +65,7 @@ const SENSITIVE_KEYWORDS = [
   'salary', 'aadhaar', 'pan card', 'passport', 'social security',
 ];
 
-function classifyEmail(from: string, subject: string, body: string): EmailClass {
+export function classifyEmail(from: string, subject: string, body: string): EmailClass {
   if (/newsletter|unsubscribe|noreply|notification/i.test(from)) return 'routine';
   const text = `${subject} ${body}`.toLowerCase();
   if (SENSITIVE_KEYWORDS.some(kw => text.includes(kw))) return 'sensitive';
