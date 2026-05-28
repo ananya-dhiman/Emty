@@ -33,6 +33,7 @@ export interface IUserIntentProfile extends Document {
   // AI provider configuration
   aiProvider:     string | null; // 'groq' | 'ollama' | null
   groqApiKey:     string | null; // AES-256-GCM encrypted, never stored plaintext
+  groqTpdExhaustedAt?: number | null;
   groqRateLimits: {
     remaining:   number;
     limit:       number;
@@ -71,6 +72,7 @@ const UserIntentProfileSchema = new Schema<IUserIntentProfile>(
 
     aiProvider:     { type: String,  default: null },
     groqApiKey:     { type: String,  default: null },
+    groqTpdExhaustedAt: { type: Number, default: null },
     groqRateLimits: {
       remaining:   { type: Number },
       limit:       { type: Number },

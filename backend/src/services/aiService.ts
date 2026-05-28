@@ -101,25 +101,25 @@ const buildPrompt = (emailContent: {
   promptLinks?: Array<{ id: string; displayString: string }>;
 }): string => {
   let candidatesText = "- Needs Action: Emails that require a response, deadline, or task\n- Finance: Bills, transactions, payments";
-  
+
   if (emailContent.stage2Candidates?.length) {
-    candidatesText = "Pre-ranked Vector Similarity Candidates (highly recommended):\n" + 
+    candidatesText = "Pre-ranked Vector Similarity Candidates (highly recommended):\n" +
       emailContent.stage2Candidates
         .slice(0, 7)
         .map(c => `- ${c.name} (Similarity: ${(c.similarityScore * 100).toFixed(1)}%)`)
         .join("\n");
   } else if (emailContent.relevantLabels?.length) {
     candidatesText = emailContent.relevantLabels
-        .slice(0, 7)
-        .map((l) => `- ${l.name}: ${l.description || "No description"}`)
-        .join("\n");
+      .slice(0, 7)
+      .map((l) => `- ${l.name}: ${l.description || "No description"}`)
+      .join("\n");
   }
 
   const linksBlock = emailContent.promptLinks && emailContent.promptLinks.length > 0
     ? `\nPre-extracted links found in this email:\n` +
-      emailContent.promptLinks
-        .map((l) => `${l.id}: ${l.displayString}`)
-        .join('\n')
+    emailContent.promptLinks
+      .map((l) => `${l.id}: ${l.displayString}`)
+      .join('\n')
     : `\nNo links were pre-extracted from this email.`;
 
   return `You are an email insight extraction AI. Analyze the following email and extract structured insights.
@@ -336,7 +336,7 @@ const extractWithOllama = async (
 
   if (!response.ok) {
     const txt = await response.text();
-    
+
     // Dynamic Fallback if model is not found (happens if backend hits api before full provisioning is done)
     if (response.status === 404 && txt.includes("not found") && attemptFallback) {
       logger.info(`[AI] Requested model ${model} not found, attempting dynamic fallback...`);
@@ -348,8 +348,8 @@ const extractWithOllama = async (
           const validFallbackModels = availableModels.filter((m: any) => !m.name.includes('embed'));
           if (validFallbackModels.length > 0) {
             const fallbackModel = (
-              validFallbackModels.find((m: any) => m.name.includes('qwen')) || 
-              validFallbackModels.find((m: any) => m.name.includes('llama')) || 
+              validFallbackModels.find((m: any) => m.name.includes('qwen')) ||
+              validFallbackModels.find((m: any) => m.name.includes('llama')) ||
               validFallbackModels[0]
             ).name;
             logger.info(`[AI] Successfully located fallback model: ${fallbackModel}. Retrying extraction.`);
@@ -376,7 +376,7 @@ const extractWithOllama = async (
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      
+
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() || ""; // The last chunk might be incomplete
@@ -411,7 +411,7 @@ const extractWithOllama = async (
   return insights;
 };
 
-const GROQ_URL   = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
 /**
@@ -431,15 +431,15 @@ const extractWithGroq = async (
     response = await fetch(GROQ_URL, {
       method: 'POST',
       headers: {
-        'Content-Type':  'application/json',
+        'Content-Type': 'application/json',
         'Authorization': `Bearer ${groqApiKey}`,
       },
       body: JSON.stringify({
-        model:       GROQ_MODEL,
-        messages:    [{ role: 'user', content: prompt }],
+        model: GROQ_MODEL,
+        messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
-        max_tokens:  600,
-        stream:      true,
+        max_tokens: 600,
+        stream: true,
       }),
       signal: controller.signal,
     });
@@ -454,7 +454,7 @@ const extractWithGroq = async (
 
   // Capture rate-limit headers before streaming body
   const remaining = parseInt(response.headers.get('x-ratelimit-remaining-requests') || '-1', 10);
-  const limit     = parseInt(response.headers.get('x-ratelimit-limit-requests')     || '-1', 10);
+  const limit = parseInt(response.headers.get('x-ratelimit-limit-requests') || '-1', 10);
 
   // Persist rate limits back to MongoDB asynchronously (non-blocking)
   if (userId && remaining >= 0 && limit > 0) {
@@ -467,7 +467,7 @@ const extractWithGroq = async (
   // Stream response body (same reader pattern as extractWithOllama)
   let extractedText = '';
   if (response.body) {
-    const reader  = response.body.getReader();
+    const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
 
@@ -484,7 +484,7 @@ const extractWithGroq = async (
         if (trimmed.startsWith('data: ')) {
           try {
             const payload = JSON.parse(trimmed.slice(6));
-            const delta   = payload.choices?.[0]?.delta?.content;
+            const delta = payload.choices?.[0]?.delta?.content;
             if (delta) extractedText += delta;
           } catch {
             // Fragmented chunk — wait for next
@@ -524,24 +524,24 @@ export const extractInsightsFromEmail = async (
   const linkMap = new Map<string, string>();
   const linkMapAnchors = new Map<string, string>();
   const promptLinks: Array<{ id: string; displayString: string }> = [];
-  
+
   const noiseRegex = /unsubscribe|report a problem|terms and conditions|privacy policy|security advice|view online|manage preferences|get app/i;
   let idCounter = 1;
 
   for (const link of emailContent.preExtractedLinks || []) {
     const anchor = link.anchorText || '';
     if (noiseRegex.test(anchor)) continue;
-    
+
     const id = `L${idCounter++}`;
     linkMap.set(id, link.url);
     linkMapAnchors.set(id, anchor);
-    
+
     const displayParts = [];
     if (anchor) displayParts.push(`Anchor: "${anchor}"`);
     if (link.context) displayParts.push(`Context: "${link.context}"`);
-    
-    promptLinks.push({ 
-      id, 
+
+    promptLinks.push({
+      id,
       displayString: displayParts.length > 0 ? displayParts.join(' | ') : 'No anchor or context available'
     });
   }
@@ -586,16 +586,84 @@ export const extractInsightsFromEmail = async (
   };
 
   // Route to Groq cloud first if enabled for this email
-  if (options.useGroq && options.groqApiKey) {
+  if (options.useGroq && options.groqApiKey && options.userId) {
+    // 1. Fetch user profile to check the exhausted flag
+    const profile = await UserIntentProfileModel.findOne({ userId: options.userId }).lean();
+    let isExhausted = false;
+
+    if (profile?.groqTpdExhaustedAt) {
+      const hoursSinceExhausted = (Date.now() - profile.groqTpdExhaustedAt) / (1000 * 60 * 60);
+      if (hoursSinceExhausted < 24) {
+        logger.info(`[AI] Groq TPD exhausted less than 24h ago (skipping Groq, falling back to Ollama)`);
+        isExhausted = true;
+      } else {
+        logger.info(`[AI] 24h passed since Groq TPD exhausted. Resetting flag in DB.`);
+        await UserIntentProfileModel.updateOne({ userId: options.userId }, { $set: { groqTpdExhaustedAt: null } });
+      }
+    }
+
+    // 2. Only attempt Groq if flag is clear (or just got cleared)
+    if (!isExhausted) {
+      let groqAttemptCount = 0;
+      let groqSuccess = false;
+      let groqResult: any;
+
+      while (groqAttemptCount < 2 && !groqSuccess) {
+        try {
+          groqAttemptCount++;
+          logger.debug(`[AI] Routing to Groq | model=${GROQ_MODEL} (Attempt ${groqAttemptCount})`);
+          groqResult = await extractWithGroq(prompt, options.groqApiKey, options.userId);
+          const enriched = applyInferenceFallback(groqResult, emailContent);
+          logger.debug('[AI] Groq extraction succeeded');
+          return resolveLinks(enriched);
+        } catch (groqErr: any) {
+          const errMsg = groqErr?.message?.toLowerCase() || "";
+
+          // Check if it's a 429 error
+          if (errMsg.includes("429")) {
+            // Case 1: Tokens Per Day (TPD) exhausted
+            if (errMsg.includes("tokens per day") || errMsg.includes("tpd")) {
+              logger.debug(`[AI] Groq TPD exhausted. Saving flag to DB and falling back to Ollama immediately.`);
+              await UserIntentProfileModel.updateOne(
+                { userId: options.userId },
+                { $set: { groqTpdExhaustedAt: Date.now() } }
+              );
+              break; // Do not retry Groq, break out of while loop
+            }
+
+            // Case 2: Tokens Per Minute (TPM) exhausted
+            if (errMsg.includes("tokens per minute") || errMsg.includes("tpm") || errMsg.includes("please try again in")) {
+              if (groqAttemptCount === 1) {
+                // Parse wait time, e.g., "please try again in 7.195s"
+                const match = errMsg.match(/try again in ([\d\.]+)s/);
+                const waitSeconds = match ? parseFloat(match[1]) : 5;
+                const waitMs = (waitSeconds + 1.5) * 1000;
+
+                logger.debug(`[AI] Groq TPM exhausted. Waiting ${waitMs}ms before retrying once...`);
+                await new Promise(resolve => setTimeout(resolve, waitMs));
+                continue; // Retry once
+              } else {
+                logger.debug(`[AI] Groq TPM retry failed. Falling back to Ollama.`);
+                break; // Fall through
+              }
+            }
+          }
+
+          logger.info(`[AI] Groq attempt failed (${groqErr?.message}), falling back to Ollama`);
+          break; // Break on any non-429 error or if retries exhausted
+        }
+      }
+    }
+  } else if (options.useGroq && options.groqApiKey) {
+    // Fallback for when userId is not provided (just one attempt)
     try {
       logger.debug(`[AI] Routing to Groq | model=${GROQ_MODEL}`);
-      const result   = await extractWithGroq(prompt, options.groqApiKey, options.userId);
+      const result = await extractWithGroq(prompt, options.groqApiKey, options.userId);
       const enriched = applyInferenceFallback(result, emailContent);
       logger.debug('[AI] Groq extraction succeeded');
       return resolveLinks(enriched);
     } catch (groqErr: any) {
       logger.info(`[AI] Groq attempt failed (${groqErr?.message}), falling back to Ollama`);
-      // Fall through to the Ollama chain below
     }
   }
 

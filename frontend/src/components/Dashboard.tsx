@@ -454,12 +454,13 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
           );
         
           if (data?.success && data.progressStage) {
-            if (data.progressStage !== 'completed') {
+            const isFinished = ['completed', 'error', 'idle'].includes(data.progressStage);
+            if (!isFinished) {
               // If a background sync is happening, fetch latest inbox items silently
               setIsSyncing(true);
               await fetchInsights(true);
             } else {
-               if (lastStage !== 'completed') {
+               if (!['completed', 'error', 'idle'].includes(lastStage)) {
                  // Final fetch to reflect completed state
                  await fetchInsights(true);
                }
@@ -541,6 +542,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       },
       matchedLabels: ['Low Priority'],
       isActionRequired: false,
+      isCompleted: false,
       score: {
         baseScore: selectedLowPriorityItem.score,
         dynamicScore: 0,
@@ -765,6 +767,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       const MAX_WAIT_MS = 5 * 60 * 1000; // 5-minute safety cap
       const POLL_INTERVAL_MS = 2000;
       const startedAt = Date.now();
+      let finalStage = 'completed';
 
       await new Promise<void>((resolve) => {
         const poll = async () => {
@@ -776,13 +779,15 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
             const stage = data?.progressStage;
 
-            if (stage === 'completed' || stage === 'error') {
+            if (stage === 'completed' || stage === 'error' || stage === 'idle') {
+              finalStage = stage;
               resolve();
               return;
             }
 
             if (Date.now() - startedAt > MAX_WAIT_MS) {
               console.warn('[Sync] Poller timed out waiting for AI completion.');
+              finalStage = 'error';
               resolve();
               return;
             }
@@ -802,6 +807,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
       const counts = manualSyncCountsRef.current;
       let extraDetail = '';
+      let progressError = '';
       try {
         const { data: progress } = await axios.get(
           `${API_URL}/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
@@ -810,17 +816,23 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         if (progress?.aiFallbackCount > 0) {
           extraDetail = ` | Fallbacks: ${progress.aiFallbackCount}`;
         }
+        if (progress?.progressMessage && finalStage === 'error') {
+           progressError = progress.progressMessage;
+        }
       } catch {
         // non-blocking
       }
-      setNotification({
-        show: true,
-        type: 'success',
-        message: 'Sync completed',
-        detail: counts
-          ? `Processed: ${counts.processed} | Success: ${counts.succeeded} | Failed: ${counts.failed}${extraDetail}`
-          : 'Inbox is up to date.',
-      });
+      
+      if (finalStage !== 'error') {
+        setNotification({
+          show: true,
+          type: 'success',
+          message: 'Sync completed',
+          detail: counts
+            ? `Processed: ${counts.processed} | Success: ${counts.succeeded} | Failed: ${counts.failed}${extraDetail}`
+            : 'Inbox is up to date.',
+        });
+      }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       console.error('[Sync] Error:', err);

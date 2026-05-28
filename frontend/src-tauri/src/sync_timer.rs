@@ -91,7 +91,7 @@ pub fn check_on_launch(app_handle: AppHandle, port: u16) {
                     let interval_minutes = state.sync_interval_minutes.unwrap_or(180);
                     let interval_ms = interval_minutes * 60 * 1000;
 
-                    if gap_ms > interval_ms {
+                    if gap_ms > interval_ms || state.sync_state == "error" {
                         trigger_sync(port, &aid, "urgent").await;
                     }
                 }
