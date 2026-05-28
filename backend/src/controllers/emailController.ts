@@ -801,6 +801,7 @@ export const getPriorityRankingInsights = async (req: AuthRequest, res: Response
             actionRequired: result.actionRequired,
             topPriority: result.topPriority,
             others: result.others,
+            completed: result.completed,
             lowPriorityEmails: result.lowPriorityEmails,
         });
     } catch (error: any) {
@@ -813,4 +814,37 @@ export const getPriorityRankingInsights = async (req: AuthRequest, res: Response
     }
 };
 
+export const toggleEmailCompletion = async (req: AuthRequest, res: Response): Promise<void> => {
+    const uid = req.user?.uid;
+    const { insightId } = req.params;
+    const { isCompleted } = req.body;
 
+    if (!uid || !insightId || typeof insightId !== 'string') {
+        res.status(400).json({ success: false, message: 'insightId is required and must be a string' });
+        return;
+    }
+
+    if (typeof isCompleted !== 'boolean') {
+        res.status(400).json({ success: false, message: 'isCompleted must be a boolean' });
+        return;
+    }
+
+    try {
+        const insight = insightRepository.findById(insightId);
+        if (!insight || insight.user_id !== uid) {
+            res.status(404).json({ success: false, message: 'Insight not found or unauthorized' });
+            return;
+        }
+
+        insightRepository.updateCompletedStatus(insightId, isCompleted);
+
+        res.status(200).json({
+            success: true,
+            insightId,
+            isCompleted
+        });
+    } catch (error: any) {
+        logger.info('Error toggling email completion:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to toggle email completion: ' + error.message });
+    }
+};

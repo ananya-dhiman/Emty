@@ -375,6 +375,7 @@ export interface PriorityRankingItem {
   };
   matchedLabels: string[];
   isActionRequired: boolean;
+  isCompleted: boolean;
   score: PriorityRankingScoreBreakdown;
   timestamps: {
     createdAt?: Date;
@@ -589,6 +590,7 @@ export const getPriorityRanking = async (params: {
   actionRequired: PriorityRankingItem[];
   topPriority: PriorityRankingItem[];
   others: PriorityRankingItem[];
+  completed: PriorityRankingItem[];
   lowPriorityEmails: LowPriorityEmailItem[];
   config: ILabelPriorityConfig;
 }> => {
@@ -627,6 +629,7 @@ export const getPriorityRanking = async (params: {
       attachments: (() => { try { return JSON.parse(rawInsight.attachments || '[]'); } catch { return []; } })(),
       checklist: (() => { try { return JSON.parse(rawInsight.checklist || '[]'); } catch { return []; } })(),
       emails: (() => { try { return JSON.parse(rawInsight.emails || '[]'); } catch { return []; } })(),
+      isCompleted: rawInsight.is_completed === 1,
     };
     const labels = (Array.isArray(insight.labels) ? insight.labels : []) as Array<{
       labelId?: Types.ObjectId;
@@ -758,6 +761,7 @@ export const getPriorityRanking = async (params: {
       },
       matchedLabels,
       isActionRequired: insight.summary?.intent === "action_required",
+      isCompleted: insight.isCompleted,
       score: {
         baseScore,
         dynamicScore,
@@ -844,7 +848,8 @@ export const getPriorityRanking = async (params: {
     });
   }
 
-  scoredItems.sort((a, b) => {
+  // Sort active items by score/recency; completed items are sorted by when they were completed (recency)
+  const scoreSort = (a: PriorityRankingItem, b: PriorityRankingItem) => {
     if (b.score.totalScore !== a.score.totalScore) {
       return b.score.totalScore - a.score.totalScore;
     }
@@ -860,13 +865,19 @@ export const getPriorityRanking = async (params: {
       return bTime - aTime;
     }
     return b.insightId.localeCompare(a.insightId);
-  });
+  };
 
-  const actionRequiredCount = resolveEnvInt(process.env.PRIORITY_ACTION_REQUIRED_COUNT, 5);
-  const topPriorityCount = resolveEnvInt(process.env.PRIORITY_TOP_COUNT, 5);
-  const actionRequired = scoredItems.filter((item) => item.isActionRequired).slice(0, actionRequiredCount);
+  // Split completed items out first — they never appear in active boards
+  const completedItems = scoredItems.filter((item) => item.isCompleted);
+  const activeItems = scoredItems.filter((item) => !item.isCompleted);
+
+  activeItems.sort(scoreSort);
+  completedItems.sort(scoreSort);
+
+  const topPriorityCount = resolveEnvInt(process.env.PRIORITY_TOP_COUNT, 10);
+  const actionRequired = activeItems.filter((item) => item.isActionRequired);
   const actionRequiredSet = new Set(actionRequired.map((item) => item.insightId));
-  const remaining = scoredItems.filter((item) => !actionRequiredSet.has(item.insightId));
+  const remaining = activeItems.filter((item) => !actionRequiredSet.has(item.insightId));
   const topPriority = remaining.slice(0, topPriorityCount);
   const topPrioritySet = new Set(topPriority.map((item) => item.insightId));
   const others = remaining.filter((item) => !topPrioritySet.has(item.insightId));
@@ -882,6 +893,7 @@ export const getPriorityRanking = async (params: {
     actionRequired,
     topPriority,
     others,
+    completed: completedItems,
     lowPriorityEmails: lowPriorityRows.map((email) => ({
       messageId: email.message_id,
       threadId: email.thread_id,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import '../styles/Dashboard.css';
 import { CalendarSidebar } from './CalendarSidebar';
@@ -62,6 +62,7 @@ export interface PriorityRankingItem {
   };
   matchedLabels: string[];
   isActionRequired: boolean;
+  isCompleted: boolean;
   score: PriorityRankingScoreBreakdown;
   timestamps: {
     createdAt?: Date;
@@ -243,8 +244,15 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [focusItems, setFocusItems] = useState<PriorityRankingItem[]>([]);
   const [actionItems, setActionItems] = useState<PriorityRankingItem[]>([]);
   const [agendaItems, setAgendaItems] = useState<PriorityRankingItem[]>([]);
+  const [completedItems, setCompletedItems] = useState<PriorityRankingItem[]>([]);
+  const [isDoneOpen, setIsDoneOpen] = useState(false);
   const [lowPriorityItems, setLowPriorityItems] = useState<LowPriorityEmailItem[]>([]);
   const [isLowPriorityOpen, setIsLowPriorityOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState<'do' | 'done' | 'ignore'>('do');
+  const [toast, setToast] = useState<string | null>(null);
+  const doneRef = useRef<HTMLDivElement>(null);
+  const lowPriorityRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
   const [sidebarLabels, setSidebarLabels] = useState<{id: string, name: string, color: string, rank: number, count: number}[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [notification, setNotification] = useState<{show: boolean, message: string, detail?: string, type: 'success' | 'error' | 'info'} | null>(null);
@@ -273,6 +281,59 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       console.warn('[Feedback] Failed to record feedback (non-blocking):', err);
     }
   }, [feedbackMap]);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleToggleCompletion = async (insightId: string, currentStatus: boolean, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const token = localStorage.getItem('firebaseToken');
+    if (!token) return;
+
+    const newStatus = !currentStatus;
+
+    const removeFromActive = (items: PriorityRankingItem[]) =>
+      items.filter(item => item.insightId !== insightId);
+    const markInActive = (items: PriorityRankingItem[]) =>
+      items.map(item => item.insightId === insightId ? { ...item, isCompleted: newStatus } : item);
+
+    if (newStatus) {
+      const allActive = [...focusItems, ...actionItems, ...agendaItems];
+      const movingItem = allActive.find(i => i.insightId === insightId);
+      setFocusItems(removeFromActive);
+      setActionItems(removeFromActive);
+      setAgendaItems(removeFromActive);
+      if (movingItem) {
+        setCompletedItems(prev => [{ ...movingItem, isCompleted: true }, ...prev]);
+      }
+      setIsDoneOpen(true);
+      showToast('Moved to Done. Scroll down to review.');
+    } else {
+      const movingItem = completedItems.find(i => i.insightId === insightId);
+      setCompletedItems(prev => prev.filter(i => i.insightId !== insightId));
+      if (movingItem) {
+        setAgendaItems(prev => [{ ...movingItem, isCompleted: false }, ...prev]);
+      }
+      showToast('Moved back to All Items.');
+    }
+    setFocusItems(prev => markInActive(prev));
+    setActionItems(prev => markInActive(prev));
+    setAgendaItems(prev => markInActive(prev));
+
+    try {
+      await axios.put(
+        `${API_BASE_URL}/api/emails/insights/${insightId}/complete`,
+        { isCompleted: newStatus },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      await fetchInsights(true);
+    } catch (err) {
+      console.warn('[Dashboard] Failed to toggle completion', err);
+      fetchInsights(true);
+    }
+  };
 
   const fetchInsights = async (isBackground = false) => {
     const API_URL = API_BASE_URL;
@@ -307,13 +368,10 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       console.log("Priority Ranking Response Data:", response.data);
 
       if (response.data.success) {
-        console.log("Setting Focus Items:", response.data.topPriority);
-        console.log("Setting Action Items:", response.data.actionRequired);
-        console.log("Setting Agenda Items:", response.data.others);
-        console.log("Setting Low Priority Items:", response.data.lowPriorityEmails);
         setFocusItems(response.data.topPriority || []);
         setActionItems(response.data.actionRequired || []);
         setAgendaItems(response.data.others || []);
+        setCompletedItems(response.data.completed || []);
         setLowPriorityItems(response.data.lowPriorityEmails || []);
       } else {
         console.error("API returned success: false", response.data);
@@ -863,25 +921,21 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                 <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="16" y1="2" x2="16" y2="6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="8" y1="2" x2="8" y2="6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="3" y1="10" x2="21" y2="10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
                 <span className="sb-txt">Calendar</span>
               </div>
-              <div className="sb-row on">
+              <div className={`sb-row ${activeSection === 'do' ? 'on' : ''}`} onClick={() => { setActiveSection('do'); setIsActionOpen(true); mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' }); }}>
                 <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 4h14v4H5zM5 10h14v4H5zM5 16h14v4H5z" fill="currentColor"/></svg></div>
-                <span className="sb-txt">Do</span><span className="sb-ct a">7</span>
+                <span className="sb-txt">Do</span><span className="sb-ct a">{actionItems.length}</span>
               </div>
-              <div className="sb-row">
-                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M4 5l8 7-8 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M12 5l8 7-8 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
-                <span className="sb-txt">Defer</span><span className="sb-ct g">3</span>
-              </div>
-              <div className="sb-row">
-                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="5" stroke="currentColor" strokeWidth="1.6"/><path d="M8 12h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg></div>
-                <span className="sb-txt">Track</span><span className="sb-ct g">2</span>
+              <div className={`sb-row ${activeSection === 'done' ? 'on' : ''}`} onClick={() => { setActiveSection('done'); setIsDoneOpen(true); setTimeout(() => doneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); }}>
+                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+                <span className="sb-txt">Done</span><span className="sb-ct g">{completedItems.length}</span>
               </div>
               <div className="sb-row" onClick={() => onNavigate('metrics')}>
                 <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M3 3v18h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M7 11l3-3 3 3 4-4 2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
                 <span className="sb-txt">Metrics</span>
               </div>
-              <div className="sb-row">
+              <div className={`sb-row ${activeSection === 'ignore' ? 'on' : ''}`} onClick={() => { setActiveSection('ignore'); setIsLowPriorityOpen(true); setTimeout(() => lowPriorityRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); }}>
                 <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 5l14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M19 5L5 19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></div>
-                <span className="sb-txt">Ignore</span><span className="sb-ct g">124</span>
+                <span className="sb-txt">Ignore</span><span className="sb-ct g">{lowPriorityItems.length}</span>
               </div>
             </div>
 
@@ -935,7 +989,14 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         />
 
         {/* MAIN */}
-        <div className="main">
+        <div className="main" ref={mainRef}>
+          {/* Toast notification */}
+          {toast && (
+            <div className="done-toast">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              {toast}
+            </div>
+          )}
           {error && (
             <div style={{ padding: '12px 20px', background: 'var(--red)', color: '#fff', fontSize: '13px', borderRadius: '6px', marginBottom: '20px' }}>
               {error}
@@ -970,7 +1031,9 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                   {!loading && actionItems.length === 0 && (
                      <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>No urgent actions required.</div>
                   )}
-                  {!loading && actionItems.map((item) => (
+                  {!loading && actionItems.map((item) => {
+                    const nearestDeadline = item.dates?.filter(d => d.type === 'deadline').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+                    return (
                     <div
                       className={`kard ${selectedInsightId === item.insightId ? 'sel' : ''}`}
                       key={item.insightId}
@@ -978,6 +1041,15 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                     >
                       <div className="kard-top">
                         <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
+                        <button
+                          className="kard-check-btn"
+                          onClick={(e) => handleToggleCompletion(item.insightId, !!item.isCompleted, e)}
+                          title="Mark as done"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                          </svg>
+                        </button>
                       </div>
                       <div className="ks">{item.summary.shortSnippet || "Action required"}</div>
                       <div className="kard-tags">
@@ -985,12 +1057,18 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                         {item.matchedLabels.slice(0, 1).map(lbl => (
                           <span className="tag tn" key={lbl}>{lbl}</span>
                         ))}
+                        {nearestDeadline && (
+                          <span className="tag ta">
+                            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '2px'}}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                            Due {new Date(nearestDeadline.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                          </span>
+                        )}
                         <span className="kt">
                           {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
                         </span>
                       </div>
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
             </div>
@@ -1024,7 +1102,9 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                        {isSyncing ? 'Evaluating emails in the background. Your most important emails will pop up here shortly...' : 'Inbox zero. Great job!'}
                      </div>
                   )}
-                  {!loading && focusItems.map((item) => (
+                  {!loading && focusItems.map((item) => {
+                    const nearestDeadline = item.dates?.filter(d => d.type === 'deadline').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+                    return (
                     <div
                       className={`kard ${selectedInsightId === item.insightId ? 'sel' : ''}`}
                       key={item.insightId}
@@ -1032,18 +1112,33 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                     >
                       <div className="kard-top">
                         <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
+                        <button
+                          className="kard-check-btn"
+                          onClick={(e) => handleToggleCompletion(item.insightId, !!item.isCompleted, e)}
+                          title="Mark as done"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                          </svg>
+                        </button>
                       </div>
                       <div className="ks">{item.summary.shortSnippet || "No summary available"}</div>
                       <div className="kard-tags">
                         {item.matchedLabels.slice(0, 2).map(lbl => (
                           <span className="tag" key={lbl}>{lbl}</span>
                         ))}
+                        {nearestDeadline && (
+                          <span className="tag ta">
+                            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '2px'}}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                            Due {new Date(nearestDeadline.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                          </span>
+                        )}
                         <span className="kt">
                           {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
                         </span>
                       </div>
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
             </div>
@@ -1080,13 +1175,81 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                   </div>
                 </div>
                 <div className="ar-time">
-                   {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
+                  {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
                 </div>
+                <button
+                  className="ar-check-btn"
+                  onClick={(e) => handleToggleCompletion(item.insightId, !!item.isCompleted, e)}
+                  title="Mark as done"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                  </svg>
+                </button>
               </div>
             ))}
 
+            {/* DONE SECTION */}
             {!loading && (
-              <div className="low-priority-wrap">
+              <div className="done-wrap" ref={doneRef}>
+                <button
+                  className="done-head"
+                  type="button"
+                  onClick={() => setIsDoneOpen((prev) => !prev)}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  <span className="done-head-title">Done</span>
+                  <span className="done-head-count">{completedItems.length}</span>
+                  <span className={`done-head-toggle ${isDoneOpen ? 'open' : ''}`}>
+                    <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </span>
+                </button>
+                {isDoneOpen && (
+                  <div className="done-list">
+                    {completedItems.length === 0 && (
+                      <div className="done-empty">No completed items yet.</div>
+                    )}
+                    {completedItems.map((item) => (
+                      <div
+                        className={`arow done-row ${selectedInsightId === item.insightId ? 'sel' : ''}`}
+                        key={item.insightId}
+                        onClick={() => selectEmail(item)}
+                      >
+                        <div className="ar-body">
+                          <div className="ar-from" style={{ textDecoration: 'line-through' }}>{item.from.name || item.from.email}</div>
+                          <div className="ar-snip" style={{ textDecoration: 'line-through' }}>{item.summary.shortSnippet}</div>
+                          <div className="ar-tags">
+                            {item.matchedLabels.slice(0, 2).map((lbl) => (
+                              <span className="ar-label-chip" key={lbl} style={getAgendaLabelStyle(lbl)}>{lbl}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="ar-time">
+                          {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
+                        </div>
+                        <button
+                          className="ar-check-btn ar-check-btn--done"
+                          onClick={(e) => handleToggleCompletion(item.insightId, true, e)}
+                          title="Undo"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+
+            {!loading && (
+              <div className="low-priority-wrap" ref={lowPriorityRef}>
                 <button
                   className="low-priority-head"
                   type="button"

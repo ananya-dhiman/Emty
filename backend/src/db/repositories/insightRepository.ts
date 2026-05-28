@@ -35,11 +35,12 @@ export interface InsightRow {
   verification_status: string;
   failed_verification_groups: string;
   source: string | null;
+  is_completed: number;
   created_at: number;
   updated_at: number;
 }
 
-export function create(data: Omit<InsightRow, "id" | "created_at" | "updated_at">): InsightRow {
+export function create(data: Omit<InsightRow, "id" | "created_at" | "updated_at" | "is_completed"> & { is_completed?: number }): InsightRow {
   const db = getDb();
   const id = randomUUID();
   const now = Date.now();
@@ -50,8 +51,8 @@ export function create(data: Omit<InsightRow, "id" | "created_at" | "updated_at"
       labels, label_suggestions, importance_score, base_score, base_score_breakdown, base_score_computed_at,
       summary_snippet, summary_intent, dates, attachments, checklist, state_relevance, state_first_seen_at,
       state_last_signal_at, state_last_verified_at, extracted_facts, embedding, needs_review, ai_confidence,
-      ai_uncertainty_source, pipeline_stage_reached, verification_status, failed_verification_groups, source, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ai_uncertainty_source, pipeline_stage_reached, verification_status, failed_verification_groups, source, is_completed, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -88,6 +89,7 @@ export function create(data: Omit<InsightRow, "id" | "created_at" | "updated_at"
     data.verification_status || 'pending',
     data.failed_verification_groups || '[]',
     data.source,
+    data.is_completed || 0,
     now,
     now
   );
@@ -95,6 +97,7 @@ export function create(data: Omit<InsightRow, "id" | "created_at" | "updated_at"
   return {
     id,
     ...data,
+    is_completed: data.is_completed || 0,
     created_at: now,
     updated_at: now,
   };
@@ -227,5 +230,15 @@ export function findAllByAccountId(accountId: string): InsightRow[] {
     WHERE account_id = ?
   `);
   return stmt.all(accountId) as InsightRow[];
+}
+
+export function updateCompletedStatus(insightId: string, isCompleted: boolean): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE insights
+    SET is_completed = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(isCompleted ? 1 : 0, Date.now(), insightId);
 }
 

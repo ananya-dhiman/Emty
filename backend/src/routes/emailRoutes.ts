@@ -12,6 +12,7 @@ import {
   updateLabelPriorityOrder,
   reviewLabelPriorityOrder,
   getPriorityRankingInsights,
+  toggleEmailCompletion,
 } from '../controllers/emailController';
 import { getSyncProgress } from '../controllers/syncProgressController';
 
@@ -41,6 +42,7 @@ router.get('/label-priorities', verifyToken, getLabelPriorityOrder);
 router.put('/label-priorities', verifyToken, updateLabelPriorityOrder);
 router.post('/label-priorities/review', verifyToken, reviewLabelPriorityOrder);
 router.get('/priority-ranking', verifyToken, getPriorityRankingInsights);
+router.put('/insights/:insightId/complete', verifyToken, toggleEmailCompletion);
 
 // POST /api/emails/sync - Incremental email sync (manual trigger)
 // Protected route (needs verifyToken middleware)

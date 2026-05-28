@@ -49,19 +49,6 @@ export function WidgetApp() {
   const gmailAccountIdRef = useRef<string | null>(null);
   const apiReadyRef = useRef(false);
 
-  const loadSubmitted = () => {
-    try {
-      const stored = localStorage.getItem('emty-widget-submitted');
-      if (stored) setSubmitted(new Set(JSON.parse(stored)));
-    } catch (e) {
-      console.warn('Failed to load submitted tasks', e);
-    }
-  };
-
-  const saveSubmitted = (newSet: Set<string>) => {
-    setSubmitted(newSet);
-    localStorage.setItem('emty-widget-submitted', JSON.stringify(Array.from(newSet)));
-  };
 
   /**
    * Returns the freshest available token.
@@ -186,6 +173,11 @@ export function WidgetApp() {
       if (rankingRes.data.success) {
         setFilteredCount(rankingRes.data.lowPriorityEmails?.length ?? 0);
         setItems(mapItems(rankingRes.data));
+        // Derive completed set from backend — single source of truth, no localStorage
+        const completedFromApi = new Set<string>(
+          (rankingRes.data.completed || []).map((item: any) => String(item.insightId))
+        );
+        setSubmitted(completedFromApi);
       } else {
         setWidgetError('Failed to load emails from server.');
       }
@@ -271,8 +263,6 @@ export function WidgetApp() {
     const root = document.getElementById('root');
     if (root) root.classList.add('widget-mode');
 
-    loadSubmitted();
-
     // Ensure the API URL is resolved via Tauri IPC before any requests
     const bootstrap = async () => {
       if (!apiReadyRef.current) {
@@ -342,15 +332,37 @@ export function WidgetApp() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const toggleSubmit = (id: string, e: React.MouseEvent) => {
+  const toggleSubmit = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const newSet = new Set(submitted);
-    if (newSet.has(id)) {
-      newSet.delete(id);
-    } else {
-      newSet.add(id);
+    const isCurrentlyDone = submitted.has(id);
+    const newStatus = !isCurrentlyDone;
+
+    // Optimistic visual update
+    setSubmitted(prev => {
+      const next = new Set(prev);
+      newStatus ? next.add(id) : next.delete(id);
+      return next;
+    });
+
+    try {
+      const token = getToken();
+      if (!token) return;
+      await axios.put(
+        `${API_BASE_URL}/api/emails/insights/${id}/complete`,
+        { isCompleted: newStatus },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      // Immediately re-fetch so the list re-sorts authoritatively from the server
+      await fetchData();
+    } catch (err) {
+      console.warn('[Widget] Failed to sync completion status', err);
+      // Revert optimistic update on failure
+      setSubmitted(prev => {
+        const next = new Set(prev);
+        isCurrentlyDone ? next.add(id) : next.delete(id);
+        return next;
+      });
     }
-    saveSubmitted(newSet);
   };
 
   const getTimeLeftTier = (due: Date | null) => {

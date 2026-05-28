@@ -43,6 +43,12 @@ export function runMigrations(db: Database.Database): void {
       logger.info("Applied migration v4: Add is_active to accounts");
     }
 
+    if (currentVersion < 5) {
+      migration_v5(db);
+      db.prepare("INSERT INTO schema_version (version) VALUES (5)").run();
+      logger.info("Applied migration v5: Add is_completed to insights");
+    }
+
     const finalVersion = db
       .prepare("SELECT MAX(version) as version FROM schema_version")
       .get() as { version: number | null };
@@ -325,3 +331,19 @@ function migration_v4(db: Database.Database): void {
     logger.info("Migration v4 failed (non-critical):", error);
   }
 }
+
+/**
+ * Migration v5: Add is_completed column to insights table
+ */
+function migration_v5(db: Database.Database): void {
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(insights)").all() as any[];
+    if (!tableInfo.some((col) => col.name === "is_completed")) {
+      db.exec("ALTER TABLE insights ADD COLUMN is_completed INTEGER DEFAULT 0");
+      logger.info("Added is_completed column to insights table");
+    }
+  } catch (error) {
+    logger.info("Migration v5 failed (non-critical):", error);
+  }
+}
+
