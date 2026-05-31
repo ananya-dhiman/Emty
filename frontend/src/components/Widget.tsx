@@ -3,6 +3,7 @@ import axios from 'axios';
 import '../styles/Widget.css';
 import { API_BASE_URL, initApi } from '../utils/api';
 import type { PriorityRankingItem } from './Dashboard';
+import { invoke } from '@tauri-apps/api/core';
 
 const openExternalLink = (url: string) => {
   const a = document.createElement('a');
@@ -54,6 +55,14 @@ export function WidgetApp() {
   const [filteredCount, setFilteredCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [widgetError, setWidgetError] = useState<string | null>(null);
+
+  const openMainApp = async () => {
+    try {
+      await invoke('open_main_window');
+    } catch (e) {
+      console.warn('[Widget] Could not open main window', e);
+    }
+  };
 
   // Resolved after initApi() runs — shared across fetchData and doSync
   const gmailAccountIdRef = useRef<string | null>(null);
@@ -502,6 +511,19 @@ export function WidgetApp() {
           </div>
           <div className="w-hd-right">
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button
+                id="widget-open-app-btn"
+                className="w-open-btn"
+                onClick={openMainApp}
+                aria-label="Open Emty app"
+                title="Open Emty"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="9" y1="3" x2="9" y2="21"/>
+                </svg>
+                OPEN
+              </button>
               <button
                 className="w-sync-btn"
                 onClick={doSync}

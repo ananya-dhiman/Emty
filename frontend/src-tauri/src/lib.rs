@@ -65,6 +65,15 @@ async fn set_active_account(state: State<'_, AppState>, account_id: String) -> R
     Ok(())
 }
 
+#[tauri::command]
+fn open_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -207,6 +216,21 @@ pub fn run() {
             }
 
             // ---------------------------------------------------------------
+            // Position the widget in the bottom-right corner on startup
+            // ---------------------------------------------------------------
+            if let Some(widget_win) = app.get_webview_window("widget") {
+                if let Ok(Some(monitor)) = widget_win.current_monitor() {
+                    let size = monitor.size();
+                    let scale = monitor.scale_factor();
+                    let physical_width = (340.0 * scale) as u32;
+                    let physical_height = (380.0 * scale) as u32;
+                    let y = size.height.saturating_sub(physical_height + (60.0 * scale) as u32);
+                    let x = size.width.saturating_sub(physical_width + (20.0 * scale) as u32);
+                    let _ = widget_win.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+                }
+            }
+
+            // ---------------------------------------------------------------
             // Tray Setup
             // ---------------------------------------------------------------
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -313,7 +337,8 @@ pub fn run() {
             get_ollama_status,
             get_gpu_info,
             restart_ollama,
-            set_active_account
+            set_active_account,
+            open_main_window
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
