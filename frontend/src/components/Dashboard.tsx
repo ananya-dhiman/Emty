@@ -1592,7 +1592,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               className="det-btn pri"
               href={
                 selectedEmail
-                  ? `https://mail.google.com/mail/u/0/#all/${selectedEmail.gmailThreadId?.trim() || selectedEmail.messageId?.trim() || ''}`
+                  ? `https://accounts.google.com/AccountChooser?Email=${user?.email ? encodeURIComponent(user.email) : ''}&continue=${encodeURIComponent(`https://mail.google.com/mail/#all/${selectedEmail.gmailThreadId?.trim() || selectedEmail.messageId?.trim() || ''}`)}`
                   : undefined
               }
               target="_blank"

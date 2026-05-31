@@ -76,26 +76,26 @@
 
   /* Boards */
   --focus-badge-text:  #15803D;
-  --focus-board-bg:    #F4FAF6;
-  --focus-board-hd:    #E8F5E9;
+  --focus-board-bg:    transparent;
+  --focus-board-hd:    transparent;
   --focus-board-border:rgba(21, 128, 61, 0.2);
-  --focus-card-bg:     #FFFFFF;
-  --focus-card-hover:  #F1F9F3;
+  --focus-card-bg:     var(--surface);
+  --focus-card-hover:  var(--surface-2);
   --focus-bar:         var(--green);
   --focus-label:       var(--green);
   --focus-badge-border:var(--green-border);
   --focus-badge-bg:    var(--green-bg);
 
-  --action-badge-text:  #E11D48;
-  --action-board-bg:    #FFF5F6;
-  --action-board-hd:    #FFF0F1;
-  --action-board-border:rgba(225, 29, 72, 0.2);
-  --action-card-bg:     #FFFFFF;
-  --action-card-hover:  #FFEBEE;
-  --action-bar:         var(--red);
-  --action-label:       var(--red);
-  --action-badge-border:var(--red-border);
-  --action-badge-bg:    var(--red-bg);
+  --action-badge-text:  var(--accent);
+  --action-board-bg:    transparent;
+  --action-board-hd:    transparent;
+  --action-board-border:rgba(0, 229, 255, 0.2);
+  --action-card-bg:     var(--surface);
+  --action-card-hover:  var(--surface-2);
+  --action-bar:         var(--accent);
+  --action-label:       var(--accent);
+  --action-badge-border:var(--accent);
+  --action-badge-bg:    var(--accent-lt);
 }
 /* ───────────────── DARK MODE ───────────────── */
 [data-mode="dark"] {
@@ -156,16 +156,16 @@
   --focus-badge-border:var(--green-border);
   --focus-badge-bg:    var(--green-bg);
 
-  --action-badge-text:  #FFFFFF;
+  --action-badge-text:  var(--accent);
   --action-board-bg:    #050505;
   --action-board-hd:    #0D0705;
-  --action-board-border:#3A1414;
+  --action-board-border:#00E5FF;
   --action-card-bg:     #1A0F0F;
   --action-card-hover:  #241414;
-  --action-bar:         var(--red);
-  --action-label:       var(--red);
-  --action-badge-border:var(--red-border);
-  --action-badge-bg:    var(--red-bg);
+  --action-bar:         var(--accent);
+  --action-label:       var(--accent);
+  --action-badge-border:var(--accent);
+  --action-badge-bg:    var(--accent-lt);
 }
 
 /* ───────────────── LOGO SWITCHING ───────────────── */

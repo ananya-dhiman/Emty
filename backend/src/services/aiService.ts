@@ -90,6 +90,24 @@ export const parseAIResponse = (text: string): AIInsightExtraction => {
   }
 };
 
+const cleanNoiseText = (text: string): string => {
+  if (!text) return text;
+  return text
+    // Remove common invisible/formatting characters (e.g. zero-width spaces, combining grapheme joiner)
+    .replace(/[\u00AD\u200B-\u200D\u2060\uFEFF\u034F\u034f]/g, '')
+    // Remove repeated separators (---, ===, ___, ***)
+    .replace(/[\-_=~*]{2,}/g, ' ')
+    // Remove email quote markers like ">>>" or "> > >"
+    .replace(/(^|\s)([>\s]+)(?=\s|$)/g, ' ')
+    // Remove common image placeholders like [image: ...]
+    .replace(/\[image:[^\]]+\]/gi, '')
+    // Remove raw URLs in angle brackets like <https://...>
+    .replace(/<https?:\/\/[^>]+>/gi, '')
+    // Replace multiple whitespace characters with a single space
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
 const buildPrompt = (emailContent: {
   from: string;
   subject: string;
@@ -133,7 +151,7 @@ ${candidatesText}
 ${linksBlock}
 
 Body:
-${emailContent.body.split(/\s+/).slice(0, 600).join(' ')}
+${cleanNoiseText(emailContent.body).split(/\s+/).slice(0, 600).join(' ')}
 
 Extract and return a JSON object with:
 1. intent: One of 'action_required', 'event', 'opportunity', 'information', 'waiting', 'noise'
@@ -529,16 +547,20 @@ export const extractInsightsFromEmail = async (
   let idCounter = 1;
 
   for (const link of emailContent.preExtractedLinks || []) {
-    const anchor = link.anchorText || '';
-    if (noiseRegex.test(anchor)) continue;
+    const rawAnchor = link.anchorText || '';
+    const anchor = cleanNoiseText(rawAnchor);
+    if (noiseRegex.test(anchor) || noiseRegex.test(rawAnchor)) continue;
 
     const id = `L${idCounter++}`;
     linkMap.set(id, link.url);
-    linkMapAnchors.set(id, anchor);
+    linkMapAnchors.set(id, rawAnchor);
 
     const displayParts = [];
     if (anchor) displayParts.push(`Anchor: "${anchor}"`);
-    if (link.context) displayParts.push(`Context: "${link.context}"`);
+    if (link.context) {
+      const cleanedContext = cleanNoiseText(link.context);
+      if (cleanedContext) displayParts.push(`Context: "${cleanedContext}"`);
+    }
 
     promptLinks.push({
       id,

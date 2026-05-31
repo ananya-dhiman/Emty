@@ -21,6 +21,7 @@ struct AppState {
     backend_port: u16,
     ollama: Arc<OllamaManager>,
     gpu_info: GpuInfo,
+    node_child: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -126,15 +127,6 @@ pub fn run() {
             });
 
             // ---------------------------------------------------------------
-            // Manage state
-            // ---------------------------------------------------------------
-            app.manage(AppState {
-                backend_port: port,
-                ollama: ollama_manager.clone(),
-                gpu_info,
-            });
-
-            // ---------------------------------------------------------------
             // Spawn the Node sidecar (existing logic, now with OLLAMA_URL)
             // ---------------------------------------------------------------
             // Tauri v2 preserves the directory structure.
@@ -163,7 +155,7 @@ pub fn run() {
 
             let target_model = ollama_manager.selected_model.lock().unwrap().clone();
 
-            let (mut rx, _child) = app
+            let (mut rx, child) = app
                 .shell()
                 .sidecar("node")
                 .expect("Failed to create sidecar command")
@@ -177,6 +169,16 @@ pub fn run() {
                 .env("OLLAMA_MODEL", &target_model)
                 .spawn()
                 .expect("Failed to spawn node sidecar");
+
+            // ---------------------------------------------------------------
+            // Manage state
+            // ---------------------------------------------------------------
+            app.manage(AppState {
+                backend_port: port,
+                ollama: ollama_manager.clone(),
+                gpu_info,
+                node_child: Mutex::new(Some(child)),
+            });
 
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = rx.recv().await {
@@ -220,6 +222,11 @@ pub fn run() {
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => {
+                        let state: tauri::State<AppState> = app.state();
+                        if let Some(child) = state.node_child.lock().unwrap().take() {
+                            let _ = child.kill();
+                        }
+                        state.ollama.stop();
                         app.exit(0);
                     }
                     "sync" => {
@@ -249,7 +256,7 @@ pub fn run() {
                                     let size = monitor.size();
                                     let scale = monitor.scale_factor();
                                     let physical_width = (340.0 * scale) as u32;
-                                    let physical_height = (240.0 * scale) as u32;
+                                    let physical_height = (380.0 * scale) as u32;
                                     let y = size.height.saturating_sub(physical_height + (50.0 * scale) as u32);
                                     let x = size.width.saturating_sub(physical_width + (20.0 * scale) as u32);
                                     let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
@@ -308,6 +315,16 @@ pub fn run() {
             restart_ollama,
             set_active_account
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| match event {
+            tauri::RunEvent::Exit => {
+                let state: tauri::State<AppState> = app_handle.state();
+                if let Some(child) = state.node_child.lock().unwrap().take() {
+                    let _ = child.kill();
+                }
+                state.ollama.stop();
+            }
+            _ => {}
+        });
 }

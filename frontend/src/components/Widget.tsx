@@ -4,6 +4,15 @@ import '../styles/Widget.css';
 import { API_BASE_URL, initApi } from '../utils/api';
 import type { PriorityRankingItem } from './Dashboard';
 
+const openExternalLink = (url: string) => {
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+};
+
 const normalizeDateValue = (raw: any): Date | null => {
   if (!raw) return null;
   if (raw instanceof Date) return Number.isNaN(raw.getTime()) ? null : raw;
@@ -26,6 +35,7 @@ interface WidgetCardData {
   id: string;
   initials: string;
   from: string;
+  intent: string;
   title: string;
   summary: string;
   due: Date | null;
@@ -47,6 +57,7 @@ export function WidgetApp() {
 
   // Resolved after initApi() runs — shared across fetchData and doSync
   const gmailAccountIdRef = useRef<string | null>(null);
+  const emailRef = useRef<string | null>(null);
   const apiReadyRef = useRef(false);
 
 
@@ -75,6 +86,9 @@ export function WidgetApp() {
       const res = await axios.get(`${API_BASE_URL}/api/auth/verify`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.data?.user?.email) {
+        emailRef.current = String(res.data.user.email);
+      }
       const accountId = res.data?.user?.gmailAccountId
         ? String(res.data.user.gmailAccountId)
         : null;
@@ -114,16 +128,18 @@ export function WidgetApp() {
 
       const hasAttach = Array.isArray(item.attachments) && item.attachments.length > 0;
       const hasLink =
-        item.importantLinksByEmail && Object.keys(item.importantLinksByEmail).length > 0;
+        item.importantLinksByEmail && 
+        Object.values(item.importantLinksByEmail).some((links: any) => Array.isArray(links) && links.length > 0);
 
       return {
         id: item.insightId,
         initials: initials || '?',
         from: fromName,
+        intent: item.summary?.intent || '',
         title:
-          item.summary?.intent ||
           item.emailContextById?.[item.gmailThreadId]?.subject ||
-          'Action Required',
+          item.summary?.shortSnippet ||
+          'No Subject',
         summary: item.summary?.shortSnippet || '',
         due,
         label: item.matchedLabels?.[0] || 'Task',
@@ -403,7 +419,14 @@ export function WidgetApp() {
         t.tier === 'overdue' ? 'w-av-red' : t.tier === 'today' ? 'w-av-amber' : 'w-av-muted';
 
       return (
-        <div key={d.id} className={`w-dcard ${tierCls}`}>
+        <div key={d.id} className={`w-dcard ${tierCls}`} onClick={() => {
+           const threadId = d.originalItem.gmailThreadId?.trim() || d.originalItem.messageId?.trim() || '';
+           if (threadId) {
+             const userEmail = emailRef.current || '';
+             const url = `https://accounts.google.com/AccountChooser?Email=${encodeURIComponent(userEmail)}&continue=${encodeURIComponent(`https://mail.google.com/mail/#all/${threadId}`)}`;
+             openExternalLink(url);
+           }
+        }} style={{ cursor: 'pointer' }}>
           <div className="w-dc-top">
             <div className={`w-dc-av ${avCls}`}>{d.initials}</div>
             <div className="w-dc-body">
@@ -420,20 +443,32 @@ export function WidgetApp() {
             </div>
           </div>
           <div className="w-dc-actions">
+            {d.intent && (
+              <span className="w-dc-intent">{d.intent.replace(/_/g, ' ')}</span>
+            )}
             <span className="w-lbl-tag">{d.label}</span>
-            {d.hasAttach && (
-              <button className="w-ibtn w-has-attach" title="Has attachment">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-              </button>
-            )}
             {d.hasLink && (
-              <button className="w-ibtn w-has-link" title="Has link">
+              <button
+                className="w-ibtn w-has-link"
+                title="Open link"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  let firstLink = '';
+                  if (d.originalItem.importantLinksByEmail) {
+                    for (const sourceId in d.originalItem.importantLinksByEmail) {
+                      const links = d.originalItem.importantLinksByEmail[sourceId];
+                      if (links && links.length > 0) {
+                        firstLink = links[0].url;
+                        break;
+                      }
+                    }
+                  }
+                  if (firstLink) {
+                    openExternalLink(firstLink);
+                  }
+                }}
+              >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-              </button>
-            )}
-            {d.needsReply && (
-              <button className="w-ibtn w-reply-icon" title="Needs reply">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
               </button>
             )}
             <button

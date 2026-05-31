@@ -149,6 +149,8 @@ export const extractLinksFromPayload = (payload: any): PreExtractedLink[] => {
         const decoded = Buffer.from(payload.body.data, 'base64').toString('utf-8');
         if (decoded.includes('<') && decoded.includes('>')) {
             processRawHtml(decoded);
+            // Also scan as plain text to catch bare URLs in HTML bodies
+            processRawText(htmlToText(decoded, { wordwrap: false, selectors: [{ selector: 'a', options: { ignoreHref: false, noLinkBrackets: false } }, { selector: 'img', format: 'skip' }, { selector: 'script', format: 'skip' }, { selector: 'style', format: 'skip' }] }));
         } else {
             processRawText(decoded);
         }
