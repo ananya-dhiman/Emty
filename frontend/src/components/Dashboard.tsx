@@ -255,6 +255,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const mainRef = useRef<HTMLDivElement>(null);
   const [sidebarLabels, setSidebarLabels] = useState<{id: string, name: string, color: string, rank: number, count: number}[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStats, setSyncStats] = useState<{ total: number, processed: number } | null>(null);
   const [notification, setNotification] = useState<{show: boolean, message: string, detail?: string, type: 'success' | 'error' | 'info'} | null>(null);
   // Holds counts from the initial sync HTTP response so the poller can surface them on completion
   const manualSyncCountsRef = React.useRef<{processed: number; succeeded: number; failed: number} | null>(null);
@@ -452,6 +453,10 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             `${API_BASE_URL}/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
+
+          if (data?.success) {
+            setSyncStats({ total: data.totalCandidates || 0, processed: data.processedCandidates || 0 });
+          }
         
           if (data?.success && data.progressStage) {
             const isFinished = ['completed', 'error', 'idle'].includes(data.progressStage);
@@ -777,6 +782,10 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               { headers: { Authorization: `Bearer ${token}` } }
             );
 
+            if (data?.success) {
+              setSyncStats({ total: data.totalCandidates || 0, processed: data.processedCandidates || 0 });
+            }
+
             const stage = data?.progressStage;
 
             if (stage === 'completed' || stage === 'error' || stage === 'idle') {
@@ -813,6 +822,9 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
           `${API_URL}/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
+        if (progress?.success) {
+          setSyncStats({ total: progress.totalCandidates || 0, processed: progress.processedCandidates || 0 });
+        }
         if (progress?.aiFallbackCount > 0) {
           extraDetail = ` | Fallbacks: ${progress.aiFallbackCount}`;
         }
@@ -901,6 +913,12 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               <button className={`tgl-btn ${theme === 'light' ? 'on' : ''}`} onClick={() => setTheme('light')}>Light</button>
               <button className={`tgl-btn ${theme === 'dark' ? 'on' : ''}`} onClick={() => setTheme('dark')}>Dark</button>
             </div>
+            {syncStats && syncStats.total > 0 && (
+              <div style={{ marginRight: '16px', fontSize: '11.5px', color: 'var(--text-3)', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>AI Queue:</span>
+                <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{syncStats.processed} / {syncStats.total}</span>
+              </div>
+            )}
             <button 
               className={`sync-pill ${isSyncing ? 'syncing' : ''}`}
               onClick={handleSync} 

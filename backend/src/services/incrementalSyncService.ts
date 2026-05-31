@@ -692,8 +692,8 @@ export class IncrementalSyncService {
           progressPercent: 99,
           progressStage: "finalizing",
           progressMessage: "Staging complete, background workers starting...",
-          totalCandidates: totalToProcess,
-          processedCandidates: processed,
+          totalCandidates: 0,
+          processedCandidates: 0,
         });
       } else {
         await this.updateProgress(normalizedAccountId, {

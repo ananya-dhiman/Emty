@@ -47,14 +47,33 @@ interface WidgetCardData {
   originalItem: PriorityRankingItem;
 }
 
+/**
+ * Converts a Date into a short human-readable relative-time string.
+ * e.g. 'just now', '2 min ago', '1 hr ago', '3 hrs ago'
+ */
+function formatSyncTime(date: Date | null): string {
+  if (!date) return 'never synced';
+  const diffMs = Date.now() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} min ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr === 1) return '1 hr ago';
+  return `${diffHr} hrs ago`;
+}
+
 export function WidgetApp() {
   const [items, setItems] = useState<WidgetCardData[]>([]);
   const [submitted, setSubmitted] = useState<Set<string>>(new Set());
   const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSyncText, setLastSyncText] = useState('synced just now');
+  const [lastSyncText, setLastSyncText] = useState('never synced');
   const [filteredCount, setFilteredCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [widgetError, setWidgetError] = useState<string | null>(null);
+
+  // Stores the actual Date of last completed sync so the ticker can reformat it
+  const lastSyncAtRef = useRef<Date | null>(null);
 
   const openMainApp = async () => {
     try {
@@ -274,7 +293,11 @@ export function WidgetApp() {
 
       // Refresh cards after sync is truly done
       await fetchData();
-      setLastSyncText('synced just now');
+
+      // Record the real completion timestamp
+      const now = new Date();
+      lastSyncAtRef.current = now;
+      setLastSyncText(formatSyncTime(now));
     } catch (e) {
       console.error('[Widget] Sync error', e);
       setLastSyncText('sync failed');
@@ -295,9 +318,37 @@ export function WidgetApp() {
         apiReadyRef.current = true;
       }
       await fetchData();
+
+      // Seed lastSyncAt from backend so the display is accurate on first open
+      try {
+        const token = getToken();
+        const accountId = gmailAccountIdRef.current;
+        if (token && accountId) {
+          const { data } = await axios.get(
+            `${API_BASE_URL}/api/emails/sync-progress?accountId=${accountId}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (data?.updatedAt) {
+            const d = new Date(data.updatedAt);
+            if (!Number.isNaN(d.getTime())) {
+              lastSyncAtRef.current = d;
+              setLastSyncText(formatSyncTime(d));
+            }
+          }
+        }
+      } catch {
+        // non-blocking — display stays at 'never synced'
+      }
     };
 
     void bootstrap();
+
+    // Ticker: update the relative-time label every 30 seconds
+    const ticker = setInterval(() => {
+      if (!isSyncing) {
+        setLastSyncText(formatSyncTime(lastSyncAtRef.current));
+      }
+    }, 30_000);
 
     // Background polling — refresh widget cards while a sync is active
     // This mirrors the Dashboard's background progress polling
@@ -353,6 +404,7 @@ export function WidgetApp() {
       document.body.classList.remove('widget-mode');
       if (root) root.classList.remove('widget-mode');
       clearInterval(pollInterval);
+      clearInterval(ticker);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

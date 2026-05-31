@@ -285,7 +285,7 @@ body.widget-mode {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 8.5px;
   font-weight: 500;
-  color: #00E5FF;
+  color: var(--amber, #FFC857);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   background: rgba(255, 200, 87, 0.1);

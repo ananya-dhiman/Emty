@@ -24,6 +24,8 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
         progress_percent: 60,
         progress_stage: "scoring_emails",
         progress_message: "Evaluating priority of emails...",
+        total_candidates: 0,
+        processed_candidates: 0,
         last_progress_at: Date.now(),
     });
 
@@ -90,7 +92,7 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
         for (const item of allScored) {
             // Only consider promoting to 'top' if it wasn't already marked as 'low' by the rules engine
             if (item.priority_state !== 'low') {
-                const newState = rank <= TOP_K ? 'top' : 'low';
+                const newState = rank <= TOP_K ? 'top' : 'pending';
                 if (item.priority_state !== newState) {
                     emailMessageRepository.updatePriorityState(item.id, newState);
                 }

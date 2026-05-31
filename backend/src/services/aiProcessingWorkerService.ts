@@ -130,8 +130,9 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
 
     // Ensure we process only high-priority emails that are score-qualified.
     const candidates = await emailMessageRepository.findUnprocessed(accountId);
+    const totalRemaining = emailMessageRepository.countUnprocessed(accountId);
     logger.debug(
-        `[AI WORKER] Candidate query applied | priority=top | aiProcessed=false | minScore=${MIN_AI_SCORE}`
+        `[AI WORKER] Candidate query applied | priority=top/pending | aiProcessed=false | minScore=${MIN_AI_SCORE} | totalRemaining=${totalRemaining}`
     );
     
     if (candidates.length === 0) {
@@ -149,7 +150,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         return weightA - weightB;
     });
 
-    logger.debug(`[AI WORKER] Found ${candidates.length} emails to process with AI`);
+    logger.debug(`[AI WORKER] Found ${candidates.length} emails to process with AI (Batch limit)`);
 
     // Prepare context models
     const assignableLabels = await getAssignableLabels(gmailAccount.userId, accountId);
@@ -172,7 +173,9 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         await syncCheckpointRepository.updateProgress(accountId, {
             progress_percent: 60 + Math.floor(ratio * 39), // from 60 to 99
             progress_stage: "processing_emails",
-            progress_message: `Running 4-Stage AI Pipeline on emails (${processedCount}/${totalCount})`,
+            progress_message: `Running 4-Stage AI Pipeline on emails (${processedCount}/${totalRemaining})`,
+            total_candidates: totalRemaining,
+            processed_candidates: processedCount,
         });
 
         const promises = batch.map(async (email) => {
@@ -493,6 +496,35 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
     // Complete Progress Updates
     await updateProgressComplete(accountId);
     logger.debug(`[AI WORKER] Completed processing for account ${accountId}`);
+
+    // --- CONTINUOUS BACKGROUND DRAIN ---
+    // Check if more pending emails remain in the backlog (from scoring worker's priority cutoff).
+    // If so, re-run scoring to promote the next batch to 'top' and immediately process them.
+    // This loop continues until the entire backlog is drained, as long as the app is running.
+    const remainingAfterBatch = emailMessageRepository.countUnprocessed(accountId);
+    if (remainingAfterBatch > 0) {
+        logger.debug(`[AI WORKER] ${remainingAfterBatch} emails still pending. Re-running scoring and starting next batch after cooldown...`);
+        // Cooldown between batches to respect rate limits
+        await new Promise(resolve => setTimeout(resolve, 10000)); // 10 second gap
+        try {
+            await syncCheckpointRepository.updateProgress(accountId, {
+                progress_percent: 60,
+                progress_stage: "scoring_emails",
+                progress_message: `Preparing next batch (${remainingAfterBatch} remaining)...`,
+                total_candidates: remainingAfterBatch,
+                processed_candidates: 0,
+            });
+            // Re-run scoring to promote next batch of 'pending' -> 'top'
+            const { runScoringWorker } = await import('./scoringWorkerService');
+            await runScoringWorker(userId, accountId);
+            // Process the newly promoted batch
+            await runAiProcessingWorker(userId, accountId);
+        } catch (loopErr: any) {
+            logger.info(`[AI WORKER] Backlog drain loop error (non-fatal): ${loopErr.message}`);
+        }
+    } else {
+        logger.debug(`[AI WORKER] Backlog fully drained for account ${accountId}`);
+    }
 };
 
 async function updateProgressComplete(accountId: string) {
@@ -501,6 +533,7 @@ async function updateProgressComplete(accountId: string) {
         progress_stage: "completed",
         progress_message: "Sync complete",
         processed_candidates: 0,
+        total_candidates: 0,
     });
     await syncCheckpointRepository.updateSyncState(accountId, "idle");
 }

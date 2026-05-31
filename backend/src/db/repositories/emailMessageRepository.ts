@@ -76,6 +76,17 @@ export function findUnprocessed(accountId: string, limit: number = 50): EmailMes
   return stmt.all(accountId, limit) as EmailMessageRow[];
 }
 
+export function countUnprocessed(accountId: string): number {
+  const db = getDb();
+  const stmt = db.prepare(`
+    SELECT COUNT(*) as count FROM email_messages
+    WHERE account_id = ? AND priority_state IN ('top', 'pending') AND ai_processed = 0
+  `);
+  
+  const result = stmt.get(accountId) as { count: number };
+  return result.count;
+}
+
 export function findByMessageId(accountId: string, messageId: string): EmailMessageRow | null {
   const db = getDb();
   const stmt = db.prepare(`
