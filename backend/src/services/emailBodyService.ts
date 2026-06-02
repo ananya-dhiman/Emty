@@ -51,15 +51,49 @@ const TRACKING_DOMAINS = [
     'campaign-archive.com',
 ];
 
+const NOISE_DOMAINS = [
+    'itunes.apple.com',
+    'apps.apple.com',
+    'play.google.com',
+    'instagram.com',
+    'twitter.com',
+    'facebook.com',
+    'linkedin.com/help',
+    'support.google.com'
+];
+
+const BOILERPLATE_KEYWORDS = [
+    'unsubscribe',
+    'manage preferences',
+    'email preferences',
+    'privacy policy',
+    'terms of service',
+    'terms & conditions',
+    'view in browser',
+    'view as webpage',
+    'download on the app store',
+    'get it on google play',
+    'help center'
+];
+
 const TRACKING_PARAMS_ONLY = /^[^?]*\?(?:utm_[a-z]+=[^&]*&?)+$/i;
 
-const isTrackingUrl = (url: string): boolean => {
+const isTrackingOrNoiseUrl = (url: string, anchorText?: string, contextText?: string): boolean => {
     try {
         const parsed = new URL(url);
         if (TRACKING_DOMAINS.some(d => parsed.hostname === d || parsed.hostname.endsWith(`.${d}`))) {
             return true;
         }
+        if (NOISE_DOMAINS.some(d => parsed.hostname === d || parsed.hostname.endsWith(`.${d}`) || parsed.href.includes(d))) {
+            return true;
+        }
         if (TRACKING_PARAMS_ONLY.test(url)) return true;
+
+        const combinedText = `${anchorText || ''} ${contextText || ''}`.toLowerCase();
+        if (BOILERPLATE_KEYWORDS.some(k => combinedText.includes(k))) {
+            return true;
+        }
+
         return false;
     } catch {
         return false;
@@ -67,11 +101,11 @@ const isTrackingUrl = (url: string): boolean => {
 };
 
 const getSurroundingContext = (body: string, matchIndex: number, matchLength: number): string => {
-    const before = body.lastIndexOf('.', matchIndex);
-    const after = body.indexOf('.', matchIndex + matchLength);
-    const start = before === -1 ? Math.max(0, matchIndex - 120) : before + 1;
-    const end = after === -1 ? Math.min(body.length, matchIndex + matchLength + 120) : after + 1;
-    return body.slice(start, end).replace(/\s+/g, ' ').trim().slice(0, 200);
+    const start = Math.max(0, matchIndex - 45);
+    const end = Math.min(body.length, matchIndex + matchLength + 45);
+    const before = body.slice(start, matchIndex);
+    const after = body.slice(matchIndex + matchLength, end);
+    return `${before}[LINK]${after}`.replace(/\s+/g, ' ').trim();
 };
 
 /**
@@ -93,7 +127,7 @@ export const extractLinksFromPayload = (payload: any): PreExtractedLink[] => {
                 const normalized = new URL(
                     /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`
                 ).toString();
-                if (isTrackingUrl(normalized)) continue;
+                if (isTrackingOrNoiseUrl(normalized, anchor, '')) continue;
                 if (!linkMap.has(normalized)) {
                     linkMap.set(normalized, {
                         url: normalized,
@@ -112,9 +146,9 @@ export const extractLinksFromPayload = (payload: any): PreExtractedLink[] => {
             const rawUrl = match[0].replace(/[),.;!?]+$/, '');
             try {
                 const normalized = new URL(rawUrl).toString();
-                if (isTrackingUrl(normalized)) continue;
+                const ctx = getSurroundingContext(text, match.index, match[0].length);
+                if (isTrackingOrNoiseUrl(normalized, '', ctx)) continue;
                 if (!linkMap.has(normalized)) {
-                    const ctx = getSurroundingContext(text, match.index, match[0].length);
                     linkMap.set(normalized, {
                         url: normalized,
                         anchorText: '',
@@ -156,7 +190,7 @@ export const extractLinksFromPayload = (payload: any): PreExtractedLink[] => {
         }
     }
 
-    return Array.from(linkMap.values()).slice(0, 30);
+    return Array.from(linkMap.values()).slice(0, 15);
 };
 
 /**

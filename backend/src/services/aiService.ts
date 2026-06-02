@@ -326,7 +326,7 @@ const extractWithOllama = async (
   attemptFallback = true
 ): Promise<AIInsightExtraction> => {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2-minute hard timeout
+  const timeoutId = setTimeout(() => controller.abort(), 300_000); // 5-minute hard timeout
 
   let response: Response;
   try {
@@ -558,7 +558,8 @@ export const extractInsightsFromEmail = async (
     const displayParts = [];
     if (anchor) displayParts.push(`Anchor: "${anchor}"`);
     if (link.context) {
-      const cleanedContext = cleanNoiseText(link.context);
+      const urlStrippedContext = link.context.replace(/\bhttps?:\/\/[^\s<>"')\]]+/gi, '');
+      const cleanedContext = cleanNoiseText(urlStrippedContext);
       if (cleanedContext) displayParts.push(`Context: "${cleanedContext}"`);
     }
 

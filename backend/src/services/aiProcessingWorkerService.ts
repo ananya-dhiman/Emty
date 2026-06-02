@@ -471,35 +471,12 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                 const isPermanent = errorType === 'permanent' || newRetryCount >= MAX_RETRIES;
                 const finalErrorType = isPermanent ? 'permanent' : errorType;
 
-                if (!existing) {
-                    await processedEmailLogRepository.createOrUpdate({
-                        account_id: accountId,
-                        message_id: messageId,
-                        insight_id: "",
-                        thread_id: email.thread_id,
-                        previous_state_hash: "",
-                        internal_date: email.internal_date || Date.now(),
-                        processed_at: Date.now(),
-                        retry_count: 1,
-                        last_retry_at: Date.now(),
-                        last_error_message: err.message || String(err),
-                        error_type: finalErrorType,
-                        previous_labels: JSON.stringify([]),
-                    });
-                } else {
-                    await processedEmailLogRepository.incrementRetry(
-                        accountId,
-                        messageId,
-                        err.message || String(err),
-                        finalErrorType
-                    );
-                }
-                
-                // If it's a permanent error or we hit the retry limit, mark it processed so it unblocks the queue
-                if (isPermanent) {
-                    logger.debug(`[AI WORKER] Email ${messageId} failed permanently after ${newRetryCount} attempts. Marking as processed to skip.`);
-                    await emailMessageRepository.markProcessed(messageId);
-                }
+                await processedEmailLogRepository.incrementRetry(
+                    accountId,
+                    messageId,
+                    err.message || String(err),
+                    finalErrorType
+                );
             }
         });
 
