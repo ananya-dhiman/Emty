@@ -14,11 +14,11 @@ import { fetchFullEmailBody } from "./emailBodyService";
 
 import rulesEngine from "./rulesEngine";
 import classifyError from "./errorClassifier";
-import { 
-    getAssignableLabels, 
-    normalizeAIClassification, 
-    recordSuggestedLabel, 
-    AI_LABEL_SUGGESTION_MIN_MATCHES 
+import {
+    getAssignableLabels,
+    normalizeAIClassification,
+    recordSuggestedLabel,
+    AI_LABEL_SUGGESTION_MIN_MATCHES
 } from "./labelLifecycleService";
 import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
 import { resolveAIContextForUser } from "./aiProviderService";
@@ -32,29 +32,29 @@ import logger from '../utils/logger';
  * Strict concurrency management via batching.
  */
 
-const BATCH_SIZE = 1; // Process 1 email at a time to stay under API limits
+const BATCH_SIZE = process.env.BATCH_SIZE ? parseInt(process.env.BATCH_SIZE) : 1; // Process 1 email at a time to stay under API limits
 const MAX_RETRIES = process.env.MAX_RETRIES ? parseInt(process.env.MAX_RETRIES) : 5;
-const MAX_EMAILS_PER_THREAD = 50;
-const MIN_AI_SCORE = 0.4;
+const MAX_EMAILS_PER_THREAD = process.env.MAX_EMAILS_PER_THREAD ? parseInt(process.env.MAX_EMAILS_PER_THREAD) : 50;
+const MIN_AI_SCORE = process.env.MIN_AI_SCORE ? parseFloat(process.env.MIN_AI_SCORE) : 0.4;
 
 const safeParseDate = (val: any): Date | null => {
-  if (!val && val !== 0) return null;
-  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
-  if (typeof val === 'number') {
-    if (val.toString().length <= 10) return new Date(val * 1000);
-    return new Date(val);
-  }
-  if (typeof val === 'string') {
-    const trimmed = val.trim();
-    if (/^\d+$/.test(trimmed)) {
-      const n = Number(trimmed);
-      if (trimmed.length <= 10) return new Date(n * 1000);
-      return new Date(n);
+    if (!val && val !== 0) return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+    if (typeof val === 'number') {
+        if (val.toString().length <= 10) return new Date(val * 1000);
+        return new Date(val);
     }
-    const parsed = Date.parse(trimmed);
-    if (!isNaN(parsed)) return new Date(parsed);
-  }
-  return null;
+    if (typeof val === 'string') {
+        const trimmed = val.trim();
+        if (/^\d+$/.test(trimmed)) {
+            const n = Number(trimmed);
+            if (trimmed.length <= 10) return new Date(n * 1000);
+            return new Date(n);
+        }
+        const parsed = Date.parse(trimmed);
+        if (!isNaN(parsed)) return new Date(parsed);
+    }
+    return null;
 };
 
 export const runAiProcessingWorker = async (userId: string, accountId: string): Promise<void> => {
@@ -134,7 +134,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
     logger.debug(
         `[AI WORKER] Candidate query applied | priority=top/pending | aiProcessed=false | minScore=${MIN_AI_SCORE} | totalRemaining=${totalRemaining}`
     );
-    
+
     if (candidates.length === 0) {
         logger.debug(`[AI WORKER] No top emails to process for account ${accountId}`);
         await updateProgressComplete(accountId);
@@ -183,7 +183,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
             try {
                 // --- STAGE 2: PRE-FETCH BODY ---
                 let parsedBodyResult: { body: string; payload: any; headers: any[]; preExtractedLinks: import('./emailBodyService').PreExtractedLink[] } | undefined;
-                
+
                 try {
                     parsedBodyResult = await fetchFullEmailBody(gmail, messageId);
                 } catch (stage2Err) {
@@ -314,7 +314,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                     const fromEmail = typeof deepResult.from === 'string' ? deepResult.from : deepResult.from?.email || 'unknown';
                     const fromName = typeof deepResult.from === 'object' ? deepResult.from?.name || null : null;
                     const fromDomain = typeof deepResult.from === 'object' ? deepResult.from?.domain || null : null;
-                    
+
                     const newInsight = await insightRepository.create({
                         user_id: userId,
                         account_id: accountId,
@@ -392,7 +392,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                         source: label.source,
                         statusSnapshot: label.status,
                     }));
-                    
+
                     const threadLabelsJson = JSON.stringify(threadLabels);
                     const suggestionsJson = JSON.stringify(suggestedLabel
                         ? [
@@ -409,13 +409,13 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                             },
                         ]
                         : []);
-                    
+
                     await insightRepository.updateLabels(
                         insight.id,
                         threadLabelsJson,
                         suggestionsJson
                     );
-                    
+
                     await insightRepository.updateState(
                         insight.id,
                         {
@@ -457,7 +457,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
 
             } catch (err: any) {
                 logger.info(`[AI WORKER] Deep processing failed for ${messageId}:`, err.message || err);
-                
+
                 // Stop the entire run immediately if it's because Ollama isn't done pulling models yet
                 if (err?.message?.includes("AIPendingProvisioningError") || err?.message?.includes("try pulling it first")) {
                     logger.debug(`[AI WORKER] Aborting batch early due to missing models. App is likely still provisioning Ollama.`);
@@ -471,12 +471,35 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                 const isPermanent = errorType === 'permanent' || newRetryCount >= MAX_RETRIES;
                 const finalErrorType = isPermanent ? 'permanent' : errorType;
 
-                await processedEmailLogRepository.incrementRetry(
-                    accountId,
-                    messageId,
-                    err.message || String(err),
-                    finalErrorType
-                );
+                if (!existing) {
+                    await processedEmailLogRepository.createOrUpdate({
+                        account_id: accountId,
+                        message_id: messageId,
+                        insight_id: "",
+                        thread_id: email.thread_id,
+                        previous_state_hash: "",
+                        internal_date: email.internal_date || Date.now(),
+                        processed_at: Date.now(),
+                        retry_count: 1,
+                        last_retry_at: Date.now(),
+                        last_error_message: err.message || String(err),
+                        error_type: finalErrorType,
+                        previous_labels: JSON.stringify([]),
+                    });
+                } else {
+                    await processedEmailLogRepository.incrementRetry(
+                        accountId,
+                        messageId,
+                        err.message || String(err),
+                        finalErrorType
+                    );
+                }
+                
+                // If it's a permanent error or we hit the retry limit, mark it processed so it unblocks the queue
+                if (isPermanent) {
+                    logger.debug(`[AI WORKER] Email ${messageId} failed permanently after ${newRetryCount} attempts. Marking as processed to skip.`);
+                    await emailMessageRepository.markProcessed(messageId);
+                }
             }
         });
 
@@ -488,8 +511,8 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
 
         // RATE LIMIT BUFFER: If more batches remain, wait briefly to avoid model throttle.
         if (i + BATCH_SIZE < totalCount) {
-          logger.debug(`[AI WORKER] Email complete. Sleeping 4s to respect rate limits...`);
-          await new Promise(resolve => setTimeout(resolve, 4000));
+            logger.debug(`[AI WORKER] Email complete. Sleeping 4s to respect rate limits...`);
+            await new Promise(resolve => setTimeout(resolve, 4000));
         }
     }
 

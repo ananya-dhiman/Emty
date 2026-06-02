@@ -18,7 +18,7 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
     const objectIdAccountId = new Types.ObjectId(accountId);
 
     logger.debug(`[SCORING] Worker started for account ${accountId}`);
-    
+
     // Update progress
     syncCheckpointRepository.updateProgress(objectIdAccountId.toString(), {
         progress_percent: 60,
@@ -35,9 +35,9 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
             accountId,
         });
 
-        // Loop through all EmailMessage documents for this account
-        const emails = emailMessageRepository.findByAccountId(objectIdAccountId.toString());
-        
+        // Loop through all unprocessed EmailMessage documents for this account
+        const emails = emailMessageRepository.findByAccountId(objectIdAccountId.toString()).filter(e => e.ai_processed === 0);
+
         logger.debug(`[SCORING] Found ${emails.length} emails to score`);
 
         const profile: any = await UserIntentProfileModel.findOne({ userId }).lean();
@@ -77,7 +77,7 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
             const newPriorityState = filterResult.process ? "pending" : "low";
 
             emailMessageRepository.updatePriorityStateAndScore(email.id, scoreToSave, newPriorityState);
-            
+
             processed++;
             if (processed % 100 === 0) {
                 logger.debug(`[SCORING] Processed ${processed}/${emails.length}`);
@@ -85,8 +85,8 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
         }
 
         // Now, we need to pick the Top K (e.g., 50) and mark them as 'top', rest as 'low'
-        const TOP_K = 50;
-        const allScored = emailMessageRepository.findTopScoredByAccountId(objectIdAccountId.toString());
+        const TOP_K = parseInt(process.env.TOP_K || '10', 10);
+        const allScored = emailMessageRepository.findTopScoredByAccountId(objectIdAccountId.toString()).filter(e => e.ai_processed === 0);
 
         let rank = 1;
         for (const item of allScored) {

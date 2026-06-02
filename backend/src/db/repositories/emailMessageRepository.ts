@@ -109,7 +109,7 @@ export function updateScore(messageId: string, score: number, priorityState: str
   const stmt = db.prepare(`
     UPDATE email_messages
     SET score = ?, priority_state = ?, updated_at = ?
-    WHERE id = ?
+    WHERE message_id = ?
   `);
   stmt.run(score, priorityState, Date.now(), messageId);
 }
@@ -119,7 +119,7 @@ export function markProcessed(messageId: string): void {
   const stmt = db.prepare(`
     UPDATE email_messages
     SET ai_processed = 1, updated_at = ?
-    WHERE id = ?
+    WHERE message_id = ?
   `);
   stmt.run(Date.now(), messageId);
 }
@@ -129,7 +129,7 @@ export function updateEmbedding(messageId: string, embedding: string, embeddingM
   const stmt = db.prepare(`
     UPDATE email_messages
     SET embedding = ?, embedding_model = ?, updated_at = ?
-    WHERE id = ?
+    WHERE message_id = ?
   `);
   stmt.run(embedding, embeddingModel, Date.now(), messageId);
 }
