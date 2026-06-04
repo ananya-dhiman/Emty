@@ -22,8 +22,8 @@ app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (desktop native, curl, health checks)
     if (!origin) return callback(null, true);
-    // Allow the Tauri custom protocol
-    if (origin.startsWith("tauri://")) return callback(null, true);
+    // Allow the Tauri custom protocol (v1 and v2)
+    if (origin.startsWith("tauri://") || origin.startsWith("http://tauri.localhost") || origin.startsWith("https://tauri.localhost")) return callback(null, true);
     // Allow any localhost regardless of port (dev + sidecar)
     if (origin.startsWith("http://localhost") || origin.startsWith("http://127.0.0.1")) return callback(null, true);
     // Allow known web origins

@@ -51,12 +51,10 @@
       "icons/icon.ico"
     ],
     "resources": [
-      {
-        "src": "../../backend/.env",
-        "target": "_up_/_up_/backend/.env"
-      },
       "../../backend/dist",
-      "../../backend/node_modules/better-sqlite3"
+      "../../backend/node_modules/better-sqlite3",
+      "../../backend/node_modules/bindings",
+      "../../backend/node_modules/file-uri-to-path"
     ],
     "externalBin": [
       "binaries/node",
