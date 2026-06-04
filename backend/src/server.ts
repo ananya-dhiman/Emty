@@ -10,9 +10,6 @@ import syncRoutes from "./routes/syncRoutes";
 
 import logger from './utils/logger';
 
-// Load environment variables
-dotenv.config();
-
 const app = express();
 
 // CORS: allow tauri:// protocol, any localhost port, and the web deployment.

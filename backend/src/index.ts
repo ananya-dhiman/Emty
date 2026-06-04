@@ -1,9 +1,5 @@
-import dotenv from "dotenv";
-
+import "./env";
 import path from "path";
-
-// Load environment variables FIRST before any other imports
-dotenv.config({ path: path.join(__dirname, "../.env") });
 
 import mongoose from "mongoose";
 import app from "./server";
