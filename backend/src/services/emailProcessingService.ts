@@ -58,17 +58,61 @@ const parseEmailAddress = (
 
 export type EmailClass = 'routine' | 'sensitive' | 'normal';
 
-const SENSITIVE_KEYWORDS = [
-  'bank account', 'password', 'otp', 'transaction', 'credit card',
-  'diagnosis', 'prescription', 'medical report', 'test results',
-  'legal notice', 'court', 'lawsuit', 'confidential',
-  'salary', 'aadhaar', 'pan card', 'passport', 'social security',
+const TIER_1_KEYWORDS = [
+  'aadhaar', 'aadhaar number', 'pan card', 'passport number', 'driving licence number', 'voter id',
+  'cvv', 'upi pin', 'debit card number', 'credit card number', 'card number', 'net banking password',
+  'medical report', 'diagnostic report', 'pathology report', 'prescription', 'health record', 'lab report',
+  'tax return', 'income tax filing', 'form 16', 'social security number'
+];
+
+const TIER_2_KEYWORDS = [
+  { words: ['otp', 'one time password', 'verification code', 'authentication code', 'security code'], score: 5 },
+  { words: ['bank account', 'account number', 'beneficiary', 'bank statement', 'payment confirmation'], score: 4 },
+  { words: ['transaction', 'transfer', 'withdrawal', 'deposit', 'payment', 'reimbursement'], score: 3 },
+  { words: ['password', 'login', 'verification', 'authenticate', 'security alert', 'suspicious activity', 'account access'], score: 2 },
+  { words: ['invoice', 'billing', 'receipt', 'statement', 'security', 'account', 'banking'], score: 1 }
 ];
 
 export function classifyEmail(from: string, subject: string, body: string): EmailClass {
+  // Stage 1: Restrict Content to Subject and first 500 chars of body
+  const textToScan = `${subject} ${body.substring(0, 500)}`.toLowerCase();
+
+  let finalScore = 0;
+  const triggeredKeywords: { word: string; score: number }[] = [];
+  let tier1Triggered = false;
+
+  // Stage 2 & 3: Exact Word Matching & Tiered Scoring
+  for (const word of TIER_1_KEYWORDS) {
+    const regex = new RegExp(`\\b${word}\\b`, 'i');
+    if (regex.test(textToScan)) {
+      tier1Triggered = true;
+      triggeredKeywords.push({ word, score: 99 });
+      break;
+    }
+  }
+
+  if (!tier1Triggered) {
+    for (const tier of TIER_2_KEYWORDS) {
+      for (const word of tier.words) {
+        const regex = new RegExp(`\\b${word}\\b`, 'i');
+        if (regex.test(textToScan)) {
+          finalScore += tier.score;
+          triggeredKeywords.push({ word, score: tier.score });
+        }
+      }
+    }
+  }
+
+  // Stage 4: Threshold-Based Decision
+  const isSensitive = tier1Triggered || finalScore >= 6;
+
+  // Additional Requirements: Logging
+  logger.info(`[CLASSIFIER] Result: ${isSensitive ? 'Sensitive' : 'Routine/Normal'} | Score: ${finalScore} | Keywords: ${JSON.stringify(triggeredKeywords)} | Tier1: ${tier1Triggered}`);
+
+  if (isSensitive) return 'sensitive';
+
+  // Fallback to original routine vs normal routing logic
   if (/newsletter|unsubscribe|noreply|notification/i.test(from)) return 'routine';
-  const text = `${subject} ${body}`.toLowerCase();
-  if (SENSITIVE_KEYWORDS.some(kw => text.includes(kw))) return 'sensitive';
   return 'normal';
 }
 
