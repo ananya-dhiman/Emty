@@ -37,7 +37,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis"
+    ],
+    "windows": {
+      "wix": null
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -49,7 +54,7 @@
       "../../backend/.env",
       "../../backend/package.json",
       "../../backend/dist/**/*",
-      "../../backend/node_modules/**/*"
+      "../../backend/node_modules/better-sqlite3/**/*"
     ],
     "externalBin": [
       "binaries/node",

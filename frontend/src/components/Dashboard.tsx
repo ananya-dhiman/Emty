@@ -816,7 +816,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
       const counts = manualSyncCountsRef.current;
       let extraDetail = '';
-      let progressError = '';
       try {
         const { data: progress } = await axios.get(
           `${API_URL}/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
@@ -827,9 +826,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         }
         if (progress?.aiFallbackCount > 0) {
           extraDetail = ` | Fallbacks: ${progress.aiFallbackCount}`;
-        }
-        if (progress?.progressMessage && finalStage === 'error') {
-          progressError = progress.progressMessage;
         }
       } catch {
         // non-blocking
