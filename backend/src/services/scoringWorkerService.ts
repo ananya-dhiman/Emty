@@ -69,6 +69,16 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
                     context: priorityScoringContext,
                 });
                 scoreToSave = baseScoreResult.baseScore;
+
+                // Penalize sensitive and routine emails so normal emails are processed first
+                const { classifyEmail } = require("./emailProcessingService");
+                const emailClass = classifyEmail(email.from || '', email.subject || '', email.snippet || '');
+                
+                if (emailClass === 'sensitive') {
+                    scoreToSave -= 10000; // Deepest penalty, processed last
+                } else if (emailClass === 'routine') {
+                    scoreToSave -= 5000; // Processed after normal, before sensitive
+                }
             } else {
                 scoreToSave = filterResult.score || 0.1; // Ensure it stays low
             }
