@@ -95,7 +95,7 @@ export const runScoringWorker = async (userId: string, accountId: string): Promi
         }
 
         // Now, we need to pick the Top K (e.g., 50) and mark them as 'top', rest as 'low'
-        const TOP_K = parseInt(process.env.TOP_K || '10', 10);
+        const TOP_K = parseInt(process.env.TOP_K || '20', 10);
         const allScored = emailMessageRepository.findTopScoredByAccountId(objectIdAccountId.toString()).filter(e => e.ai_processed === 0);
 
         let rank = 1;

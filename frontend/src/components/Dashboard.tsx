@@ -25,7 +25,7 @@ const DetCollapsible: React.FC<{
           className={`det-section-chev ${open ? 'open' : ''}`}
           width="12" height="12" viewBox="0 0 16 16" fill="none"
         >
-          <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         <span className="det-section-lbl">{label}</span>
         {count > 0 && <span className="det-section-ct">{count}</span>}
@@ -191,7 +191,7 @@ const TimelineItem = ({ item, isFirst, selectedEmail, onSourceClick }: any) => {
   const hasFacts = context && context.extractedFacts;
   const reasonStr = hasFacts ? Object.values(context.extractedFacts).join(' · ') : '';
   const sourceName = context?.subject || item.sourceEmailId || 'Unknown source';
-  
+
   return (
     <div className="tl-item">
       <div className={`tl-dot ${isFirst ? 'active' : ''}`}></div>
@@ -200,14 +200,14 @@ const TimelineItem = ({ item, isFirst, selectedEmail, onSourceClick }: any) => {
           <div className="tl-date">{new Date(item.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</div>
           <span className="tl-type-tag">{item.type}</span>
           <svg className={`tl-toggle ${isOpen ? 'open' : ''}`} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
         <div className={`tl-body ${isOpen ? 'open' : ''}`}>
           {reasonStr || `Scheduled ${item.type} date.`}
           {item.sourceEmailId && (
-            <div 
-              className="tl-source" 
+            <div
+              className="tl-source"
               onClick={(e) => { e.stopPropagation(); onSourceClick(item.sourceEmailId); }}
               style={{ cursor: 'pointer', textDecoration: 'underline' }}
             >
@@ -253,12 +253,12 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const doneRef = useRef<HTMLDivElement>(null);
   const lowPriorityRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLDivElement>(null);
-  const [sidebarLabels, setSidebarLabels] = useState<{id: string, name: string, color: string, rank: number, count: number}[]>([]);
+  const [sidebarLabels, setSidebarLabels] = useState<{ id: string, name: string, color: string, rank: number, count: number }[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStats, setSyncStats] = useState<{ total: number, processed: number } | null>(null);
-  const [notification, setNotification] = useState<{show: boolean, message: string, detail?: string, type: 'success' | 'error' | 'info'} | null>(null);
+  const [notification, setNotification] = useState<{ show: boolean, message: string, detail?: string, type: 'success' | 'error' | 'info' } | null>(null);
   // Holds counts from the initial sync HTTP response so the poller can surface them on completion
-  const manualSyncCountsRef = React.useRef<{processed: number; succeeded: number; failed: number} | null>(null);
+  const manualSyncCountsRef = React.useRef<{ processed: number; succeeded: number; failed: number } | null>(null);
 
   // feedbackMap: insightId -> 'boost' | 'suppress' | null
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'boost' | 'suppress' | null>>({});
@@ -339,19 +339,19 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const fetchInsights = async (isBackground = false) => {
     const API_URL = API_BASE_URL;
     const token = localStorage.getItem('firebaseToken');
-      
-      console.log("Dashboard mount check:", { hasGmailAccountId: !!user?.gmailAccountId, hasToken: !!token, user });
 
-      if (!user?.gmailAccountId || !token) {
+    console.log("Dashboard mount check:", { hasGmailAccountId: !!user?.gmailAccountId, hasToken: !!token, user });
+
+    if (!user?.gmailAccountId || !token) {
       console.log("Bailing out of fetchInsights due to missing gmailAccountId or token.");
       if (!isBackground) setLoading(false);
       return;
     }
-    
+
     try {
       if (!isBackground) setLoading(true);
       console.log(`Fetching from: ${API_URL}/api/emails/priority-ranking?accountId=${user.gmailAccountId}`);
-      
+
       const [rankingRes, priorityRes, labelsRes] = await Promise.all([
         axios.get(`${API_URL}/api/emails/priority-ranking?accountId=${user.gmailAccountId}`, {
           headers: { Authorization: `Bearer ${token}` }
@@ -365,7 +365,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       ]);
 
       const response = rankingRes;
-      
+
       console.log("Priority Ranking Response Data:", response.data);
 
       if (response.data.success) {
@@ -379,46 +379,46 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         setError(response.data.message);
       }
 
-        // Sidebar Labels integration
+      // Sidebar Labels integration
       if (priorityRes.data.success && labelsRes.data.success) {
         const activeLabels = labelsRes.data.labels || [];
         const priorities = priorityRes.data.priorities || [];
-        
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const labelMap = new Map<string, any>(activeLabels.map((l: any) => [l._id, l]));
-        
+
         const mappedLabels = priorities
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .filter((p: any) => !['Focus', 'Action Required', 'Newsletters'].includes(p.labelNameSnapshot))
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .map((p: any) => {
-                const lbl = labelMap.get(p.labelId);
-                // Try to derive a deterministic color if none provided
-                const defaultColors = ['#C0351A', '#1854A0', '#186845', '#9A5405', 'var(--text-2)'];
-                const fallbackColor = defaultColors[p.rank % defaultColors.length];
-                
-                return {
-                    id: p.labelId,
-                    name: p.labelNameSnapshot,
-                    color: lbl?.color || fallbackColor,
-                    rank: p.rank,
-                    count: 0 // Placeholder
-                };
-            });
-        
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .filter((p: any) => !['Focus', 'Action Required', 'Newsletters'].includes(p.labelNameSnapshot))
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .map((p: any) => {
+            const lbl = labelMap.get(p.labelId);
+            // Try to derive a deterministic color if none provided
+            const defaultColors = ['#C0351A', '#1854A0', '#186845', '#9A5405', 'var(--text-2)'];
+            const fallbackColor = defaultColors[p.rank % defaultColors.length];
+
+            return {
+              id: p.labelId,
+              name: p.labelNameSnapshot,
+              color: lbl?.color || fallbackColor,
+              rank: p.rank,
+              count: 0 // Placeholder
+            };
+          });
+
         setSidebarLabels(mappedLabels);
       }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
-        console.error("Error fetching priority ranking:", err);
-        if (err.response) {
-            console.error("Error Response Data:", err.response.data);
-        }
-        setError("Failed to load dashboard insights");
-      } finally {
-        if (!isBackground) setLoading(false);
+      console.error("Error fetching priority ranking:", err);
+      if (err.response) {
+        console.error("Error Response Data:", err.response.data);
       }
-    };
+      setError("Failed to load dashboard insights");
+    } finally {
+      if (!isBackground) setLoading(false);
+    }
+  };
 
   useEffect(() => {
     setIsFocusOpen(focusItems.length > 0);
@@ -430,7 +430,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
   useEffect(() => {
     fetchInsights(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   // Background polling for live-stream dashboard (Option B)
@@ -448,41 +448,41 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     const checkBackgroundProgress = async () => {
       if (isCurrentlyPolling) return;
       isCurrentlyPolling = true;
-        try {
-          const { data } = await axios.get(
-            `${API_BASE_URL}/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
+      try {
+        const { data } = await axios.get(
+          `${API_BASE_URL}/api/emails/sync-progress?accountId=${user.gmailAccountId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
 
-          if (data?.success) {
-            setSyncStats({ total: data.totalCandidates || 0, processed: data.processedCandidates || 0 });
-          }
-        
-          if (data?.success && data.progressStage) {
-            const isFinished = ['completed', 'error', 'idle'].includes(data.progressStage);
-            if (!isFinished) {
-              // If a background sync is happening, fetch latest inbox items silently
-              setIsSyncing(true);
+        if (data?.success) {
+          setSyncStats({ total: data.totalCandidates || 0, processed: data.processedCandidates || 0 });
+        }
+
+        if (data?.success && data.progressStage) {
+          const isFinished = ['completed', 'error', 'idle'].includes(data.progressStage);
+          if (!isFinished) {
+            // If a background sync is happening, fetch latest inbox items silently
+            setIsSyncing(true);
+            await fetchInsights(true);
+          } else {
+            if (!['completed', 'error', 'idle'].includes(lastStage)) {
+              // Final fetch to reflect completed state
               await fetchInsights(true);
-            } else {
-               if (!['completed', 'error', 'idle'].includes(lastStage)) {
-                 // Final fetch to reflect completed state
-                 await fetchInsights(true);
-               }
-               setIsSyncing(false);
-               if (data.aiFallbackCount > 0) {
-                 setNotification({
-                   show: true,
-                   type: 'info',
-                   message: 'AI fallback used',
-                   detail: data.aiFallbackMessage || 'Some emails used shared AI key due to key/model errors.',
-                 });
-               }
-               // Removed clearInterval so we keep polling for future syncs triggered externally
             }
-            lastStage = data.progressStage;
+            setIsSyncing(false);
+            if (data.aiFallbackCount > 0) {
+              setNotification({
+                show: true,
+                type: 'info',
+                message: 'AI fallback used',
+                detail: data.aiFallbackMessage || 'Some emails used shared AI key due to key/model errors.',
+              });
+            }
+            // Removed clearInterval so we keep polling for future syncs triggered externally
           }
-        } catch (err) {
+          lastStage = data.progressStage;
+        }
+      } catch (err) {
         console.warn('[Dashboard] Background progress poll failed', err);
       } finally {
         isCurrentlyPolling = false;
@@ -493,19 +493,19 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     pollInterval = setInterval(checkBackgroundProgress, 4000);
 
     return () => clearInterval(pollInterval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const allItems = [...focusItems, ...actionItems, ...agendaItems];
-  const filteredItems = selectedLabel 
+  const filteredItems = selectedLabel
     ? allItems.filter(item => item.matchedLabels.includes(selectedLabel))
     : agendaItems;
   const selectedLabelKey = selectedLabel ? normalizeLabelKey(selectedLabel) : null;
   const filteredLowPriorityItems = selectedLabelKey
     ? lowPriorityItems.filter((item) =>
-        Array.isArray(item.extractedFeatures)
-          && item.extractedFeatures.some((feature) => normalizeLabelKey(feature) === selectedLabelKey)
-      )
+      Array.isArray(item.extractedFeatures)
+      && item.extractedFeatures.some((feature) => normalizeLabelKey(feature) === selectedLabelKey)
+    )
     : lowPriorityItems;
   const agendaLabelColorMap = React.useMemo(
     () => new Map(sidebarLabels.map((label) => [normalizeLabelKey(label.name), label.color])),
@@ -583,25 +583,25 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const selectedChecklistItems = Array.isArray((selectedEmail as any)?.checklistItems)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ? ((selectedEmail as any).checklistItems as Array<any>)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .map((item: any) => ({
-          task: typeof item?.task === 'string' ? item.task.trim() : '',
-          status: 'pending' as const,
-          dueDate: normalizeDateValue(item?.dueDate),
-          reason: typeof item?.reason === 'string' ? item.reason : undefined,
-          inferred: item?.inferred === true,
-          sourceEmailId: typeof item?.sourceEmailId === 'string' ? item.sourceEmailId : undefined,
-        }))
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .filter((item: any) => item.task.length > 0)
-    : selectedChecklist.map((task) => ({
-        task,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((item: any) => ({
+        task: typeof item?.task === 'string' ? item.task.trim() : '',
         status: 'pending' as const,
-        dueDate: null,
-        reason: undefined,
-        inferred: false,
-        sourceEmailId: undefined,
-      }));
+        dueDate: normalizeDateValue(item?.dueDate),
+        reason: typeof item?.reason === 'string' ? item.reason : undefined,
+        inferred: item?.inferred === true,
+        sourceEmailId: typeof item?.sourceEmailId === 'string' ? item.sourceEmailId : undefined,
+      }))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((item: any) => item.task.length > 0)
+    : selectedChecklist.map((task) => ({
+      task,
+      status: 'pending' as const,
+      dueDate: null,
+      reason: undefined,
+      inferred: false,
+      sourceEmailId: undefined,
+    }));
   const selectedImportantLinksByEmail = (selectedEmail?.importantLinksByEmail && typeof selectedEmail.importantLinksByEmail === 'object')
     ? selectedEmail.importantLinksByEmail
     : {};
@@ -651,7 +651,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const handleGmailClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     const threadId = selectedEmail?.gmailThreadId?.trim();
     const messageId = selectedEmail?.messageId?.trim();
-    
+
     if (!threadId && !messageId) {
       e.preventDefault();
       console.warn('[Gmail Open] Missing gmailThreadId and messageId', { selectedEmail });
@@ -696,8 +696,8 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
           }}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill={fb === 'boost' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
-            <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z" />
+            <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
           </svg>
           Relevant
         </button>
@@ -720,8 +720,8 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
           }}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill={fb === 'suppress' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
-            <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+            <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z" />
+            <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
           </svg>
           Not relevant
         </button>
@@ -829,12 +829,12 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
           extraDetail = ` | Fallbacks: ${progress.aiFallbackCount}`;
         }
         if (progress?.progressMessage && finalStage === 'error') {
-           progressError = progress.progressMessage;
+          progressError = progress.progressMessage;
         }
       } catch {
         // non-blocking
       }
-      
+
       if (finalStage !== 'error') {
         setNotification({
           show: true,
@@ -845,7 +845,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             : 'Inbox is up to date.',
         });
       }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       console.error('[Sync] Error:', err);
       setNotification({
@@ -872,39 +872,39 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       {/* NOTIFICATION */}
       {notification && notification.show && (
         <div className="sync-notification" style={{
-            position: 'fixed',
-            bottom: '24px',
-            right: '24px',
-            background: notification.type === 'error' ? 'var(--red)' : 'var(--accent)',
-            color: notification.type === 'error' ? '#fff' : 'var(--accent-inv)',
-            padding: '16px 20px',
-            borderRadius: '8px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-            zIndex: 1000,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px',
-            minWidth: '280px',
-            fontFamily: 'var(--font-sans)'
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          background: notification.type === 'error' ? 'var(--red)' : 'var(--accent)',
+          color: notification.type === 'error' ? '#fff' : 'var(--accent-inv)',
+          padding: '16px 20px',
+          borderRadius: '8px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          zIndex: 1000,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+          minWidth: '280px',
+          fontFamily: 'var(--font-sans)'
         }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-               <strong style={{ fontSize: '14px', fontWeight: 600 }}>{notification.message}</strong>
-               <button onClick={() => setNotification(null)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, opacity: 0.7 }}>
-                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 3L11 11M11 3L3 11"/></svg>
-               </button>
-            </div>
-            {notification.detail && <span style={{ fontSize: '13px', opacity: 0.9 }}>{notification.detail}</span>}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <strong style={{ fontSize: '14px', fontWeight: 600 }}>{notification.message}</strong>
+            <button onClick={() => setNotification(null)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, opacity: 0.7 }}>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 3L11 11M11 3L3 11" /></svg>
+            </button>
+          </div>
+          {notification.detail && <span style={{ fontSize: '13px', opacity: 0.9 }}>{notification.detail}</span>}
         </div>
       )}
 
       {/* SHELL */}
       <div className="shell-dash" style={{ gridTemplateColumns: `${sidebarCol ? '44px' : '176px'} ${calendarCol ? '1fr' : '0px'} ${calendarCol ? '0px' : '1fr'} ${rightCol ? 'minmax(300px, 40vw)' : '0px'}` }}>
-        
+
         {/* BAR */}
         <div className="bar">
-          <div className="bar-logo" style={{margin: '0 20px', display: 'flex', alignItems: 'center', gap: '12px'}}>
+          <div className="bar-logo" style={{ margin: '0 20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <Logo size={28} />
-            <span style={{color: 'var(--text-1)', fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700}}>Emty</span>
+            <span style={{ color: 'var(--text-1)', fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700 }}>Emty</span>
           </div>
           <div className="bar-date" style={{ flex: 1 }}>SAT 21 MAR 2026</div>
           <div className="bar-r">
@@ -919,9 +919,9 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                 <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{syncStats.processed} / {syncStats.total}</span>
               </div>
             )}
-            <button 
+            <button
               className={`sync-pill ${isSyncing ? 'syncing' : ''}`}
-              onClick={handleSync} 
+              onClick={handleSync}
               disabled={isSyncing}
               aria-label={isSyncing ? 'Syncing inbox, please wait' : 'Sync inbox now'}
               style={{ cursor: isSyncing ? 'default' : 'pointer', background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--text-1)' }}
@@ -937,7 +937,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         <div className={`sidebar ${sidebarCol ? 'col' : ''}`} id="sb">
           <button className="sb-tog" onClick={toggleSidebar}>
             <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-              <path d="M7 2L4 5.5L7 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M7 2L4 5.5L7 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
           <div className="sb-col-strip">
@@ -948,24 +948,26 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             <div className="sb-grp" style={{ paddingTop: '12px' }}>
               <span className="sb-grp-lbl">Views</span>
               <div className={`sb-row ${calendarCol ? 'on' : ''}`} onClick={() => setCalendarCol(!calendarCol)}>
-                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="16" y1="2" x2="16" y2="6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="8" y1="2" x2="8" y2="6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="3" y1="10" x2="21" y2="10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
+                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /><line x1="16" y1="2" x2="16" y2="6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /><line x1="8" y1="2" x2="8" y2="6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /><line x1="3" y1="10" x2="21" y2="10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></div>
                 <span className="sb-txt">Calendar</span>
               </div>
               <div className={`sb-row ${activeSection === 'do' ? 'on' : ''}`} onClick={() => { setActiveSection('do'); setIsActionOpen(true); mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' }); }}>
-                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 4h14v4H5zM5 10h14v4H5zM5 16h14v4H5z" fill="currentColor"/></svg></div>
+                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 4h14v4H5zM5 10h14v4H5zM5 16h14v4H5z" fill="currentColor" /></svg></div>
                 <span className="sb-txt">Do</span><span className="sb-ct a">{actionItems.length}</span>
               </div>
               <div className={`sb-row ${activeSection === 'done' ? 'on' : ''}`} onClick={() => { setActiveSection('done'); setIsDoneOpen(true); setTimeout(() => doneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); }}>
-                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg></div>
                 <span className="sb-txt">Done</span><span className="sb-ct g">{completedItems.length}</span>
               </div>
-              <div className="sb-row" onClick={() => onNavigate('metrics')}>
-                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M3 3v18h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M7 11l3-3 3 3 4-4 2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
-                <span className="sb-txt">Metrics</span>
-              </div>
+
               <div className={`sb-row ${activeSection === 'ignore' ? 'on' : ''}`} onClick={() => { setActiveSection('ignore'); setIsLowPriorityOpen(true); setTimeout(() => lowPriorityRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); }}>
-                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 5l14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M19 5L5 19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></div>
+                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 5l14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><path d="M19 5L5 19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg></div>
                 <span className="sb-txt">Ignore</span><span className="sb-ct g">{lowPriorityItems.length}</span>
+              </div>
+
+              <div className="sb-row" onClick={() => onNavigate('metrics')}>
+                <div className="sb-ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M3 3v18h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M7 11l3-3 3 3 4-4 2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></div>
+                <span className="sb-txt">Metrics</span>
               </div>
             </div>
 
@@ -974,11 +976,11 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             <div className="sb-grp">
               <span className="sb-grp-lbl">Labels</span>
               {sidebarLabels.length === 0 && !loading && (
-                 <div className="lrow" style={{ color: 'var(--text-3)', fontSize: '11px', paddingLeft: '24px' }}>No custom labels</div>
+                <div className="lrow" style={{ color: 'var(--text-3)', fontSize: '11px', paddingLeft: '24px' }}>No custom labels</div>
               )}
               {sidebarLabels.map((lbl) => (
-                <div 
-                  className={`lrow ${selectedLabel === lbl.name ? 'on' : ''}`} 
+                <div
+                  className={`lrow ${selectedLabel === lbl.name ? 'on' : ''}`}
                   key={lbl.id}
                   onClick={() => setSelectedLabel(selectedLabel === lbl.name ? null : lbl.name)}
                 >
@@ -1005,17 +1007,17 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             <div className="sb-foot" onClick={() => onNavigate('profile')}>
               <div className="foot-av">{user?.name ? user.name.charAt(0).toUpperCase() : 'U'}</div>
               <div style={{ minWidth: 0 }}><div className="foot-name">{user?.name || 'User Name'}</div><div className="foot-email">{user?.email || 'user@example.com'}</div></div>
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginLeft: 'auto', flexShrink: 0 }}><circle cx="5" cy="2" r="1" fill="var(--text-3)"/><circle cx="5" cy="5" r="1" fill="var(--text-3)"/><circle cx="5" cy="8" r="1" fill="var(--text-3)"/></svg>
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginLeft: 'auto', flexShrink: 0 }}><circle cx="5" cy="2" r="1" fill="var(--text-3)" /><circle cx="5" cy="5" r="1" fill="var(--text-3)" /><circle cx="5" cy="8" r="1" fill="var(--text-3)" /></svg>
             </div>
           </div>
         </div>
 
         {/* CALENDAR SIDEBAR */}
-        <CalendarSidebar 
-          isOpen={calendarCol} 
-          items={allItems} 
-          onSelectEmail={selectEmail} 
-          onClose={() => setCalendarCol(false)} 
+        <CalendarSidebar
+          isOpen={calendarCol}
+          items={allItems}
+          onSelectEmail={selectEmail}
+          onClose={() => setCalendarCol(false)}
         />
 
         {/* MAIN */}
@@ -1023,7 +1025,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
           {/* Toast notification */}
           {toast && (
             <div className="done-toast">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
               {toast}
             </div>
           )}
@@ -1039,18 +1041,18 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               <div className="board-hd" onClick={() => setIsActionOpen(!isActionOpen)} style={{ cursor: 'pointer', userSelect: 'none' }}>
                 <div className="board-bar"></div>
                 <span className="board-name">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6, verticalAlign: 'text-bottom'}}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6, verticalAlign: 'text-bottom' }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                   Action Board
                 </span>
                 <span className="board-desc">&nbsp;— requires your response</span>
                 <span className="board-badge">{loading ? '...' : `${actionItems.length} urgent`}</span>
                 <span style={{ marginLeft: '12px', color: 'var(--text-3)', transition: 'transform 0.2s', transform: isActionOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </span>
               </div>
               {isActionOpen && (
                 <div className="track">
-                  {loading && [0,1,2].map(i => (
+                  {loading && [0, 1, 2].map(i => (
                     <div className="kard kard-skeleton" key={i}>
                       <div className="skel-line skel-line--sender" />
                       <div className="skel-line skel-line--snip" />
@@ -1059,46 +1061,47 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                     </div>
                   ))}
                   {!loading && actionItems.length === 0 && (
-                     <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>No urgent actions required.</div>
+                    <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '12px' }}>No urgent actions required.</div>
                   )}
                   {!loading && actionItems.map((item) => {
                     const nearestDeadline = item.dates?.filter(d => d.type === 'deadline').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
                     return (
-                    <div
-                      className={`kard ${selectedInsightId === item.insightId ? 'sel' : ''}`}
-                      key={item.insightId}
-                      onClick={() => selectEmail(item)}
-                    >
-                      <div className="kard-top">
-                        <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
-                        <button
-                          className="kard-check-btn"
-                          onClick={(e) => handleToggleCompletion(item.insightId, !!item.isCompleted, e)}
-                          title="Mark as done"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                          </svg>
-                        </button>
-                      </div>
-                      <div className="ks">{item.summary.shortSnippet || "Action required"}</div>
-                      <div className="kard-tags">
-                        <span className="tag tr">Action Required</span>
-                        {item.matchedLabels.slice(0, 1).map(lbl => (
-                          <span className="tag tn" key={lbl}>{lbl}</span>
-                        ))}
-                        {nearestDeadline && (
-                          <span className="tag ta">
-                            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '2px'}}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                            Due {new Date(nearestDeadline.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      <div
+                        className={`kard ${selectedInsightId === item.insightId ? 'sel' : ''}`}
+                        key={item.insightId}
+                        onClick={() => selectEmail(item)}
+                      >
+                        <div className="kard-top">
+                          <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
+                          <button
+                            className="kard-check-btn"
+                            onClick={(e) => handleToggleCompletion(item.insightId, !!item.isCompleted, e)}
+                            title="Mark as done"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="3" width="18" height="18" rx="2" />
+                            </svg>
+                          </button>
+                        </div>
+                        <div className="ks">{item.summary.shortSnippet || "Action required"}</div>
+                        <div className="kard-tags">
+                          <span className="tag tr">Action Required</span>
+                          {item.matchedLabels.slice(0, 1).map(lbl => (
+                            <span className="tag tn" key={lbl}>{lbl}</span>
+                          ))}
+                          {nearestDeadline && (
+                            <span className="tag ta">
+                              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                              Due {new Date(nearestDeadline.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                            </span>
+                          )}
+                          <span className="kt">
+                            {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
                           </span>
-                        )}
-                        <span className="kt">
-                          {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
-                        </span>
+                        </div>
                       </div>
-                    </div>
-                  )})}
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -1108,18 +1111,18 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               <div className="board-hd" onClick={() => setIsFocusOpen(!isFocusOpen)} style={{ cursor: 'pointer', userSelect: 'none' }}>
                 <div className="board-bar"></div>
                 <span className="board-name">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6, verticalAlign: 'text-bottom'}}><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6, verticalAlign: 'text-bottom' }}><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
                   Focus Board
                 </span>
                 <span className="board-desc">&nbsp;— pinned · most relevant today</span>
                 <span className="board-badge">{loading ? '...' : `${focusItems.length} items`}</span>
                 <span style={{ marginLeft: '12px', color: 'var(--text-3)', transition: 'transform 0.2s', transform: isFocusOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </span>
               </div>
               {isFocusOpen && (
                 <div className="track">
-                  {loading && [0,1,2].map(i => (
+                  {loading && [0, 1, 2].map(i => (
                     <div className="kard kard-skeleton" key={i}>
                       <div className="skel-line skel-line--sender" />
                       <div className="skel-line skel-line--snip" />
@@ -1128,47 +1131,48 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                     </div>
                   ))}
                   {!loading && focusItems.length === 0 && (
-                     <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '13px', lineHeight: 1.5 }}>
-                       {isSyncing ? 'Evaluating emails in the background. Your most important emails will pop up here shortly...' : 'Inbox zero. Great job!'}
-                     </div>
+                    <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '13px', lineHeight: 1.5 }}>
+                      {isSyncing ? 'Evaluating emails in the background. Your most important emails will pop up here shortly...' : 'Inbox zero. Great job!'}
+                    </div>
                   )}
                   {!loading && focusItems.map((item) => {
                     const nearestDeadline = item.dates?.filter(d => d.type === 'deadline').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
                     return (
-                    <div
-                      className={`kard ${selectedInsightId === item.insightId ? 'sel' : ''}`}
-                      key={item.insightId}
-                      onClick={() => selectEmail(item)}
-                    >
-                      <div className="kard-top">
-                        <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
-                        <button
-                          className="kard-check-btn"
-                          onClick={(e) => handleToggleCompletion(item.insightId, !!item.isCompleted, e)}
-                          title="Mark as done"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                          </svg>
-                        </button>
-                      </div>
-                      <div className="ks">{item.summary.shortSnippet || "No summary available"}</div>
-                      <div className="kard-tags">
-                        {item.matchedLabels.slice(0, 2).map(lbl => (
-                          <span className="tag" key={lbl}>{lbl}</span>
-                        ))}
-                        {nearestDeadline && (
-                          <span className="tag ta">
-                            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '2px'}}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                            Due {new Date(nearestDeadline.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      <div
+                        className={`kard ${selectedInsightId === item.insightId ? 'sel' : ''}`}
+                        key={item.insightId}
+                        onClick={() => selectEmail(item)}
+                      >
+                        <div className="kard-top">
+                          <div className="kf">{item.from.name || item.from.email.split('@')[0]}</div>
+                          <button
+                            className="kard-check-btn"
+                            onClick={(e) => handleToggleCompletion(item.insightId, !!item.isCompleted, e)}
+                            title="Mark as done"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="3" width="18" height="18" rx="2" />
+                            </svg>
+                          </button>
+                        </div>
+                        <div className="ks">{item.summary.shortSnippet || "No summary available"}</div>
+                        <div className="kard-tags">
+                          {item.matchedLabels.slice(0, 2).map(lbl => (
+                            <span className="tag" key={lbl}>{lbl}</span>
+                          ))}
+                          {nearestDeadline && (
+                            <span className="tag ta">
+                              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                              Due {new Date(nearestDeadline.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                            </span>
+                          )}
+                          <span className="kt">
+                            {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
                           </span>
-                        )}
-                        <span className="kt">
-                          {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
-                        </span>
+                        </div>
                       </div>
-                    </div>
-                  )})}
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -1184,29 +1188,17 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
 
           <div className="agenda-rows">
             {loading && <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '13px' }}>Loading agenda...</div>}
-            
+
             {!loading && selectedLabel && filteredItems.length === 0 && (
               <div className="empty-fallback">No emails found for this label.</div>
             )}
-            
+
             {!loading && filteredItems.map((item) => (
               <div
                 className={`arow ${selectedInsightId === item.insightId ? 'sel' : ''}`}
                 key={item.insightId}
                 onClick={() => selectEmail(item)}
               >
-                <div className="ar-body">
-                  <div className="ar-from">{item.from.name || item.from.email}</div>
-                  <div className="ar-snip">{item.summary.shortSnippet}</div>
-                  <div className="ar-tags">
-                    {item.matchedLabels.slice(0, 3).map((lbl) => (
-                      <span className="ar-label-chip" key={lbl} style={getAgendaLabelStyle(lbl)}>{lbl}</span>
-                    ))}
-                  </div>
-                </div>
-                <div className="ar-time">
-                  {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
-                </div>
                 <button
                   className="ar-check-btn"
                   onClick={(e) => handleToggleCompletion(item.insightId, !!item.isCompleted, e)}
@@ -1216,6 +1208,18 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                     <rect x="3" y="3" width="18" height="18" rx="2" />
                   </svg>
                 </button>
+                <div className="ar-time">
+                  {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
+                </div>
+                <div className="ar-body">
+                  <div className="ar-from">{item.from.name || item.from.email}</div>
+                  <div className="ar-snip">{item.summary.shortSnippet}</div>
+                  <div className="ar-tags">
+                    {item.matchedLabels.slice(0, 3).map((lbl) => (
+                      <span className="ar-label-chip" key={lbl} style={getAgendaLabelStyle(lbl)}>{lbl}</span>
+                    ))}
+                  </div>
+                </div>
               </div>
             ))}
 
@@ -1234,7 +1238,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                   <span className="done-head-count">{completedItems.length}</span>
                   <span className={`done-head-toggle ${isDoneOpen ? 'open' : ''}`}>
                     <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </span>
                 </button>
@@ -1249,18 +1253,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                         key={item.insightId}
                         onClick={() => selectEmail(item)}
                       >
-                        <div className="ar-body">
-                          <div className="ar-from" style={{ textDecoration: 'line-through' }}>{item.from.name || item.from.email}</div>
-                          <div className="ar-snip" style={{ textDecoration: 'line-through' }}>{item.summary.shortSnippet}</div>
-                          <div className="ar-tags">
-                            {item.matchedLabels.slice(0, 2).map((lbl) => (
-                              <span className="ar-label-chip" key={lbl} style={getAgendaLabelStyle(lbl)}>{lbl}</span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="ar-time">
-                          {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
-                        </div>
                         <button
                           className="ar-check-btn ar-check-btn--done"
                           onClick={(e) => handleToggleCompletion(item.insightId, true, e)}
@@ -1270,6 +1262,18 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                             <polyline points="20 6 9 17 4 12" />
                           </svg>
                         </button>
+                        <div className="ar-time">
+                          {item.timestamps.lastSignalAt ? new Date(item.timestamps.lastSignalAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'}
+                        </div>
+                        <div className="ar-body">
+                          <div className="ar-from" style={{ textDecoration: 'line-through' }}>{item.from.name || item.from.email}</div>
+                          <div className="ar-snip" style={{ textDecoration: 'line-through' }}>{item.summary.shortSnippet}</div>
+                          <div className="ar-tags">
+                            {item.matchedLabels.slice(0, 2).map((lbl) => (
+                              <span className="ar-label-chip" key={lbl} style={getAgendaLabelStyle(lbl)}>{lbl}</span>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1293,7 +1297,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                   </span>
                   <span className={`low-priority-toggle ${isLowPriorityOpen ? 'open' : ''}`}>
                     <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </span>
                 </button>
@@ -1365,8 +1369,8 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               <div className="det-empty-state">
                 <div className="det-empty-icon">
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="4" width="20" height="16" rx="2"/>
-                    <polyline points="2,4 12,13 22,4"/>
+                    <rect x="2" y="4" width="20" height="16" rx="2" />
+                    <polyline points="2,4 12,13 22,4" />
                   </svg>
                 </div>
                 <div className="det-empty-title">No email selected</div>
@@ -1550,10 +1554,10 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
                                   >
                                     <div className="att-icon">
                                       <svg viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <rect x="0.5" y="0.5" width="35" height="43" rx="4" fill="var(--surface-2)" stroke="var(--border)"/>
-                                        <rect x="4" y="30" width="28" height="3" rx="1.5" fill="var(--accent)"/>
-                                        <rect x="4" y="35" width="18" height="3" rx="1.5" fill="var(--border-lt)"/>
-                                        <rect x="4" y="10" width="28" height="14" rx="2" fill="var(--surface-2)"/>
+                                        <rect x="0.5" y="0.5" width="35" height="43" rx="4" fill="var(--surface-2)" stroke="var(--border)" />
+                                        <rect x="4" y="30" width="28" height="3" rx="1.5" fill="var(--accent)" />
+                                        <rect x="4" y="35" width="18" height="3" rx="1.5" fill="var(--border-lt)" />
+                                        <rect x="4" y="10" width="28" height="14" rx="2" fill="var(--surface-2)" />
                                         <text x="18" y="20" textAnchor="middle" fontSize="7" fontWeight="600" fill="var(--text-3)" fontFamily="var(--font-mono)">{ext.substring(0, 4)}</text>
                                       </svg>
                                     </div>
@@ -1628,9 +1632,9 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               }}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}>
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                <polyline points="15 3 21 3 21 9"/>
-                <line x1="10" y1="14" x2="21" y2="3"/>
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
               </svg>
               Open in Gmail
             </a>
