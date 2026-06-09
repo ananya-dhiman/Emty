@@ -4,6 +4,8 @@ import './App.css'
 import { signOutUser, auth } from './utils/firebase'
 import { onIdTokenChanged, signInWithCustomToken } from 'firebase/auth'
 import axios from 'axios'
+import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 import { ConnectGmail } from './components/ConnectGmail'
 import { Dashboard } from './components/Dashboard'
 import { Profile } from './components/Profile'
@@ -62,18 +64,42 @@ function App() {
 
   // Check session and URL params on mount
   useEffect(() => {
-    // 1. Check URL parameters for OAuth redirect status
+    // 1. Listen for deep link event from Rust (production: emty://auth?desktop_login_token=... or error=...)
+    let unlistenDeepLink: (() => void) | null = null;
+    listen<{ token?: string, error?: string }>('deep-link-received', (event) => {
+      const { token, error: deepLinkError } = event.payload;
+
+      if (deepLinkError) {
+        setError(`Authentication Error: ${deepLinkError.replace(/_/g, ' ')}`);
+        setLoggedOutView('signin');
+        setLoading(false);
+        return;
+      }
+
+      if (!token) return;
+      setLoading(true);
+      signInWithCustomToken(auth, token).then(() => {
+        // Firebase onIdTokenChanged below will pick up the new user
+      }).catch((err: any) => {
+        console.error('Deep link custom token sign in failed', err);
+        setError('Desktop Secure Login failed: ' + err.message);
+        setLoggedOutView('signin');
+        setLoading(false);
+      });
+    }).then((fn) => { unlistenDeepLink = fn; }).catch(() => {
+      // Not in Tauri context (e.g. browser preview) — ignore
+    });
+
+    // 2. Fallback: check URL parameters for dev mode (Vite localhost:5173)
     const params = new URLSearchParams(window.location.search);
     const gmailSuccess = params.get('gmail_success');
     const gmailError = params.get('gmail_error');
-
     const desktopLoginToken = params.get('desktop_login_token');
     const authError = params.get('error');
 
     if (gmailSuccess === 'true') {
       setIsGmailConnected(true);
-      setRoute('syncing'); // Sync runs first; it navigates to onboarding when done
-      // Clean up URL
+      setRoute('syncing');
       window.history.replaceState({}, document.title, window.location.pathname);
     } else if (gmailError) {
       if (gmailError === 'true') {
@@ -81,7 +107,6 @@ function App() {
       } else {
          setError(`Gmail connection error: ${gmailError.replace('_', ' ')}`);
       }
-      // Clean up URL
       window.history.replaceState({}, document.title, window.location.pathname);
     } else if (desktopLoginToken) {
       setLoading(true);
@@ -137,7 +162,10 @@ function App() {
       }
     });
     
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (unlistenDeepLink) unlistenDeepLink();
+    };
   }, [user]); // Run on mount and react if `user` is modified
 
   // Apply theme class to document and persist to localStorage
@@ -152,8 +180,18 @@ function App() {
   const handleLogin = async () => {
     setLoading(true);
     setError('');
-    // Safely redirect Tauri app to Backend handler
-    window.location.href = `${API_BASE_URL}/api/auth/google/desktop/initiate`;
+    // Open in the SYSTEM browser (Chrome/Edge), not the Tauri webview.
+    // This lets Google redirect to emty:// which the OS can route back
+    // to the app. If we navigate the webview directly, emty:// has no
+    // handler inside the webview and the flow breaks.
+    try {
+      await invoke('open_in_browser', {
+        url: `${API_BASE_URL}/api/auth/google/desktop/initiate`
+      });
+    } catch (e) {
+      // Fallback for non-Tauri / browser preview context
+      window.location.href = `${API_BASE_URL}/api/auth/google/desktop/initiate`;
+    }
   };
 
   /**

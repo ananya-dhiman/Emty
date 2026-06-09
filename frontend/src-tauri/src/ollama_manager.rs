@@ -306,25 +306,13 @@ impl OllamaManager {
     pub async fn provision_models(&self, origin: &str) {
         *self.provisioning_status.lock().unwrap() = "Checking models".to_string();
         let target_inference = { self.selected_model.lock().unwrap().clone() };
-        let embed_model = "nomic-embed-text";
         
-        let has_embed = Self::check_model(origin, embed_model).await;
+        // Embeddings (nomic-embed-text) have been removed; keep state flag true for frontend compatibility.
+        *self.embedding_model_present.lock().unwrap() = true;
+        
         let has_inf = Self::check_model(origin, &target_inference).await;
         
-        *self.embedding_model_present.lock().unwrap() = has_embed;
         *self.inference_model_present.lock().unwrap() = has_inf;
-
-        if !has_embed {
-            *self.provisioning_status.lock().unwrap() = format!("Pulling {}", embed_model);
-            let ok = Self::pull_model(origin, embed_model).await;
-            if ok {
-                *self.embedding_model_present.lock().unwrap() = true;
-            } else {
-                *self.last_error.lock().unwrap() = Some(format!("Failed to pull {}", embed_model));
-                *self.provisioning_status.lock().unwrap() = format!("Error pulling {}", embed_model);
-                // Continue despite missing embeddings, but mark error
-            }
-        }
 
         if !has_inf {
             *self.provisioning_status.lock().unwrap() = format!("Pulling target inference model ({})", target_inference);
@@ -332,18 +320,9 @@ impl OllamaManager {
             if ok {
                 *self.inference_model_present.lock().unwrap() = true;
             } else {
-                log::warn!("Failed to pull target inference model {}, falling back to qwen2.5:3b", target_inference);
-                *self.provisioning_status.lock().unwrap() = "Falling back to qwen2.5:3b".to_string();
-                let fallback = "qwen2.5:3b";
-                let fallback_ok = Self::pull_model(origin, fallback).await;
-                if fallback_ok {
-                    *self.selected_model.lock().unwrap() = fallback.to_string();
-                    *self.inference_model_present.lock().unwrap() = true;
-                } else {
-                    *self.last_error.lock().unwrap() = Some(format!("Failed to pull fallback {}", fallback));
-                    *self.provisioning_status.lock().unwrap() = format!("Error pulling fallback {}", fallback);
-                    return;
-                }
+                *self.last_error.lock().unwrap() = Some(format!("Failed to pull target model {}", target_inference));
+                *self.provisioning_status.lock().unwrap() = format!("Error pulling model {}", target_inference);
+                return;
             }
         }
 

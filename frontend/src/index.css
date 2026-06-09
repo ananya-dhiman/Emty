@@ -328,3 +328,33 @@ svg {
   width: 100%;
   display: flex;
 }
+
+/* ───────────────── DIAMOND LOADER ───────────────── */
+.sharp-diamond-loader {
+  display: inline-block;
+  width: 48px;
+  height: 48px;
+  background-color: transparent;
+  border: 2px solid var(--accent);
+  transform: rotate(45deg);
+  animation: diamondRotate 2.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;
+  box-shadow: 0 0 12px var(--accent-glow), inset 0 0 12px var(--accent-glow);
+}
+
+.widget-diamond-loader {
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  background-color: transparent;
+  border: 2px solid var(--accent);
+  transform: rotate(45deg);
+  animation: diamondRotate 2.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;
+  box-shadow: 0 0 8px var(--accent-glow), inset 0 0 8px var(--accent-glow);
+  margin-bottom: 16px;
+}
+
+@keyframes diamondRotate {
+  0% { transform: rotate(45deg) rotateX(0deg) rotateY(0deg); }
+  50% { transform: rotate(45deg) rotateX(180deg) rotateY(0deg); }
+  100% { transform: rotate(45deg) rotateX(180deg) rotateY(180deg); }
+}

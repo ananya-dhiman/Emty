@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/SystemLoader.css';
-import { Logo } from './Logo';
 
 const MESSAGES = [
   'INITIALIZING SUBSYSTEMS',
@@ -9,7 +8,7 @@ const MESSAGES = [
   'LOADING PREFERENCES',
   'INITIALIZING AI ENGINE',
   'STARTING ENGINE',
-  
+
 ];
 
 export const SystemLoader: React.FC = () => {
@@ -24,18 +23,10 @@ export const SystemLoader: React.FC = () => {
 
   return (
     <div className="sys-loader-root">
-      <div className="sys-loader-logo">
-        <Logo size={28} />
-      </div>
+      <div className="sharp-diamond-loader" style={{ marginBottom: '50px' }}></div>
 
       <div className="sys-loader-status">
         {MESSAGES[msgIndex]}<span className="typing-cursor" style={{ marginLeft: 6 }}>_</span>
-      </div>
-
-      <div className="sys-loader-skeleton">
-        <div className="sys-sk-line l1" />
-        <div className="sys-sk-line l2" />
-        <div className="sys-sk-line l3" />
       </div>
 
       <div className="sys-loader-note">

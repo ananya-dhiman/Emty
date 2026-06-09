@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node18 --external:better-sqlite3 --outfile=dist/index.js && node -e \"require('fs').copyFileSync('.env', 'dist/.env')\"",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node18 --external:better-sqlite3 --outfile=dist/index.js && node -e \"const fs = require('fs'); fs.copyFileSync('.env', 'dist/.env'); fs.writeFileSync('dist/package.json', JSON.stringify({type: 'commonjs'}))\"",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"

@@ -9,6 +9,13 @@
     "beforeDevCommand": "npm --prefix ../backend run build && npm run setup:sidecar && npm run dev",
     "beforeBuildCommand": "npm --prefix ../backend run build && npm run setup:sidecar && npm run setup:ollama-sidecar && npm run build"
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["emty"]
+      }
+    }
+  },
   "app": {
     "windows": [
       {

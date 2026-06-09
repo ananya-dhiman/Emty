@@ -2,13 +2,40 @@ mod gpu_detector;
 mod ollama_manager;
 mod sync_timer;
 
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tauri_plugin_deep_link::DeepLinkExt;
+
+// Helper: parse and emit a deep link URL to the main window
+fn handle_deep_link_url(app: &tauri::AppHandle, url_str: &str) {
+    log::info!("Deep link received: {}", url_str);
+    if let Ok(parsed) = url::Url::parse(url_str) {
+        let token = parsed
+            .query_pairs()
+            .find(|(k, _)| k == "desktop_login_token")
+            .map(|(_, v)| v.to_string());
+        let error_param = parsed
+            .query_pairs()
+            .find(|(k, _)| k == "error")
+            .map(|(_, v)| v.to_string());
+
+        if token.is_some() || error_param.is_some() {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+                let _ = win.emit(
+                    "deep-link-received",
+                    serde_json::json!({ "token": token, "error": error_param }),
+                );
+            }
+        }
+    }
+}
 
 use gpu_detector::{GpuDetector, GpuInfo};
 use ollama_manager::{OllamaManager, OllamaState};
@@ -74,6 +101,17 @@ fn open_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Open a URL in the default system browser (not the Tauri webview).
+/// Used for the Google OAuth flow so the emty:// redirect is handled
+/// by the OS, which can route it back to the Tauri app.
+#[tauri::command]
+async fn open_in_browser(app_handle: tauri::AppHandle, url: String) -> Result<(), String> {
+    app_handle
+        .shell()
+        .open(&url, None)
+        .map_err(|e| e.to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -81,8 +119,34 @@ fn open_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Single-instance must be registered BEFORE deep-link so Windows deep link
+        // clicks are forwarded to the already-running process instead of spawning
+        // a new blank window.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // Bring the existing main window to front immediately
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+            // Look for the emty:// URL in the argv passed from the second instance
+            for arg in args.iter().skip(1) {
+                if arg.starts_with("emty://") {
+                    handle_deep_link_url(app, arg);
+                    break;
+                }
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            // Register the emty:// URI scheme in the Windows registry so the OS
+            // knows to route emty://... URLs back to this app. This is needed in
+            // dev mode because the NSIS installer (which normally does this) has
+            // not run yet.
+            if let Err(e) = app.deep_link().register_all() {
+                log::warn!("Failed to register deep link schemes: {}", e);
+            }
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -309,6 +373,18 @@ pub fn run() {
                 .build(app)?;
 
             // ---------------------------------------------------------------
+            // Deep Link handler — cold start: the app was not running when
+            // emty://auth?... was clicked. For the hot path (app already open),
+            // the single-instance callback above handles it instead.
+            // ---------------------------------------------------------------
+            let deep_link_handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    handle_deep_link_url(&deep_link_handle, &url.to_string());
+                }
+            });
+
+            // ---------------------------------------------------------------
             // Background Sync Timer & Launch Check
             // ---------------------------------------------------------------
             let app_handle = app.handle().clone();
@@ -338,7 +414,8 @@ pub fn run() {
             get_gpu_info,
             restart_ollama,
             set_active_account,
-            open_main_window
+            open_main_window,
+            open_in_browser
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
