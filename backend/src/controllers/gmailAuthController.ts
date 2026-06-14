@@ -19,48 +19,43 @@ import logger from '../utils/logger';
 // ✔ generate OAuth URL (pass state)
 // ✔ redirect
 export const initiateGoogleOAuth = async (req:AuthRequest, res:Response): Promise<void> => {
-    const oauth2Client = createOAuthClient();
-    const uid= req.user?.uid;
+    const uid = req.user?.uid;
 
-    const user = await UserModel.findOne({ firebaseId: uid });
-
-    if(!user){
-        res.status(400).json({
-            success: false, 
-            message: 'User not found.'
-        });
-        return;
-    }
-
-
-    const state = crypto.randomBytes(32).toString('hex');
-    const uidString = uid || '';
-    
-    await client.setEx(
-        `oauth:state:${state}`,
-        300, // TTL in seconds (5 minutes)
-        uidString
-    );
     try {
-        const authorizationUrl = await generateOAuthUrl(oauth2Client,state);
+        const oauth2Client = createOAuthClient();
+
+        const user = await UserModel.findOne({ firebaseId: uid });
+
+        if (!user) {
+            res.status(400).json({
+                success: false,
+                message: 'User not found.'
+            });
+            return;
+        }
+
+        const state = crypto.randomBytes(32).toString('hex');
+        const uidString = uid || '';
+
+        await client.setEx(
+            `oauth:state:${state}`,
+            300, // TTL in seconds (5 minutes)
+            uidString
+        );
+
+        const authorizationUrl = await generateOAuthUrl(oauth2Client, state);
 
         res.status(200).json({
             success: true,
             authorizationUrl: authorizationUrl
         });
-    }catch(error){
-        logger.info("Not able to initiate gmail auth request", error);
+    } catch (error) {
+        logger.info('Not able to initiate gmail auth request', error);
         res.status(500).json({
             success: false,
             message: 'Failed to initiate Google OAuth.'
         });
-        return;
-
     }
-       
-
-
-
 }
 
 
@@ -149,11 +144,16 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         // State is one-time use. Delete it to prevent reuse.
         await client.del(`oauth:state:${state}`);
 
-        res.redirect(process.env.FRONTEND_URL + '/?gmail_success=true');
+        // Redirect back into the desktop app via deep link.
+        // FRONTEND_DEEP_LINK=emty://auth routes the result back through the OS
+        // to the running Tauri process. Fallback covers web/dev preview.
+        const deepLink = process.env.FRONTEND_DEEP_LINK || 'emty://auth';
+        res.redirect(`${deepLink}?gmail_success=true`);
 
     } catch (error: any) {
         logger.info('Gmail callback error:', error.message);
-        res.redirect(process.env.FRONTEND_URL + '/?gmail_error=true');
+        const deepLink = process.env.FRONTEND_DEEP_LINK || 'emty://auth';
+        res.redirect(`${deepLink}?gmail_error=true`);
     }
 };
 

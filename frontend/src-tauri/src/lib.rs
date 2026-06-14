@@ -23,14 +23,27 @@ fn handle_deep_link_url(app: &tauri::AppHandle, url_str: &str) {
             .query_pairs()
             .find(|(k, _)| k == "error")
             .map(|(_, v)| v.to_string());
+        let gmail_success = parsed
+            .query_pairs()
+            .find(|(k, _)| k == "gmail_success")
+            .map(|(_, v)| v.to_string());
+        let gmail_error = parsed
+            .query_pairs()
+            .find(|(k, _)| k == "gmail_error")
+            .map(|(_, v)| v.to_string());
 
-        if token.is_some() || error_param.is_some() {
+        if token.is_some() || error_param.is_some() || gmail_success.is_some() || gmail_error.is_some() {
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.show();
                 let _ = win.set_focus();
                 let _ = win.emit(
                     "deep-link-received",
-                    serde_json::json!({ "token": token, "error": error_param }),
+                    serde_json::json!({
+                        "token": token,
+                        "error": error_param,
+                        "gmail_success": gmail_success,
+                        "gmail_error": gmail_error
+                    }),
                 );
             }
         }
@@ -121,19 +134,13 @@ pub fn run() {
     tauri::Builder::default()
         // Single-instance must be registered BEFORE deep-link so Windows deep link
         // clicks are forwarded to the already-running process instead of spawning
-        // a new blank window.
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        // a new blank window. The deep-link feature automatically routes the URL
+        // to on_open_url on the existing instance — we only need to focus the window here.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Bring the existing main window to front immediately
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.show();
                 let _ = win.set_focus();
-            }
-            // Look for the emty:// URL in the argv passed from the second instance
-            for arg in args.iter().skip(1) {
-                if arg.starts_with("emty://") {
-                    handle_deep_link_url(app, arg);
-                    break;
-                }
             }
         }))
         .plugin(tauri_plugin_deep_link::init())

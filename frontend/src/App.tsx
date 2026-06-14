@@ -64,10 +64,41 @@ function App() {
 
   // Check session and URL params on mount
   useEffect(() => {
-    // 1. Listen for deep link event from Rust (production: emty://auth?desktop_login_token=... or error=...)
+    // 1. Listen for deep link event from Rust (production: emty://auth?... or gmail params)
     let unlistenDeepLink: (() => void) | null = null;
-    listen<{ token?: string, error?: string }>('deep-link-received', (event) => {
-      const { token, error: deepLinkError } = event.payload;
+    listen<{ token?: string, error?: string, gmail_success?: string, gmail_error?: string }>('deep-link-received', async (event) => {
+      const { token, error: deepLinkError, gmail_success, gmail_error } = event.payload;
+
+      // Handle Gmail connect success via deep link (emty://auth?gmail_success=true)
+      // IMPORTANT: user object is stale from login time — gmailAccountId was null then.
+      // Re-fetch from backend (which now has the Gmail account saved in MongoDB)
+      // before routing to SyncLoading, otherwise gmailAccountId stays null and sync is skipped.
+      if (gmail_success === 'true') {
+        try {
+          const storedToken = localStorage.getItem('firebaseToken');
+          if (storedToken) {
+            const refreshed = await axios.post(`${API_BASE_URL}/api/auth/login`, { token: storedToken });
+            if (refreshed.data.success) {
+              setUser(refreshed.data.user);
+            }
+          }
+        } catch (e) {
+          console.error('[Emty] Failed to refresh user after Gmail connect:', e);
+        }
+        setIsGmailConnected(true);
+        setRoute('syncing');
+        setLoading(false);
+        return;
+      }
+
+      // Handle Gmail connect error via deep link (emty://auth?gmail_error=...)
+      if (gmail_error) {
+        setError(gmail_error === 'true'
+          ? 'Failed to connect Gmail account. Please try again.'
+          : `Gmail connection error: ${gmail_error.replace(/_/g, ' ')}`);
+        setLoading(false);
+        return;
+      }
 
       if (deepLinkError) {
         setError(`Authentication Error: ${deepLinkError.replace(/_/g, ' ')}`);
@@ -215,8 +246,15 @@ function App() {
 
       const data = response.data;
       if (data.success && data.authorizationUrl) {
-        // Redirect to Google Consent screen
-        window.location.href = data.authorizationUrl;
+        // Open in the SYSTEM browser (Chrome/Edge), not the Tauri webview.
+        // This lets Google redirect to emty:// which the OS routes back to the app.
+        // Navigating the webview directly to Google causes "Origin header is not a valid URL".
+        try {
+          await invoke('open_in_browser', { url: data.authorizationUrl });
+        } catch (e) {
+          // Fallback for non-Tauri context (browser dev preview)
+          window.location.href = data.authorizationUrl;
+        }
       } else {
         throw new Error(data.message || 'Failed to initiate Gmail connection');
       }
