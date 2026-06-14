@@ -22,13 +22,8 @@ function App() {
     localStorage.setItem('app-theme', theme);
   }, [theme]);
 
-  const handleSignInClick = () => {
-    // In production, this might redirect to the actual web app or desktop app download link
-    window.location.href = 'https://app.emty.co/login'; 
-  };
-
   return (
-    <LandingPage theme={theme} setTheme={setTheme} onSignInClick={handleSignInClick} />
+    <LandingPage theme={theme} setTheme={setTheme} />
   );
 }
 

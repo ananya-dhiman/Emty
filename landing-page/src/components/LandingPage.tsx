@@ -6,7 +6,6 @@ import { LogoMark } from './Logo';
 interface LandingPageProps {
   theme: 'light' | 'dark';
   setTheme: React.Dispatch<React.SetStateAction<'light' | 'dark'>>;
-  onSignInClick?: () => void;
 }
 
 /* ════════════════════════════════════════════════
@@ -109,7 +108,7 @@ const STATUS_CELLS = [
 /* ─── FOOTER COLUMNS ─── */
 const FOOTER_COLS = [
   { title: 'PRODUCT', links: ['Features', 'How it works', 'Pricing', 'Changelog'] },
-  { title: 'COMPANY', links: ['About', 'Blog', 'Contact', 'Early access'] },
+  { title: 'COMPANY', links: ['About', 'Blog', 'Contact', 'Download App'] },
   { title: 'LEGAL',   links: ['Privacy policy', 'Terms of service', 'Data handling', 'Security'] },
 ];
 
@@ -227,7 +226,7 @@ const Tape: React.FC<{ reversed?: boolean }> = ({ reversed = false }) => (
 /* ════════════════════════════════════════════════
    MAIN COMPONENT
 ════════════════════════════════════════════════ */
-const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme, onSignInClick }) => {
+const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme }) => {
   const mode = theme;
   const toggle = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   const [openFaq, setOpenFaq] = useState<number | null>(null);
@@ -240,11 +239,6 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme, onSignInClic
   const toggleFaq = (i: number) =>
     setOpenFaq(prev => (prev === i ? null : i));
 
-  const handleEarlyAccessClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    e.preventDefault();
-    onSignInClick?.();
-  };
-
   return (
     <div className="lp-root">
 
@@ -256,7 +250,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme, onSignInClic
         </a>
 
         <ul className="lp-nav-links">
-          {['Features', 'How it works', 'Privacy', 'FAQ'].map(label => (
+          {['Features', 'How it works', 'Privacy', 'Download', 'FAQ'].map(label => (
             <li key={label}>
               <a href={`#${label.toLowerCase().replace(/\s+/g, '-')}`}>{label}</a>
             </li>
@@ -267,7 +261,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme, onSignInClic
           <button className="lp-theme-toggle" onClick={toggle}>
             {mode === 'dark' ? '☼ LIGHT' : '☾ DARK'}
           </button>
-          <a className="lp-btn-primary" href="#" onClick={handleEarlyAccessClick}>Get early access</a>
+          <a className="lp-btn-primary" href={import.meta.env.WINDOWS_EXE}>Download App</a>
         </div>
       </nav>
 
@@ -291,11 +285,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme, onSignInClic
             <div className="lp-hero-actions">
               <a
                 className="lp-btn-primary"
-                href="#"
-                onClick={handleEarlyAccessClick}
+                href={import.meta.env.WINDOWS_EXE}
                 style={{ fontSize: 14, padding: '14px 28px' }}
               >
-                Get early access →
+                Download App →
               </a>
               <a className="lp-btn-outline" href="#how-it-works">
                 See how it works
@@ -425,11 +418,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme, onSignInClic
             <div className="lp-empty-cta">
               <a
                 className="lp-btn-primary"
-                href="#"
-                onClick={handleEarlyAccessClick}
+                href={import.meta.env.WINDOWS_EXE}
                 style={{ fontSize: 14, padding: '14px 24px' }}
               >
-                Get early access →
+                Download App →
               </a>
               <span className="lp-empty-cta-note">// Gmail · 30 seconds to connect</span>
             </div>
@@ -508,6 +500,61 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme, onSignInClic
                 <div className="lp-priv-cd">{c.d}</div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ══ DOWNLOAD ══ */}
+      <section className="lp-sec" id="download">
+        <div className="lp-sec-hd">
+          <span className="lp-sec-lbl">—</span>
+          <span className="lp-sec-lbl">DOWNLOAD APP</span>
+        </div>
+        <div className="lp-dl-grid">
+          {/* Windows */}
+          <div className="lp-dl-card">
+            <div className="lp-dl-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/>
+              </svg>
+            </div>
+            <div className="lp-dl-os">WINDOWS</div>
+            <div className="lp-dl-ver">VERSION 1.0.0</div>
+            <a
+              className="lp-btn-primary"
+              href={import.meta.env.WINDOWS_EXE}
+              style={{ marginTop: 'auto', fontSize: 13, padding: '12px 24px' }}
+            >
+              Download .exe
+            </a>
+          </div>
+
+          {/* Mac */}
+          <div className="lp-dl-card">
+            <div className="lp-dl-icon" style={{ opacity: 0.5 }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.15 2.65.83 3.32 2.01-2.91 1.76-2.4 5.86.37 7.02-.75 1.54-1.78 3.03-3.1 4.2M12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.39 2.31-1.84 4.38-3.74 4.25z"/>
+              </svg>
+            </div>
+            <div className="lp-dl-os" style={{ opacity: 0.5 }}>MAC OS</div>
+            <div className="lp-dl-ver" style={{ opacity: 0.5 }}>APPLE SILICON / INTEL</div>
+            <div className="lp-btn-outline" style={{ marginTop: 'auto', fontSize: 13, padding: '12px 24px', opacity: 0.5, cursor: 'not-allowed' }}>
+              Coming Soon
+            </div>
+          </div>
+
+          {/* Linux */}
+          <div className="lp-dl-card">
+            <div className="lp-dl-icon" style={{ opacity: 0.5 }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M11.666 2.005C8.948 2.128 7.234 4.417 7.234 6.942v1.54c-1.391.808-2.613 1.942-3.327 3.39-1.125 2.274-1.187 4.707-.468 7.043.435 1.411 2.314 2.809 3.518 3.085h10.086c1.204-.276 3.083-1.674 3.518-3.085.719-2.336.657-4.769-.468-7.043-.714-1.448-1.936-2.582-3.327-3.39v-1.54c0-2.525-1.714-4.814-4.432-4.937a5.533 5.533 0 0 0-.668 0zM10 8c.552 0 1 .448 1 1s-.448 1-1 1-1-.448-1-1 .448-1 1-1zm4 0c.552 0 1 .448 1 1s-.448 1-1 1-1-.448-1-1 .448-1 1-1zm-2 5c1.105 0 2 .895 2 2s-.895 2-2 2-2-.895-2-2 .895-2 2-2z"/>
+              </svg>
+            </div>
+            <div className="lp-dl-os" style={{ opacity: 0.5 }}>LINUX</div>
+            <div className="lp-dl-ver" style={{ opacity: 0.5 }}>DEB / APPIMAGE</div>
+            <div className="lp-btn-outline" style={{ marginTop: 'auto', fontSize: 13, padding: '12px 24px', opacity: 0.5, cursor: 'not-allowed' }}>
+              Coming Soon
+            </div>
           </div>
         </div>
       </section>

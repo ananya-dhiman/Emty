@@ -31,6 +31,10 @@
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.25; }
 }
+@keyframes lpGlassShine {
+  0% { transform: translateX(-150%) skewX(-25deg); }
+  100% { transform: translateX(150%) skewX(-25deg); }
+}
 
 /* ══════════════════════════════════════════
    ROOT WRAPPER — font vars scoped here only
@@ -111,36 +115,69 @@
 .lp-btn-primary {
   background:      var(--accent);
   color:           var(--accent-inv);
-  font-family:     var(--lp-body);
+  font-family:     var(--lp-mono);
   font-weight:     700;
-  font-size:       13px;
-  padding:         10px 20px;
+  font-size:       11px;
+  text-transform:  uppercase;
+  padding:         12px 24px;
   border:          none;
   cursor:          pointer;
-  letter-spacing:  0.3px;
+  letter-spacing:  1.5px;
   text-decoration: none;
   display:         inline-flex;
   align-items:     center;
   gap:             6px;
-  transition:      background 0.2s, transform 0.1s;
+  transition:      background 0.2s, filter 0.2s, transform 0.1s, box-shadow 0.2s;
+  position:        relative;
+  overflow:        hidden;
 }
-.lp-btn-primary:hover { filter: brightness(0.88); transform: translateY(-1px); }
+
+.lp-btn-primary::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 150%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.4),
+    transparent
+  );
+  transform: translateX(-150%) skewX(-25deg);
+}
+
+.lp-btn-primary:hover { 
+  filter: brightness(1.1); 
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.lp-btn-primary:hover::after {
+  animation: lpGlassShine 0.8s ease-in-out;
+}
 
 .lp-btn-outline {
   background:      transparent;
   color:           var(--text-1);
-  font-family:     var(--lp-body);
-  font-weight:     600;
-  font-size:       13px;
-  padding:         10px 20px;
+  font-family:     var(--lp-mono);
+  font-weight:     700;
+  font-size:       11px;
+  text-transform:  uppercase;
+  padding:         12px 24px;
   border:          1px solid var(--border-lt);
   cursor:          pointer;
+  letter-spacing:  1.5px;
   text-decoration: none;
   display:         inline-flex;
   align-items:     center;
   gap:             6px;
   transition:      all 0.2s;
+  position:        relative;
+  overflow:        hidden;
 }
+
 .lp-btn-outline:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ─── HERO ─── */
@@ -367,6 +404,14 @@
 .lp-priv-ct     { font-family: var(--lp-body); font-size: 15px; font-weight: 700; color: var(--text-1); margin-bottom: 8px; }
 .lp-priv-cd     { font-family: var(--lp-body); font-size: 13px; color: var(--text-2); line-height: 1.7; }
 
+/* ─── DOWNLOAD ─── */
+.lp-dl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border-lt); margin-top: 40px; }
+.lp-dl-card { background: var(--bg); padding: 48px 36px; text-align: center; transition: background 0.2s; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.lp-dl-card:hover { background: var(--surface); }
+.lp-dl-icon { font-size: 32px; color: var(--text-1); }
+.lp-dl-os { font-family: var(--lp-display); font-size: 32px; line-height: 1; color: var(--text-1); }
+.lp-dl-ver { font-family: var(--lp-mono); font-size: 10px; letter-spacing: 2px; color: var(--text-3); }
+
 /* ─── FAQ ─── */
 .lp-faq-grid  { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border-lt); margin-top: 40px; }
 .lp-faq-item  { background: var(--bg); padding: 28px 24px; cursor: pointer; transition: background 0.2s; }
@@ -414,6 +459,7 @@
   .lp-feat-grid,
   .lp-hiw-grid,
   .lp-priv-grid,
+  .lp-dl-grid,
   .lp-faq-grid,
   .lp-foot-top    { grid-template-columns: 1fr; }
   .lp-priv-left   { position: static; }
