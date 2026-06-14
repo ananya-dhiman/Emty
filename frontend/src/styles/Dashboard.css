@@ -254,14 +254,15 @@
 .board.focus .board-badge { color: var(--focus-badge-text); border-color: var(--focus-badge-border); background: var(--focus-badge-bg); }
 .board.action .board-badge { color: var(--action-badge-text); border-color: var(--action-badge-border); background: var(--action-badge-bg); }
 
-/* Horizontal scroll track */
+/* Horizontal scroll track — cards fill column-first (top to bottom in col 1, then col 2...) */
 .track {
   display: grid;
-  grid-template-rows: repeat(2, 1fr);
+  grid-template-rows: repeat(2, auto);
   grid-auto-flow: column;
   grid-auto-columns: 250px;
-  gap: 16px 12px;
-  padding: 24px 16px 24px;
+  align-items: start;
+  gap: 12px;
+  padding: 20px 16px 24px;
   overflow-x: auto; scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
   border-top: 1px solid var(--border-lt);

@@ -521,6 +521,8 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
             await runAiProcessingWorker(userId, accountId);
         } catch (loopErr: any) {
             logger.info(`[AI WORKER] Backlog drain loop error (non-fatal): ${loopErr.message}`);
+            // Revert progress state to idle/complete so the UI does not hang indefinitely
+            await updateProgressComplete(accountId);
         }
     } else {
         logger.debug(`[AI WORKER] Backlog fully drained for account ${accountId}`);

@@ -4,6 +4,7 @@ import '../styles/Dashboard.css';
 import { CalendarSidebar } from './CalendarSidebar';
 import { Logo } from './Logo';
 import { API_BASE_URL } from '../utils/api';
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 
 /* ── Collapsible section used in the detail panel body ── */
 const DetCollapsible: React.FC<{
@@ -260,6 +261,28 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   // Holds counts from the initial sync HTTP response so the poller can surface them on completion
   const manualSyncCountsRef = React.useRef<{ processed: number; succeeded: number; failed: number } | null>(null);
 
+  // Track which OS notifications have been sent this session to prevent duplicate spam
+  const sentNotificationIds = useRef<Set<string>>(new Set());
+
+  const dispatchOSNotification = useCallback(async (id: string, title: string, body: string) => {
+    if (sentNotificationIds.current.has(id)) return;
+    
+    try {
+      let permissionGranted = await isPermissionGranted();
+      if (!permissionGranted) {
+        const permission = await requestPermission();
+        permissionGranted = permission === 'granted';
+      }
+      
+      if (permissionGranted) {
+        sendNotification({ title, body });
+        sentNotificationIds.current.add(id);
+      }
+    } catch (err) {
+      console.warn('[Notifications] Failed to send OS notification:', err);
+    }
+  }, []);
+
   // feedbackMap: insightId -> 'boost' | 'suppress' | null
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'boost' | 'suppress' | null>>({});
 
@@ -282,6 +305,59 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       console.warn('[Feedback] Failed to record feedback (non-blocking):', err);
     }
   }, [feedbackMap]);
+
+  const DEADLINE_NOTIFY_HOURS = 48;
+  const MIN_SCORE_FOR_NOTIFY = 0.5;
+
+  const buildAndSendDeadlineNotifications = useCallback(async (items: PriorityRankingItem[]) => {
+    const now = Date.now();
+    for (const item of items) {
+      if (item.isCompleted) continue;
+      if ((item.score.totalScore ?? 0) < MIN_SCORE_FOR_NOTIFY) continue;
+
+      const upcomingDeadlines = (item.dates ?? [])
+        .filter(d => d.type === 'deadline')
+        .map(d => ({ ...d, date: new Date(d.date) }))
+        .filter(d => d.date.getTime() > now)
+        .sort((a, b) => a.date.getTime() - b.date.getTime());
+
+      if (upcomingDeadlines.length === 0) continue;
+
+      const nearest = upcomingDeadlines[0];
+      const hoursUntil = (nearest.date.getTime() - now) / (1000 * 60 * 60);
+      if (hoursUntil > DEADLINE_NOTIFY_HOURS) continue;
+
+      const urgency = hoursUntil <= 12 ? 'CRITICAL: ' : '';
+      const timeText = hoursUntil < 24 ? `in ${Math.ceil(hoursUntil)} hours` : 'tomorrow';
+      
+      const title = `${urgency}Deadline ${timeText} - ${item.from.name || item.from.email}`;
+      const body = item.summary.shortSnippet;
+      
+      // We append the deadline timestamp to the ID so if a deadline changes, we notify again
+      const id = `deadline-${item.insightId}-${nearest.date.getTime()}`;
+      
+      const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${item.gmailThreadId}`;
+      
+      try {
+        let permissionGranted = await isPermissionGranted();
+        if (!permissionGranted) {
+          const permission = await requestPermission();
+          permissionGranted = permission === 'granted';
+        }
+        
+        if (permissionGranted && !sentNotificationIds.current.has(id)) {
+          // sendNotification creates a simple OS notification
+          sendNotification({ 
+            title, 
+            body: `${body}\n\n[Open Dashboard to view Gmail thread]` 
+          });
+          sentNotificationIds.current.add(id);
+        }
+      } catch (err) {
+        console.warn('[Notifications] Failed to send OS notification:', err);
+      }
+    }
+  }, []);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -374,6 +450,18 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         setAgendaItems(response.data.others || []);
         setCompletedItems(response.data.completed || []);
         setLowPriorityItems(response.data.lowPriorityEmails || []);
+
+        // Dispatch OS notifications for any new deadlines found during fetch
+        const activeItems = [
+          ...(response.data.topPriority || []),
+          ...(response.data.actionRequired || []),
+          ...(response.data.others || [])
+        ];
+        if (activeItems.length > 0) {
+          buildAndSendDeadlineNotifications(activeItems).catch(err => 
+            console.warn('[Dashboard] Deadline notify error:', err)
+          );
+        }
       } else {
         console.error("API returned success: false", response.data);
         setError(response.data.message);
@@ -468,6 +556,15 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             if (!['completed', 'error', 'idle'].includes(lastStage)) {
               // Final fetch to reflect completed state
               await fetchInsights(true);
+              
+              // Only notify if there's significant data processed
+              if (data?.processedCandidates && data.processedCandidates > 0) {
+                dispatchOSNotification(
+                  `sync-complete-${Date.now()}`,
+                  'Emty Sync Complete',
+                  `Processed ${data.processedCandidates} emails.`
+                );
+              }
             }
             setIsSyncing(false);
             if (data.aiFallbackCount > 0) {
@@ -832,23 +929,39 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       }
 
       if (finalStage !== 'error') {
+        const detailStr = counts
+            ? `Processed: ${counts.processed} | Success: ${counts.succeeded} | Failed: ${counts.failed}${extraDetail}`
+            : 'Inbox is up to date.';
+            
+        dispatchOSNotification(
+          `sync-complete-${Date.now()}`,
+          'Emty Sync Complete',
+          detailStr
+        );
+        
         setNotification({
           show: true,
           type: 'success',
           message: 'Sync completed',
-          detail: counts
-            ? `Processed: ${counts.processed} | Success: ${counts.succeeded} | Failed: ${counts.failed}${extraDetail}`
-            : 'Inbox is up to date.',
+          detail: detailStr,
         });
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       console.error('[Sync] Error:', err);
+      const detailStr = err.response?.data?.message || 'An error occurred during sync';
+      
+      dispatchOSNotification(
+        `sync-error-${Date.now()}`,
+        'Emty Sync Error',
+        detailStr
+      );
+      
       setNotification({
         show: true,
         type: 'error',
         message: 'Sync error',
-        detail: err.response?.data?.message || 'An error occurred during sync',
+        detail: detailStr,
       });
     } finally {
       setIsSyncing(false);

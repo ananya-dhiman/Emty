@@ -145,6 +145,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // Register the emty:// URI scheme in the Windows registry so the OS
             // knows to route emty://... URLs back to this app. This is needed in

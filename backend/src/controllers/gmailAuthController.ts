@@ -144,16 +144,76 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         // State is one-time use. Delete it to prevent reuse.
         await client.del(`oauth:state:${state}`);
 
-        // Redirect back into the desktop app via deep link.
-        // FRONTEND_DEEP_LINK=emty://auth routes the result back through the OS
-        // to the running Tauri process. Fallback covers web/dev preview.
+        // Serve an HTML page that fires the deep link into the Tauri app
+        // and then closes the browser tab. A plain redirect to emty:// leaves
+        // the tab stuck on an error page in Chrome/Edge.
         const deepLink = process.env.FRONTEND_DEEP_LINK || 'emty://auth';
-        res.redirect(`${deepLink}?gmail_success=true`);
+        const successUrl = `${deepLink}?gmail_success=true`;
+        res.setHeader('Content-Type', 'text/html');
+        res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gmail Connected</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: #0f0f0f; color: #e5e5e5; display: flex; align-items: center;
+           justify-content: center; min-height: 100vh; }
+    .card { text-align: center; max-width: 380px; padding: 40px 32px;
+            border: 1px solid #2a2a2a; background: #1a1a1a; border-radius: 12px; }
+    .icon { font-size: 40px; margin-bottom: 16px; }
+    h1 { font-size: 18px; font-weight: 700; margin: 0 0 8px; }
+    p  { font-size: 13px; color: #888; margin: 0; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">&#10003;</div>
+    <h1>Gmail Connected</h1>
+    <p>Returning you to Emty&hellip;<br/>You can close this tab if it does not close automatically.</p>
+  </div>
+  <script>
+    // Fire the deep link so the Tauri app receives gmail_success
+    window.location.href = '${successUrl}';
+    // Attempt to close this tab after a short delay
+    setTimeout(function() { window.close(); }, 800);
+  </script>
+</body>
+</html>`);
 
     } catch (error: any) {
         logger.info('Gmail callback error:', error.message);
         const deepLink = process.env.FRONTEND_DEEP_LINK || 'emty://auth';
-        res.redirect(`${deepLink}?gmail_error=true`);
+        const errorUrl = `${deepLink}?gmail_error=true`;
+        res.setHeader('Content-Type', 'text/html');
+        res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Connection Failed</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: #0f0f0f; color: #e5e5e5; display: flex; align-items: center;
+           justify-content: center; min-height: 100vh; }
+    .card { text-align: center; max-width: 380px; padding: 40px 32px;
+            border: 1px solid #2a2a2a; background: #1a1a1a; border-radius: 12px; }
+    .icon { font-size: 40px; margin-bottom: 16px; }
+    h1 { font-size: 18px; font-weight: 700; margin: 0 0 8px; }
+    p  { font-size: 13px; color: #888; margin: 0; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">&#x26A0;</div>
+    <h1>Connection Failed</h1>
+    <p>Something went wrong. Returning you to Emty&hellip;<br/>You can close this tab if it does not close automatically.</p>
+  </div>
+  <script>
+    window.location.href = '${errorUrl}';
+    setTimeout(function() { window.close(); }, 800);
+  </script>
+</body>
+</html>`);
     }
 };
 

@@ -30,6 +30,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-deep-link = "2"
 url = "2"
 sysinfo = "0.36.1"
+tauri-plugin-notification = "2"
 
 [target."cfg(any(target_os = \"macos\", windows, target_os = \"linux\"))".dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

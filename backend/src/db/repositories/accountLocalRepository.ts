@@ -21,6 +21,10 @@ export function upsert(params: {
   const db = getDb();
   const now = Date.now();
 
+  // Remove any old account with the same email address but different ID
+  // to avoid UNIQUE constraint failures when inserting the new ID.
+  db.prepare(`DELETE FROM accounts WHERE email_address = ? AND id != ?`).run(params.email_address, params.id);
+
   db.prepare(
     `
     INSERT INTO accounts (id, user_id, email_address, config_json, created_at, updated_at)
