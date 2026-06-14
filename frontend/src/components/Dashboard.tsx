@@ -336,8 +336,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       // We append the deadline timestamp to the ID so if a deadline changes, we notify again
       const id = `deadline-${item.insightId}-${nearest.date.getTime()}`;
       
-      const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${item.gmailThreadId}`;
-      
       try {
         let permissionGranted = await isPermissionGranted();
         if (!permissionGranted) {
