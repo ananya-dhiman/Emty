@@ -2,6 +2,7 @@ import fs from 'fs';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import https from 'https';
+import child_process from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -12,7 +13,7 @@ const NODE_VERSION = 'v20.11.0';
 // By default we map to Windows x64. If you deploy to Mac/Linux, add them here.
 const targets = [
   { tauri: 'x86_64-pc-windows-msvc', node: 'win-x64/node.exe', ext: '.exe' },
-  { tauri: 'aarch64-apple-darwin', node: 'darwin-arm64/node', ext: '' },
+  { tauri: 'aarch64-apple-darwin', node: 'node-v20.11.0-darwin-arm64.tar.gz', ext: '', isTar: true },
   // { tauri: 'x86_64-apple-darwin', node: 'darwin-x64/node', ext: '' },
   // { tauri: 'x86_64-unknown-linux-gnu', node: 'linux-x64/node', ext: '' }
 ];
@@ -64,7 +65,7 @@ function logger(msg) {
 }
 
 async function main() {
-  for (const { tauri, node, ext } of targets) {
+  for (const { tauri, node, ext, isTar } of targets) {
     const fileName = `node-${tauri}${ext}`;
     const destPath = path.join(destDir, fileName);
 
@@ -75,7 +76,35 @@ async function main() {
 
     const url = `https://nodejs.org/dist/${NODE_VERSION}/${node}`;
     try {
-      await download(url, destPath);
+      if (isTar) {
+        const tempTarPath = path.join(destDir, `temp-${tauri}.tar.gz`);
+        const extractDir = path.join(destDir, `temp-${tauri}`);
+        
+        await download(url, tempTarPath);
+        
+        logger(`Extracting ${tempTarPath}...`);
+        if (!fs.existsSync(extractDir)) {
+          fs.mkdirSync(extractDir, { recursive: true });
+        }
+        child_process.execSync(`tar -xf "${tempTarPath}" -C "${extractDir}"`, { stdio: 'inherit' });
+        
+        const extractedFolders = fs.readdirSync(extractDir);
+        const nodeFolder = extractedFolders.find(f => f.includes('node-v'));
+        const extractedNodePath = path.join(extractDir, nodeFolder, 'bin', 'node');
+        
+        if (fs.existsSync(extractedNodePath)) {
+            fs.renameSync(extractedNodePath, destPath);
+            fs.chmodSync(destPath, 0o755);
+            logger(`Saved binary to ${destPath}`);
+        } else {
+            throw new Error("Could not find node binary in the extracted archive.");
+        }
+        
+        fs.unlinkSync(tempTarPath);
+        fs.rmSync(extractDir, { recursive: true, force: true });
+      } else {
+        await download(url, destPath);
+      }
     } catch (e) {
       console.error(`[node-sidecar] Error downloading ${url}:`, e);
       process.exit(1);
