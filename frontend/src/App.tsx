@@ -62,6 +62,24 @@ function App() {
   // NEW: track if user has connected gmail in frontend flow
   const [isGmailConnected, setIsGmailConnected] = useState(false);
 
+  // Check notification permissions on mount
+  useEffect(() => {
+    const checkNotificationPermission = async () => {
+      if (typeof window !== 'undefined' && typeof (window as any).__TAURI_INTERNALS__ !== 'undefined') {
+        try {
+          const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
+          const permissionGranted = await isPermissionGranted();
+          if (!permissionGranted) {
+             await requestPermission();
+          }
+        } catch (e) {
+          console.error('Failed to request notification permission:', e);
+        }
+      }
+    };
+    checkNotificationPermission();
+  }, []);
+
   // Check session and URL params on mount
   useEffect(() => {
     // 1. Listen for deep link event from Rust (production: emty://auth?... or gmail params)

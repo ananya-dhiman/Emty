@@ -18,6 +18,13 @@ const targets = [
     tauri: 'x86_64-pc-windows-msvc',
     artifact: 'ollama-windows-amd64.zip',
     ext: '.exe',
+    isZip: true,
+  },
+  {
+    tauri: 'aarch64-apple-darwin',
+    artifact: 'ollama-darwin',
+    ext: '',
+    isZip: false,
   },
 ];
 
@@ -96,7 +103,7 @@ async function download(url, dest) {
 async function main() {
   log(`Ollama version: ${OLLAMA_VERSION}`);
 
-  for (const { tauri, artifact, ext } of targets) {
+  for (const { tauri, artifact, ext, isZip } of targets) {
     const finalName = `ollama-${tauri}${ext}`;
     const destPath = path.join(destDir, finalName);
     const tempZipPath = path.join(destDir, artifact);
@@ -115,29 +122,35 @@ async function main() {
       log(`Successfully downloaded ${artifact}`);
 
       // 2. Extract specific executable
-      log(`Extracting ${artifact}...`);
-      if (!fs.existsSync(extractDir)) {
-          fs.mkdirSync(extractDir, { recursive: true });
-      }
-
-      // Use native Windows tar to extract the zip (available in > Win10 17063)
-      child_process.execSync(`tar -xf "${tempZipPath}" -C "${extractDir}"`, { stdio: 'inherit' });
-
-      // 3. Move the binary into place
-      const extractedExePath = path.join(extractDir, 'ollama.exe');
-      if (fs.existsSync(extractedExePath)) {
-          fs.renameSync(extractedExePath, destPath);
-          log(`Moved ollama.exe to ${finalName}`);
-      } else {
-          // Sometimes it might be nested, let's just do a naive find
-          const files = fs.readdirSync(extractDir);
-          const exe = files.find(f => f.toLowerCase().endsWith('ollama.exe'));
-          if (exe) {
-              fs.renameSync(path.join(extractDir, exe), destPath);
-              log(`Found and moved ${exe} to ${finalName}`);
-          } else {
-              throw new Error("Could not find ollama.exe in the extracted archive.");
+      if (isZip) {
+          log(`Extracting ${artifact}...`);
+          if (!fs.existsSync(extractDir)) {
+              fs.mkdirSync(extractDir, { recursive: true });
           }
+
+          // Use native Windows tar to extract the zip (available in > Win10 17063)
+          child_process.execSync(`tar -xf "${tempZipPath}" -C "${extractDir}"`, { stdio: 'inherit' });
+
+          // 3. Move the binary into place
+          const extractedExePath = path.join(extractDir, 'ollama.exe');
+          if (fs.existsSync(extractedExePath)) {
+              fs.renameSync(extractedExePath, destPath);
+              log(`Moved ollama.exe to ${finalName}`);
+          } else {
+              // Sometimes it might be nested, let's just do a naive find
+              const files = fs.readdirSync(extractDir);
+              const exe = files.find(f => f.toLowerCase().endsWith('ollama.exe'));
+              if (exe) {
+                  fs.renameSync(path.join(extractDir, exe), destPath);
+                  log(`Found and moved ${exe} to ${finalName}`);
+              } else {
+                  throw new Error("Could not find ollama.exe in the extracted archive.");
+              }
+          }
+      } else {
+          fs.renameSync(tempZipPath, destPath);
+          fs.chmodSync(destPath, 0o755);
+          log(`Moved binary to ${finalName}`);
       }
 
       // 4. Cleanup

@@ -513,6 +513,7 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
   // Groq API key status
   const [groqStatus, setGroqStatus] = useState<{
     connected: boolean;
+    exhaustedUntilMidnight?: boolean;
     rateLimits: { remaining: number; limit: number; lastUpdated: number } | null;
   }>({ connected: false, rateLimits: null });
   const [showGroqKeyInput, setShowGroqKeyInput] = useState(false);
@@ -520,6 +521,7 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
   const [groqKeyError, setGroqKeyError]         = useState<string | null>(null);
   const [groqKeyVerifying, setGroqKeyVerifying] = useState(false);
   const [groqKeySaved, setGroqKeySaved]         = useState(false);
+  const [aiTab, setAiTab]                       = useState<'local' | 'cloud'>('cloud');
 
   const token = localStorage.getItem('firebaseToken');
 
@@ -532,8 +534,19 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
           headers: { Authorization: `Bearer ${token}` },
         });
         if (data.success && data.profile) {
+          let isExhausted = false;
+          if (data.profile.groqTpdExhaustedAt) {
+            const exhaustedDate = new Date(data.profile.groqTpdExhaustedAt);
+            const now = new Date();
+            isExhausted = 
+              exhaustedDate.getUTCFullYear() === now.getUTCFullYear() &&
+              exhaustedDate.getUTCMonth() === now.getUTCMonth() &&
+              exhaustedDate.getUTCDate() === now.getUTCDate();
+          }
+
           setGroqStatus({
             connected:  data.profile.aiProvider === 'groq',
+            exhaustedUntilMidnight: isExhausted,
             rateLimits: data.profile.groqRateLimits || null,
           });
         }
@@ -837,220 +850,286 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
             )}
           </div>
 
-          {/* Local AI Engine Info -- desktop only */}
-          {isTauri && (
+          {/* AI Providers Section (Combined Local & Cloud) */}
+          <div
+            id="ai-providers-section"
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              overflow: 'hidden',
+              marginTop: '20px',
+            }}
+          >
             <div
-              id="local-ai-engine-section"
               style={{
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                overflow: 'hidden',
-                marginTop: '20px',
+                padding: '12px 20px',
+                borderBottom: '1px solid var(--border-lt)',
+                background: 'var(--panel)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
               }}
             >
-              <div
+              <span
                 style={{
-                  padding: '12px 20px',
-                  borderBottom: '1px solid var(--border-lt)',
-                  background: 'var(--panel)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.07em',
+                  color: 'var(--text-2)',
                 }}
               >
-                <span
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '10px',
-                    fontWeight: 600,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.07em',
-                    color: 'var(--text-2)',
-                  }}
-                >
-                  Local AI Engine
-                </span>
-                {ollamaInfo && (
-                  <span
+                AI Providers
+              </span>
+              <div style={{ display: 'flex', gap: '4px', background: 'var(--bg)', borderRadius: '6px', padding: '2px', border: '1px solid var(--border-lt)' }}>
+                {isTauri && (
+                  <button
+                    onClick={() => setAiTab('local')}
                     style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '9px',
-                      padding: '2px 8px',
-                      border: '1px solid',
-                      borderColor: ollamaInfo.source !== 'None'
-                        ? 'var(--green, #22c55e)'
-                        : 'var(--text-3)',
-                      color: ollamaInfo.source !== 'None'
-                        ? 'var(--green, #22c55e)'
-                        : 'var(--text-3)',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.05em',
+                      padding: '4px 10px',
+                      fontSize: '11px',
+                      fontFamily: 'var(--font-ui)',
+                      fontWeight: 600,
+                      borderRadius: '4px',
+                      background: aiTab === 'local' ? 'var(--surface-2)' : 'transparent',
+                      color: aiTab === 'local' ? 'var(--text-1)' : 'var(--text-3)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
                     }}
                   >
-                    {ollamaInfo.source !== 'None' ? 'Active' : 'Unavailable'}
-                  </span>
+                    Local AI
+                  </button>
                 )}
-              </div>
-
-              <div style={{ padding: '16px 20px' }}>
-                {/* Status row */}
-                {ollamaInfo ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-                      <div>
-                        <div style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '9px',
-                          color: 'var(--text-3)',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.05em',
-                          marginBottom: '3px',
-                        }}>
-                          Status
-                        </div>
-                        <div style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '12px',
-                          color: 'var(--text-1)',
-                        }}>
-                          {ollamaInfo.source !== 'None'
-                            ? `Running (${gpuInfo?.acceleration_likely ? 'GPU' : 'CPU'} mode)`
-                            : 'Not running'}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '9px',
-                          color: 'var(--text-3)',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.05em',
-                          marginBottom: '3px',
-                        }}>
-                          Model
-                        </div>
-                        <div style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '12px',
-                          color: 'var(--text-1)',
-                        }}>
-                          {ollamaInfo.model}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '9px',
-                          color: 'var(--text-3)',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.05em',
-                          marginBottom: '3px',
-                        }}>
-                          Source
-                        </div>
-                        <div style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '12px',
-                          color: 'var(--text-1)',
-                        }}>
-                          {ollamaInfo.source === 'System'
-                            ? 'System installed'
-                            : ollamaInfo.source === 'Bundled'
-                            ? 'Bundled'
-                            : '--'}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* GPU info */}
-                    {gpuInfo && (
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '8px',
-                        padding: '10px 12px',
-                        background: 'var(--bg)',
-                        border: '1px solid var(--border-lt)',
-                        marginTop: '4px',
-                      }}>
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="var(--text-3)"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          style={{ flexShrink: 0, marginTop: '1px' }}
-                        >
-                          <circle cx="12" cy="12" r="10" />
-                          <line x1="12" y1="16" x2="12" y2="12" />
-                          <line x1="12" y1="8" x2="12.01" y2="8" />
-                        </svg>
-                        <div>
-                          <div style={{
-                            fontFamily: 'var(--font-mono)',
-                            fontSize: '11px',
-                            color: 'var(--text-2)',
-                            lineHeight: 1.5,
-                          }}>
-                            {gpuInfo.detected && gpuInfo.name
-                              ? `GPU: ${gpuInfo.name}`
-                              : 'No dedicated GPU detected'}
-                          </div>
-                          <div style={{
-                            fontFamily: 'var(--font-mono)',
-                            fontSize: '10px',
-                            color: 'var(--text-3)',
-                            lineHeight: 1.5,
-                            marginTop: '2px',
-                          }}>
-                            GPU acceleration is optional and only enhances performance.
-                            It will not hamper functioning of the app.
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Retry button when unavailable */}
-                    {ollamaInfo.source === 'None' && (
-                      <button
-                        id="ollama-retry-btn"
-                        onClick={handleRestartOllama}
-                        style={{
-                          alignSelf: 'flex-start',
-                          padding: '6px 14px',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          fontFamily: 'var(--font-mono)',
-                          background: 'var(--surface)',
-                          color: 'var(--text-2)',
-                          border: '1px solid var(--border)',
-                          cursor: 'pointer',
-                          marginTop: '4px',
-                        }}
-                      >
-                        Retry
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{
-                    fontFamily: 'var(--font-mono)',
+                <button
+                  onClick={() => setAiTab('cloud')}
+                  style={{
+                    padding: '4px 10px',
                     fontSize: '11px',
-                    color: 'var(--text-3)',
-                  }}>
-                    Loading AI engine info...
-                  </div>
-                )}
+                    fontFamily: 'var(--font-ui)',
+                    fontWeight: 600,
+                    borderRadius: '4px',
+                    background: aiTab === 'cloud' ? 'var(--surface-2)' : 'transparent',
+                    color: aiTab === 'cloud' ? 'var(--text-1)' : 'var(--text-3)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  Cloud AI
+                </button>
               </div>
             </div>
-          )}
 
-          {/* Groq Cloud AI Status Card */}
+            <div style={{ padding: '16px 20px' }}>
+              {aiTab === 'local' && isTauri && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Status row */}
+                  {ollamaInfo ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+                        <div>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '3px' }}>
+                            Status
+                          </div>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-1)' }}>
+                            {ollamaInfo.source !== 'None'
+                              ? `Running (${gpuInfo?.acceleration_likely ? 'GPU' : 'CPU'} mode)`
+                              : 'Not running'}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '3px' }}>
+                            Model
+                          </div>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-1)' }}>
+                            {ollamaInfo.model}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '3px' }}>
+                            Source
+                          </div>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-1)' }}>
+                            {ollamaInfo.source === 'System' ? 'System installed' : ollamaInfo.source === 'Bundled' ? 'Bundled' : '--'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* GPU info */}
+                      {gpuInfo && (
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '10px 12px', background: 'var(--bg)', border: '1px solid var(--border-lt)', marginTop: '4px', borderRadius: '6px' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '1px' }}>
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="12" y1="16" x2="12" y2="12" />
+                            <line x1="12" y1="8" x2="12.01" y2="8" />
+                          </svg>
+                          <div>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-2)', lineHeight: 1.5 }}>
+                              {gpuInfo.detected && gpuInfo.name ? `GPU: ${gpuInfo.name}` : 'No dedicated GPU detected'}
+                            </div>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)', lineHeight: 1.5, marginTop: '2px' }}>
+                              GPU acceleration is optional and only enhances performance. It will not hamper functioning of the app.
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Retry button when unavailable */}
+                      {ollamaInfo.source === 'None' && (
+                        <button
+                          id="ollama-retry-btn"
+                          onClick={handleRestartOllama}
+                          style={{
+                            alignSelf: 'flex-start',
+                            padding: '6px 14px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            fontFamily: 'var(--font-mono)',
+                            background: 'var(--surface-2)',
+                            color: 'var(--text-1)',
+                            border: '1px solid var(--border)',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            marginTop: '4px',
+                          }}
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-3)' }}>
+                      Loading AI engine info...
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {aiTab === 'cloud' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Connection status */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '9px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', border: `1px solid ${groqStatus.exhaustedUntilMidnight ? 'var(--red)' : groqStatus.connected ? 'var(--green)' : 'var(--text-3)'}`, color: groqStatus.exhaustedUntilMidnight ? 'var(--red)' : groqStatus.connected ? 'var(--green)' : 'var(--text-3)' }}>
+                      {groqStatus.exhaustedUntilMidnight ? 'EXHAUSTED' : groqStatus.connected ? 'CONNECTED' : 'NOT CONNECTED'}
+                    </span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: (groqStatus.connected || groqStatus.exhaustedUntilMidnight) ? 'var(--text-1)' : 'var(--text-3)' }}>
+                      {groqStatus.exhaustedUntilMidnight 
+                        ? 'Groq API Exhausted — Tokens Per Day limit reached. Resets at midnight UTC.'
+                        : groqStatus.connected
+                          ? 'Groq API active — Llama 3.3 70B'
+                          : 'Running in local-only mode.'}
+                    </span>
+                  </div>
+
+                  {/* Rate limits */}
+                  {groqStatus.connected && groqStatus.rateLimits && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-2)' }}>
+                        Requests remaining today: {groqStatus.rateLimits.remaining} / {groqStatus.rateLimits.limit}
+                      </span>
+                      <div style={{ height: '4px', background: 'var(--surface-2)', borderRadius: '2px', overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            height: '100%',
+                            width: `${Math.min(100, ((groqStatus.rateLimits.limit - groqStatus.rateLimits.remaining) / groqStatus.rateLimits.limit) * 100)}%`,
+                            background: 'var(--accent)',
+                            borderRadius: '2px',
+                            transition: 'width 0.4s ease',
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)' }}>
+                        Last updated: {timeAgo(groqStatus.rateLimits.lastUpdated)}
+                      </span>
+                    </div>
+                  )}
+
+                  {!groqStatus.connected && (
+                    <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-3)', textDecoration: 'underline' }}>
+                      Get a free key at console.groq.com/keys
+                    </a>
+                  )}
+
+                  {/* API Key Input */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-2)' }}>API Key</span>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <input
+                        type="password"
+                        value={groqStatus.connected && !showGroqKeyInput ? '***************************************************' : groqKeyDraft}
+                        onChange={(e) => { setGroqKeyDraft(e.target.value); setGroqKeyError(null); }}
+                        placeholder="gsk_..."
+                        disabled={(!showGroqKeyInput && groqStatus.connected) || groqKeyVerifying || groqKeySaved}
+                        style={{
+                          flex: 1,
+                          background: 'var(--bg)',
+                          border: `1px solid ${groqKeyError ? 'var(--red)' : 'var(--border)'}`,
+                          padding: '8px 12px',
+                          fontSize: '12px',
+                          fontFamily: 'var(--font-mono)',
+                          color: 'var(--text-1)',
+                          borderRadius: '4px'
+                        }}
+                      />
+                      {(!showGroqKeyInput && groqStatus.connected) ? (
+                        <button
+                          onClick={() => { setShowGroqKeyInput(true); setGroqKeyDraft(''); setGroqKeyError(null); }}
+                          style={{
+                            padding: '8px 16px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            fontFamily: 'var(--font-ui)',
+                            background: 'var(--surface-2)',
+                            color: 'var(--text-1)',
+                            border: '1px solid var(--border)',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Edit
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleVerifyAndUpdateGroqKey}
+                          disabled={!groqKeyDraft.trim() || groqKeyVerifying || groqKeySaved}
+                          style={{
+                            padding: '8px 16px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            fontFamily: 'var(--font-ui)',
+                            background: 'var(--text-1)',
+                            color: 'var(--bg)',
+                            border: '1px solid var(--text-1)',
+                            borderRadius: '4px',
+                            cursor: (!groqKeyDraft.trim() || groqKeyVerifying || groqKeySaved) ? 'not-allowed' : 'pointer',
+                            opacity: (!groqKeyDraft.trim() || groqKeyVerifying || groqKeySaved) ? 0.6 : 1,
+                          }}
+                        >
+                          {groqKeyVerifying ? 'Verifying...' : groqKeySaved ? 'Saved' : 'Save'}
+                        </button>
+                      )}
+                    </div>
+                    {groqKeyError && (
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--red)' }}>
+                        {groqKeyError}
+                      </span>
+                    )}
+                    {groqKeySaved && (
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--green)' }}>
+                        Key updated successfully
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* OS Notifications Section */}
           <div
-            id="groq-api-section"
+            id="notifications-section"
             style={{
               background: 'var(--surface)',
               border: '1px solid var(--border)',
@@ -1069,64 +1148,34 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
               }}
             >
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-2)' }}>
-                Cloud AI (Groq)
+                System Notifications
               </span>
             </div>
-
             <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-
-              {/* Connection status */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '9px', color: groqStatus.connected ? 'var(--green)' : 'var(--text-3)' }}>
-                  {groqStatus.connected ? 'CONNECTED' : 'NOT CONNECTED'}
-                </span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: groqStatus.connected ? 'var(--text-1)' : 'var(--text-3)' }}>
-                  {groqStatus.connected
-                    ? 'Groq API active — Llama 3.3 70B'
-                    : 'Running in local-only mode.'}
-                </span>
-              </div>
-
-              {/* Rate limits — only shown when connected and data exists */}
-              {groqStatus.connected && groqStatus.rateLimits && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-2)' }}>
-                    Requests remaining today: {groqStatus.rateLimits.remaining} / {groqStatus.rateLimits.limit}
-                  </span>
-                  <div style={{ height: '4px', background: 'var(--surface-2)', borderRadius: '2px', overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        height: '100%',
-                        width: `${Math.min(100, ((groqStatus.rateLimits.limit - groqStatus.rateLimits.remaining) / groqStatus.rateLimits.limit) * 100)}%`,
-                        background: 'var(--accent)',
-                        borderRadius: '2px',
-                        transition: 'width 0.4s ease',
-                      }}
-                    />
-                  </div>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-3)' }}>
-                    Last updated: {timeAgo(groqStatus.rateLimits.lastUpdated)}
-                  </span>
-                </div>
-              )}
-
-              {/* Add key prompt when not connected */}
-              {!groqStatus.connected && (
-                <a
-                  href="https://console.groq.com/keys"
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-3)' }}
-                >
-                  Get a free key at console.groq.com/keys
-                </a>
-              )}
-
-              {/* Update / Add API key button */}
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-3)' }}>
+                Ensure notifications are enabled in your operating system to receive sync and deadline alerts.
+              </span>
               <div>
                 <button
-                  id="groq-update-key-btn"
-                  onClick={() => { setShowGroqKeyInput(v => !v); setGroqKeyError(null); }}
+                  id="test-notification-btn"
+                  onClick={async () => {
+                    if (!isTauri) return;
+                    try {
+                      const { isPermissionGranted, requestPermission, sendNotification } = await import('@tauri-apps/plugin-notification');
+                      let permissionGranted = await isPermissionGranted();
+                      if (!permissionGranted) {
+                        const permission = await requestPermission();
+                        permissionGranted = permission === 'granted';
+                      }
+                      if (permissionGranted) {
+                        sendNotification({ title: 'Emty Notification Test', body: 'Notifications are working properly!', icon: 'app-icon' });
+                      } else {
+                        alert('Notification permission denied by the operating system.');
+                      }
+                    } catch (e) {
+                      console.error('Failed to send test notification:', e);
+                    }
+                  }}
                   style={{
                     padding: '6px 14px',
                     fontSize: '12px',
@@ -1138,60 +1187,9 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
                     cursor: 'pointer',
                   }}
                 >
-                  {groqStatus.connected ? 'Update API Key' : 'Add API Key'}
+                  Test Notification
                 </button>
               </div>
-
-              {/* Inline key input form */}
-              {showGroqKeyInput && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <input
-                    id="groq-key-update-input"
-                    type="password"
-                    value={groqKeyDraft}
-                    onChange={(e) => { setGroqKeyDraft(e.target.value); setGroqKeyError(null); }}
-                    placeholder="gsk_..."
-                    disabled={groqKeyVerifying || groqKeySaved}
-                    style={{
-                      background: 'var(--bg)',
-                      border: `1px solid ${groqKeyError ? 'var(--red)' : 'var(--border)'}`,
-                      padding: '8px 12px',
-                      fontSize: '12px',
-                      fontFamily: 'var(--font-mono)',
-                      color: 'var(--text-1)',
-                    }}
-                  />
-                  {groqKeyError && (
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--red)' }}>
-                      {groqKeyError}
-                    </span>
-                  )}
-                  {groqKeySaved && (
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--green)' }}>
-                      Key updated successfully
-                    </span>
-                  )}
-                  <button
-                    id="groq-key-save-btn"
-                    onClick={handleVerifyAndUpdateGroqKey}
-                    disabled={!groqKeyDraft.trim() || groqKeyVerifying || groqKeySaved}
-                    style={{
-                      alignSelf: 'flex-start',
-                      padding: '6px 16px',
-                      fontSize: '12px',
-                      fontWeight: 600,
-                      fontFamily: 'var(--font-ui)',
-                      background: 'var(--text-1)',
-                      color: 'var(--bg)',
-                      border: '1px solid var(--text-1)',
-                      cursor: (!groqKeyDraft.trim() || groqKeyVerifying || groqKeySaved) ? 'not-allowed' : 'pointer',
-                      opacity: (!groqKeyDraft.trim() || groqKeyVerifying || groqKeySaved) ? 0.6 : 1,
-                    }}
-                  >
-                    {groqKeyVerifying ? 'Verifying...' : groqKeySaved ? 'Saved' : 'Verify & Save'}
-                  </button>
-                </div>
-              )}
             </div>
           </div>
 

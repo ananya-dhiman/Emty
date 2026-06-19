@@ -243,6 +243,44 @@ export const initiateDesktopOAuth = async (req: AuthRequest, res: Response): Pro
     }
 };
 
+const renderOAuthRedirectHtml = (res: Response, targetUrl: string, isSuccess: boolean) => {
+    const title = isSuccess ? 'Login Successful' : 'Login Failed';
+    const icon = isSuccess ? '&#10003;' : '&#x26A0;';
+    const message = isSuccess 
+        ? 'Returning you to Emty&hellip;<br/>You can close this tab if it does not close automatically.'
+        : 'Something went wrong. Returning you to Emty&hellip;<br/>You can close this tab if it does not close automatically.';
+        
+    res.setHeader('Content-Type', 'text/html');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>${title}</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: #0f0f0f; color: #e5e5e5; display: flex; align-items: center;
+           justify-content: center; min-height: 100vh; }
+    .card { text-align: center; max-width: 380px; padding: 40px 32px;
+            border: 1px solid #2a2a2a; background: #1a1a1a; border-radius: 12px; }
+    .icon { font-size: 40px; margin-bottom: 16px; }
+    h1 { font-size: 18px; font-weight: 700; margin: 0 0 8px; }
+    p  { font-size: 13px; color: #888; margin: 0; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${icon}</div>
+    <h1>${title}</h1>
+    <p>${message}</p>
+  </div>
+  <script>
+    window.location.href = '${targetUrl}';
+    setTimeout(function() { window.close(); }, 800);
+  </script>
+</body>
+</html>`);
+};
+
 export const desktopOAuthCallback = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const code = req.query.code as string;
@@ -251,7 +289,7 @@ export const desktopOAuthCallback = async (req: AuthRequest, res: Response): Pro
         const frontendUrl = process.env.FRONTEND_DEEP_LINK || 'emty://auth';
 
         if (!stateParam || !stateParam.startsWith('desktop_login_')) {
-            res.redirect(`${frontendUrl}?error=invalid_state`);
+            renderOAuthRedirectHtml(res, `${frontendUrl}?error=invalid_state`, false);
             return;
         }
 
@@ -259,7 +297,7 @@ export const desktopOAuthCallback = async (req: AuthRequest, res: Response): Pro
         const stateExists = await client.get(`desktop_oauth:state:${stateId}`);
 
         if (!stateExists) {
-            res.redirect(`${frontendUrl}?error=session_expired`);
+            renderOAuthRedirectHtml(res, `${frontendUrl}?error=session_expired`, false);
             return;
         }
 
@@ -272,7 +310,7 @@ export const desktopOAuthCallback = async (req: AuthRequest, res: Response): Pro
         const googleUser = userInfoRes.data;
 
         if (!googleUser.email) {
-            res.redirect(`${frontendUrl}?error=no_email`);
+            renderOAuthRedirectHtml(res, `${frontendUrl}?error=no_email`, false);
             return;
         }
 
@@ -298,11 +336,11 @@ export const desktopOAuthCallback = async (req: AuthRequest, res: Response): Pro
 
         await client.del(`desktop_oauth:state:${stateId}`);
 
-        res.redirect(`${frontendUrl}?desktop_login_token=${customToken}`);
+        renderOAuthRedirectHtml(res, `${frontendUrl}?desktop_login_token=${customToken}`, true);
     } catch (error: any) {
         logger.debug('Desktop OAuth Callback Error', error);
         const frontendUrl = process.env.FRONTEND_DEEP_LINK || 'emty://auth';
-        res.redirect(`${frontendUrl}?error=auth_failed`);
+        renderOAuthRedirectHtml(res, `${frontendUrl}?error=auth_failed`, false);
     }
 };
 

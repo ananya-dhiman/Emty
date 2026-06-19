@@ -333,6 +333,9 @@ impl OllamaManager {
 
     /// Full resolution + start flow. Call once during app setup.
     pub async fn resolve_and_start(&self, app_handle: &tauri::AppHandle) {
+        // Aggressively clean up any previously managed process (zombie) before starting
+        self.stop();
+
         // Load persisted state to help classify correctly
         let persisted_state = self.load_persisted_state();
 

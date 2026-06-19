@@ -58,8 +58,14 @@ const safeParseDate = (val: any): Date | null => {
 };
 
 export const runAiProcessingWorker = async (userId: string, accountId: string): Promise<void> => {
-    const objectIdAccountId = new Types.ObjectId(accountId);
-    logger.debug(`[AI WORKER] Started for account ${accountId}`);
+    let retries = 0;
+    const INITIAL_BACKOFF_MS = 60 * 1000; // 1 minute
+    const MAX_BACKOFF_MS = 7 * 60 * 1000; // 7 minutes
+
+    while (true) {
+        try {
+            const objectIdAccountId = new Types.ObjectId(accountId);
+            logger.debug(`[AI WORKER] Started for account ${accountId}`);
 
     // ===== SETUP OAUTH AND GMAIL =====
     const gmailAccount = await GmailAccount.findUnique({ where: { id: accountId } });
@@ -493,39 +499,46 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         }
     }
 
-    // Complete Progress Updates
-    await updateProgressComplete(accountId);
-    logger.debug(`[AI WORKER] Completed processing for account ${accountId}`);
-
     // --- CONTINUOUS BACKGROUND DRAIN ---
     // Check if more pending emails remain in the backlog (from scoring worker's priority cutoff).
     // If so, re-run scoring to promote the next batch to 'top' and immediately process them.
-    // This loop continues until the entire backlog is drained, as long as the app is running.
     const remainingAfterBatch = emailMessageRepository.countUnprocessed(accountId);
     if (remainingAfterBatch > 0) {
         logger.debug(`[AI WORKER] ${remainingAfterBatch} emails still pending. Re-running scoring and starting next batch after cooldown...`);
         // Cooldown between batches to respect rate limits
         await new Promise(resolve => setTimeout(resolve, 10000)); // 10 second gap
-        try {
-            await syncCheckpointRepository.updateProgress(accountId, {
-                progress_percent: 60,
-                progress_stage: "scoring_emails",
-                progress_message: `Preparing next batch (${remainingAfterBatch} remaining)...`,
-                total_candidates: remainingAfterBatch,
-                processed_candidates: 0,
-            });
-            // Re-run scoring to promote next batch of 'pending' -> 'top'
-            const { runScoringWorker } = await import('./scoringWorkerService');
-            await runScoringWorker(userId, accountId);
-            // Process the newly promoted batch
-            await runAiProcessingWorker(userId, accountId);
-        } catch (loopErr: any) {
-            logger.info(`[AI WORKER] Backlog drain loop error (non-fatal): ${loopErr.message}`);
-            // Revert progress state to idle/complete so the UI does not hang indefinitely
-            await updateProgressComplete(accountId);
-        }
+        
+        await syncCheckpointRepository.updateProgress(accountId, {
+            progress_percent: 60,
+            progress_stage: "scoring_emails",
+            progress_message: `Preparing next batch (${remainingAfterBatch} remaining)...`,
+            total_candidates: remainingAfterBatch,
+        });
+        
+        // Re-run scoring to promote next batch of 'pending' -> 'top'
+        const { runScoringWorker } = await import('./scoringWorkerService');
+        await runScoringWorker(userId, accountId);
+        
+        retries = 0; // Reset retries on successful batch iteration
+        continue; // Loop again for the next batch
     } else {
         logger.debug(`[AI WORKER] Backlog fully drained for account ${accountId}`);
+        await updateProgressComplete(accountId);
+        return; // Exit function successfully
+    }
+
+        } catch (loopErr: any) {
+            retries++;
+            const backoffMs = Math.min(MAX_BACKOFF_MS, INITIAL_BACKOFF_MS * Math.pow(2, retries - 1));
+            logger.info(`[AI WORKER] Backlog drain loop error: ${loopErr.message}. Retrying in ${backoffMs / 1000}s (Retry #${retries})...`);
+            
+            await syncCheckpointRepository.updateProgress(accountId, {
+                progress_stage: "retrying",
+                progress_message: `Error syncing. Retrying in ${backoffMs / 1000}s... (${loopErr.message})`
+            });
+            
+            await new Promise(resolve => setTimeout(resolve, backoffMs));
+        }
     }
 };
 
@@ -534,8 +547,6 @@ async function updateProgressComplete(accountId: string) {
         progress_percent: 100,
         progress_stage: "completed",
         progress_message: "Sync complete",
-        processed_candidates: 0,
-        total_candidates: 0,
     });
     await syncCheckpointRepository.updateSyncState(accountId, "idle");
 }

@@ -12,7 +12,7 @@ const NODE_VERSION = 'v20.11.0';
 // By default we map to Windows x64. If you deploy to Mac/Linux, add them here.
 const targets = [
   { tauri: 'x86_64-pc-windows-msvc', node: 'win-x64/node.exe', ext: '.exe' },
-  // { tauri: 'aarch64-apple-darwin', node: 'darwin-arm64/node', ext: '' },
+  { tauri: 'aarch64-apple-darwin', node: 'darwin-arm64/node', ext: '' },
   // { tauri: 'x86_64-apple-darwin', node: 'darwin-x64/node', ext: '' },
   // { tauri: 'x86_64-unknown-linux-gnu', node: 'linux-x64/node', ext: '' }
 ];

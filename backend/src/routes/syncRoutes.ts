@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getSyncState, getSyncStateActive, updateSyncState, triggerSync, setActiveAccount } from "../controllers/syncStateController";
+import { getPendingNotifications } from "../controllers/notificationController";
 
 const router = Router();
 
@@ -11,5 +12,5 @@ router.post("/active", setActiveAccount);
 router.get("/state/:accountId", getSyncState);
 router.post("/state/:accountId", updateSyncState);
 router.post("/trigger", triggerSync);
-
+router.get("/notifications/pending", getPendingNotifications);
 export default router;

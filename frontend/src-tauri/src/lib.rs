@@ -10,6 +10,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri_plugin_deep_link::DeepLinkExt;
+use tauri_plugin_autostart::ManagerExt;
 
 // Helper: parse and emit a deep link URL to the main window
 fn handle_deep_link_url(app: &tauri::AppHandle, url_str: &str) {
@@ -146,7 +147,17 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--autostart"])))
         .setup(|app| {
+            let _ = app.autolaunch().enable();
+            let args: Vec<String> = std::env::args().collect();
+            if !args.contains(&"--autostart".to_string()) {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.show();
+                    let _ = win.set_focus();
+                }
+            }
+
             // Register the emty:// URI scheme in the Windows registry so the OS
             // knows to route emty://... URLs back to this app. This is needed in
             // dev mode because the NSIS installer (which normally does this) has
@@ -213,6 +224,16 @@ pub fn run() {
             // Tauri v2 preserves the directory structure.
             // We'll pass the backend index.js path relative to the runtime resource folder.
             let resource_dir = app.path().resource_dir().unwrap();
+            
+            #[cfg(debug_assertions)]
+            let backend_entry_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+                .join("backend")
+                .join("dist")
+                .join("index.js");
+
+            #[cfg(not(debug_assertions))]
             let backend_entry_path = resource_dir
                 .join("_up_")
                 .join("_up_")
@@ -313,7 +334,7 @@ pub fn run() {
             
             let menu = Menu::with_items(app, &[&open_i, &toggle_widget_i, &status_i, &sync_i, &quit_i])?;
             
-            let _tray = TrayIconBuilder::new()
+            let _tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -397,7 +418,8 @@ pub fn run() {
             // ---------------------------------------------------------------
             let app_handle = app.handle().clone();
             sync_timer::check_on_launch(app_handle.clone(), port);
-            sync_timer::start_sync_timer(app_handle, port);
+            sync_timer::start_sync_timer(app_handle.clone(), port);
+            sync_timer::start_notification_poller(app_handle, port);
 
             Ok(())
         })

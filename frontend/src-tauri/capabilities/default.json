@@ -12,6 +12,7 @@
     "shell:allow-open",
     "core:window:allow-start-dragging",
     "deep-link:default",
-    "notification:default"
+    "notification:default",
+    "autostart:default"
   ]
 }

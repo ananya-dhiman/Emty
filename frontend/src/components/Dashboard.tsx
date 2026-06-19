@@ -4,7 +4,6 @@ import '../styles/Dashboard.css';
 import { CalendarSidebar } from './CalendarSidebar';
 import { Logo } from './Logo';
 import { API_BASE_URL } from '../utils/api';
-import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 
 /* ── Collapsible section used in the detail panel body ── */
 const DetCollapsible: React.FC<{
@@ -257,31 +256,9 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [sidebarLabels, setSidebarLabels] = useState<{ id: string, name: string, color: string, rank: number, count: number }[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStats, setSyncStats] = useState<{ total: number, processed: number } | null>(null);
-  const [notification, setNotification] = useState<{ show: boolean, message: string, detail?: string, type: 'success' | 'error' | 'info' } | null>(null);
+  const [notification, setNotification] = useState<{ show: boolean, message: string, detail?: string, type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
   // Holds counts from the initial sync HTTP response so the poller can surface them on completion
   const manualSyncCountsRef = React.useRef<{ processed: number; succeeded: number; failed: number } | null>(null);
-
-  // Track which OS notifications have been sent this session to prevent duplicate spam
-  const sentNotificationIds = useRef<Set<string>>(new Set());
-
-  const dispatchOSNotification = useCallback(async (id: string, title: string, body: string) => {
-    if (sentNotificationIds.current.has(id)) return;
-    
-    try {
-      let permissionGranted = await isPermissionGranted();
-      if (!permissionGranted) {
-        const permission = await requestPermission();
-        permissionGranted = permission === 'granted';
-      }
-      
-      if (permissionGranted) {
-        sendNotification({ title, body });
-        sentNotificationIds.current.add(id);
-      }
-    } catch (err) {
-      console.warn('[Notifications] Failed to send OS notification:', err);
-    }
-  }, []);
 
   // feedbackMap: insightId -> 'boost' | 'suppress' | null
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'boost' | 'suppress' | null>>({});
@@ -305,57 +282,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
       console.warn('[Feedback] Failed to record feedback (non-blocking):', err);
     }
   }, [feedbackMap]);
-
-  const DEADLINE_NOTIFY_HOURS = 48;
-  const MIN_SCORE_FOR_NOTIFY = 0.5;
-
-  const buildAndSendDeadlineNotifications = useCallback(async (items: PriorityRankingItem[]) => {
-    const now = Date.now();
-    for (const item of items) {
-      if (item.isCompleted) continue;
-      if ((item.score.totalScore ?? 0) < MIN_SCORE_FOR_NOTIFY) continue;
-
-      const upcomingDeadlines = (item.dates ?? [])
-        .filter(d => d.type === 'deadline')
-        .map(d => ({ ...d, date: new Date(d.date) }))
-        .filter(d => d.date.getTime() > now)
-        .sort((a, b) => a.date.getTime() - b.date.getTime());
-
-      if (upcomingDeadlines.length === 0) continue;
-
-      const nearest = upcomingDeadlines[0];
-      const hoursUntil = (nearest.date.getTime() - now) / (1000 * 60 * 60);
-      if (hoursUntil > DEADLINE_NOTIFY_HOURS) continue;
-
-      const urgency = hoursUntil <= 12 ? 'CRITICAL: ' : '';
-      const timeText = hoursUntil < 24 ? `in ${Math.ceil(hoursUntil)} hours` : 'tomorrow';
-      
-      const title = `${urgency}Deadline ${timeText} - ${item.from.name || item.from.email}`;
-      const body = item.summary.shortSnippet;
-      
-      // We append the deadline timestamp to the ID so if a deadline changes, we notify again
-      const id = `deadline-${item.insightId}-${nearest.date.getTime()}`;
-      
-      try {
-        let permissionGranted = await isPermissionGranted();
-        if (!permissionGranted) {
-          const permission = await requestPermission();
-          permissionGranted = permission === 'granted';
-        }
-        
-        if (permissionGranted && !sentNotificationIds.current.has(id)) {
-          // sendNotification creates a simple OS notification
-          sendNotification({ 
-            title, 
-            body: `${body}\n\n[Open Dashboard to view Gmail thread]` 
-          });
-          sentNotificationIds.current.add(id);
-        }
-      } catch (err) {
-        console.warn('[Notifications] Failed to send OS notification:', err);
-      }
-    }
-  }, []);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -449,17 +375,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         setCompletedItems(response.data.completed || []);
         setLowPriorityItems(response.data.lowPriorityEmails || []);
 
-        // Dispatch OS notifications for any new deadlines found during fetch
-        const activeItems = [
-          ...(response.data.topPriority || []),
-          ...(response.data.actionRequired || []),
-          ...(response.data.others || [])
-        ];
-        if (activeItems.length > 0) {
-          buildAndSendDeadlineNotifications(activeItems).catch(err => 
-            console.warn('[Dashboard] Deadline notify error:', err)
-          );
-        }
       } else {
         console.error("API returned success: false", response.data);
         setError(response.data.message);
@@ -557,11 +472,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
               
               // Only notify if there's significant data processed
               if (data?.processedCandidates && data.processedCandidates > 0) {
-                dispatchOSNotification(
-                  `sync-complete-${Date.now()}`,
-                  'Emty Sync Complete',
-                  `Processed ${data.processedCandidates} emails.`
-                );
+                // Background notification is now handled by the Rust sidecar.
               }
             }
             setIsSyncing(false);
@@ -931,12 +842,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             ? `Processed: ${counts.processed} | Success: ${counts.succeeded} | Failed: ${counts.failed}${extraDetail}`
             : 'Inbox is up to date.';
             
-        dispatchOSNotification(
-          `sync-complete-${Date.now()}`,
-          'Emty Sync Complete',
-          detailStr
-        );
-        
         setNotification({
           show: true,
           type: 'success',
@@ -948,12 +853,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     } catch (err: any) {
       console.error('[Sync] Error:', err);
       const detailStr = err.response?.data?.message || 'An error occurred during sync';
-      
-      dispatchOSNotification(
-        `sync-error-${Date.now()}`,
-        'Emty Sync Error',
-        detailStr
-      );
       
       setNotification({
         show: true,
@@ -982,25 +881,41 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
           position: 'fixed',
           bottom: '24px',
           right: '24px',
-          background: notification.type === 'error' ? 'var(--red)' : 'var(--accent)',
-          color: notification.type === 'error' ? '#fff' : 'var(--accent-inv)',
+          background: notification.type === 'error' ? 'var(--red)' : notification.type === 'warning' ? 'var(--amber)' : notification.type === 'success' ? 'var(--green)' : 'var(--accent)',
+          color: '#fff',
           padding: '16px 20px',
           borderRadius: '8px',
           boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
           zIndex: 1000,
           display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
-          minWidth: '280px',
+          gap: '12px',
+          minWidth: '320px',
           fontFamily: 'var(--font-sans)'
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <strong style={{ fontSize: '14px', fontWeight: 600 }}>{notification.message}</strong>
-            <button onClick={() => setNotification(null)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, opacity: 0.7 }}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 3L11 11M11 3L3 11" /></svg>
-            </button>
+          <div style={{ paddingTop: '2px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+            <Logo size={20} />
+            {notification.type === 'error' && (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            )}
+            {notification.type === 'warning' && (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            )}
+            {notification.type === 'success' && (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            )}
+            {notification.type === 'info' && (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            )}
           </div>
-          {notification.detail && <span style={{ fontSize: '13px', opacity: 0.9 }}>{notification.detail}</span>}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <strong style={{ fontSize: '15px', fontWeight: 600 }}>{notification.message}</strong>
+              <button onClick={() => setNotification(null)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, opacity: 0.7, marginTop: '2px' }}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 3L11 11M11 3L3 11" /></svg>
+              </button>
+            </div>
+            {notification.detail && <span style={{ fontSize: '13px', opacity: 0.9, lineHeight: 1.4 }}>{notification.detail}</span>}
+          </div>
         </div>
       )}
 

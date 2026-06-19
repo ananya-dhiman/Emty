@@ -1,7 +1,24 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+use std::fs;
+use tauri_plugin_notification::NotificationExt;
+use tauri::Manager;
 
+#[derive(Deserialize, Debug)]
+struct PendingNotificationsResponse {
+    success: bool,
+    notifications: Vec<NotificationItem>,
+}
+
+#[derive(Deserialize, Debug)]
+struct NotificationItem {
+    id: String,
+    title: String,
+    body: String,
+}
 #[derive(Deserialize, Debug)]
 pub struct SyncState {
     pub sync_state: String,
@@ -120,6 +137,62 @@ pub fn start_sync_timer(app_handle: AppHandle, port: u16) {
 
                     if gap_ms >= interval_ms {
                         trigger_sync(port, &aid, "scheduled").await;
+                    }
+                }
+            }
+        }
+    });
+}
+
+pub fn start_notification_poller(app_handle: AppHandle, port: u16) {
+    let app_data_dir = app_handle.path().app_data_dir().expect("Failed to get app_data_dir");
+    let file_path = app_data_dir.join("notifications.json");
+    
+    let initial_set: HashSet<String> = if let Ok(data) = fs::read_to_string(&file_path) {
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        HashSet::new()
+    };
+    
+    let seen_ids = Arc::new(Mutex::new(initial_set));
+    let path_clone = file_path.clone();
+    
+    tauri::async_runtime::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+        let client = reqwest::Client::new();
+        
+        loop {
+            ticker.tick().await;
+            
+            let res = client
+                .get(format!("http://localhost:{}/api/sync/notifications/pending", port))
+                .send()
+                .await;
+                
+            if let Ok(response) = res {
+                if let Ok(data) = response.json::<PendingNotificationsResponse>().await {
+                    if data.success {
+                        let mut state = seen_ids.lock().unwrap();
+                        let mut changed = false;
+                        
+                        for notif in data.notifications {
+                            if !state.contains(&notif.id) {
+                                state.insert(notif.id.clone());
+                                changed = true;
+                                
+                                let _ = app_handle.notification()
+                                    .builder()
+                                    .title(notif.title)
+                                    .body(notif.body)
+                                    .show();
+                            }
+                        }
+                        
+                        if changed {
+                            if let Ok(json) = serde_json::to_string(&*state) {
+                                let _ = fs::write(&path_clone, json);
+                            }
+                        }
                     }
                 }
             }

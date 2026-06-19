@@ -72,6 +72,11 @@ OAuth redirect/callback for Google (`/api/auth/google/callback`).
 ### Scalability
 Persistent state split across MongoDB + SQLite + Redis. Some in-process state exists (`metadataCache` in `backend/src/controllers/emailController.ts`). No autoscaling/IaC orchestration files found.
 
+### Desktop Shell (Tauri) Features
+- **Notifications**: Uses the official `@tauri-apps/plugin-notification` (frontend + Rust) to send OS-level notifications (`frontend/src/components/Dashboard.tsx`). 
+- **System Tray**: Initialized in `frontend/src-tauri/src/lib.rs` using `TrayIconBuilder`. Currently has an issue: the system tray icon is not reliably displaying or updating its tooltip because it is built without `.with_id("main")`, while the background sync timer attempts to update it using `tray_by_id("main")`.
+- **Auto-Launch (Device Startup)**: Not currently implemented. The ideal behavior is to launch the app quietly in the background and show the widget on device startup, but `tauri-plugin-autostart` is not yet configured. This still needs to be implemented.
+
 ## Tech Stack
 
 ### Primary Language(s)

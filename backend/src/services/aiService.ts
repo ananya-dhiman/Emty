@@ -615,12 +615,20 @@ export const extractInsightsFromEmail = async (
     let isExhausted = false;
 
     if (profile?.groqTpdExhaustedAt) {
-      const hoursSinceExhausted = (Date.now() - profile.groqTpdExhaustedAt) / (1000 * 60 * 60);
-      if (hoursSinceExhausted < 24) {
-        logger.info(`[AI] Groq TPD exhausted less than 24h ago (skipping Groq, falling back to Ollama)`);
+      const exhaustedDate = new Date(profile.groqTpdExhaustedAt);
+      const now = new Date();
+      
+      // Check if we have crossed UTC midnight since the exhaustion time
+      const isSameUtcDay = 
+        exhaustedDate.getUTCFullYear() === now.getUTCFullYear() &&
+        exhaustedDate.getUTCMonth() === now.getUTCMonth() &&
+        exhaustedDate.getUTCDate() === now.getUTCDate();
+
+      if (isSameUtcDay) {
+        logger.info(`[AI] Groq TPD exhausted today (UTC). Skipping Groq, falling back to Ollama.`);
         isExhausted = true;
       } else {
-        logger.info(`[AI] 24h passed since Groq TPD exhausted. Resetting flag in DB.`);
+        logger.info(`[AI] Passed UTC midnight since Groq TPD exhausted. Resetting flag in DB.`);
         await UserIntentProfileModel.updateOne({ userId: options.userId }, { $set: { groqTpdExhaustedAt: null } });
       }
     }

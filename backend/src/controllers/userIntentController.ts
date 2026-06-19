@@ -33,9 +33,11 @@ export const getIntentProfile = async (
       { upsert: true, returnDocument: "after" }
     );
 
-    // Strip encrypted key before sending — frontend only needs connection status
     const safeProfile = profile?.toObject ? profile.toObject() : profile;
-    if (safeProfile) delete (safeProfile as any).groqApiKey;
+    if (safeProfile) {
+      delete (safeProfile as any).groqApiKey;
+      // groqTpdExhaustedAt is included natively
+    }
 
     res.status(200).json({ success: true, profile: safeProfile });
   } catch (err: any) {
