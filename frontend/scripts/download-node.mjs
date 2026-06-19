@@ -11,17 +11,19 @@ const NODE_VERSION = 'v20.11.0';
 
 // Tauri targets mapped to officially released Node.js distribution binaries
 // By default we map to Windows x64. If you deploy to Mac/Linux, add them here.
-const targets = [
-  { tauri: 'x86_64-pc-windows-msvc', node: 'win-x64/node.exe', ext: '.exe' },
-  { tauri: 'aarch64-apple-darwin', node: 'node-v20.11.0-darwin-arm64.tar.gz', ext: '', isTar: true },
-  // { tauri: 'x86_64-apple-darwin', node: 'darwin-x64/node', ext: '' },
-  // { tauri: 'x86_64-unknown-linux-gnu', node: 'linux-x64/node', ext: '' }
-].filter(t => {
-  if (process.platform === 'win32') return t.tauri.includes('windows');
-  if (process.platform === 'darwin') return t.tauri.includes('darwin');
-  if (process.platform === 'linux') return t.tauri.includes('linux');
-  return false;
-});
+const allTargets = [
+  { tauri: 'x86_64-pc-windows-msvc', node: 'win-x64/node.exe', ext: '.exe', os: 'win32', arch: 'x64' },
+  { tauri: 'aarch64-apple-darwin', node: 'node-v20.11.0-darwin-arm64.tar.gz', ext: '', isTar: true, os: 'darwin', arch: 'arm64' },
+  { tauri: 'x86_64-apple-darwin', node: 'node-v20.11.0-darwin-x64.tar.gz', ext: '', isTar: true, os: 'darwin', arch: 'x64' },
+  { tauri: 'x86_64-unknown-linux-gnu', node: 'node-v20.11.0-linux-x64.tar.gz', ext: '', isTar: true, os: 'linux', arch: 'x64' },
+  { tauri: 'aarch64-unknown-linux-gnu', node: 'node-v20.11.0-linux-arm64.tar.gz', ext: '', isTar: true, os: 'linux', arch: 'arm64' }
+];
+
+const targets = allTargets.filter(t => t.os === process.platform && t.arch === process.arch);
+
+if (targets.length === 0) {
+  console.warn(`[node-sidecar] No matching sidecar target found for ${process.platform} ${process.arch}`);
+}
 
 const destDir = path.resolve(__dirname, '../src-tauri/binaries');
 

@@ -13,25 +13,20 @@ const __dirname = dirname(__filename);
 
 const OLLAMA_VERSION = 'v0.6.2';
 
-const targets = [
-  {
-    tauri: 'x86_64-pc-windows-msvc',
-    artifact: 'ollama-windows-amd64.zip',
-    ext: '.exe',
-    isZip: true,
-  },
-  {
-    tauri: 'aarch64-apple-darwin',
-    artifact: 'ollama-darwin.tgz',
-    ext: '',
-    isZip: true,
-  },
-].filter(t => {
-  if (process.platform === 'win32') return t.tauri.includes('windows');
-  if (process.platform === 'darwin') return t.tauri.includes('darwin');
-  if (process.platform === 'linux') return t.tauri.includes('linux');
-  return false;
-});
+const allTargets = [
+  { tauri: 'x86_64-pc-windows-msvc', artifact: 'ollama-windows-amd64.zip', ext: '.exe', isZip: true, os: 'win32', arch: 'x64' },
+  // Ollama's darwin binary is a universal binary, so it's the same artifact for both arm64 and x64
+  { tauri: 'aarch64-apple-darwin', artifact: 'ollama-darwin.tgz', ext: '', isZip: true, os: 'darwin', arch: 'arm64' },
+  { tauri: 'x86_64-apple-darwin', artifact: 'ollama-darwin.tgz', ext: '', isZip: true, os: 'darwin', arch: 'x64' },
+  { tauri: 'x86_64-unknown-linux-gnu', artifact: 'ollama-linux-amd64.tgz', ext: '', isZip: true, os: 'linux', arch: 'x64' },
+  { tauri: 'aarch64-unknown-linux-gnu', artifact: 'ollama-linux-arm64.tgz', ext: '', isZip: true, os: 'linux', arch: 'arm64' }
+];
+
+const targets = allTargets.filter(t => t.os === process.platform && t.arch === process.arch);
+
+if (targets.length === 0) {
+  console.warn(`[ollama-sidecar] No matching sidecar target found for ${process.platform} ${process.arch}`);
+}
 
 const destDir = path.resolve(__dirname, '../src-tauri/binaries');
 
