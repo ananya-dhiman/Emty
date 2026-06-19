@@ -22,9 +22,9 @@ const targets = [
   },
   {
     tauri: 'aarch64-apple-darwin',
-    artifact: 'ollama-darwin',
+    artifact: 'ollama-darwin.tgz',
     ext: '',
-    isZip: false,
+    isZip: true,
   },
 ];
 
@@ -128,24 +128,37 @@ async function main() {
               fs.mkdirSync(extractDir, { recursive: true });
           }
 
-          // Use native Windows tar to extract the zip (available in > Win10 17063)
+          // Use native Windows tar to extract the zip/tgz (available in > Win10 17063)
           child_process.execSync(`tar -xf "${tempZipPath}" -C "${extractDir}"`, { stdio: 'inherit' });
 
           // 3. Move the binary into place
-          const extractedExePath = path.join(extractDir, 'ollama.exe');
-          if (fs.existsSync(extractedExePath)) {
-              fs.renameSync(extractedExePath, destPath);
-              log(`Moved ollama.exe to ${finalName}`);
-          } else {
-              // Sometimes it might be nested, let's just do a naive find
-              const files = fs.readdirSync(extractDir);
-              const exe = files.find(f => f.toLowerCase().endsWith('ollama.exe'));
-              if (exe) {
-                  fs.renameSync(path.join(extractDir, exe), destPath);
-                  log(`Found and moved ${exe} to ${finalName}`);
-              } else {
-                  throw new Error("Could not find ollama.exe in the extracted archive.");
+          // The binary might be named ollama.exe (Windows) or just ollama (Mac/Linux)
+          // It could also be nested in a subfolder.
+          let extractedExePath = null;
+          
+          function findExe(dir) {
+              const items = fs.readdirSync(dir);
+              for (const item of items) {
+                  const fullPath = path.join(dir, item);
+                  const stat = fs.statSync(fullPath);
+                  if (stat.isDirectory()) {
+                      const found = findExe(fullPath);
+                      if (found) return found;
+                  } else if (item.toLowerCase() === 'ollama.exe' || item.toLowerCase() === 'ollama') {
+                      return fullPath;
+                  }
               }
+              return null;
+          }
+
+          extractedExePath = findExe(extractDir);
+
+          if (extractedExePath) {
+              fs.renameSync(extractedExePath, destPath);
+              fs.chmodSync(destPath, 0o755); // Make executable on Unix
+              log(`Found and moved binary to ${finalName}`);
+          } else {
+              throw new Error("Could not find ollama binary in the extracted archive.");
           }
       } else {
           fs.renameSync(tempZipPath, destPath);
