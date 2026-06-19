@@ -544,10 +544,28 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
               exhaustedDate.getUTCDate() === now.getUTCDate();
           }
 
+          let rateLimits = data.profile.groqRateLimits || null;
+          if (rateLimits && rateLimits.lastUpdated) {
+            const lastUpdatedDate = new Date(rateLimits.lastUpdated);
+            const now = new Date();
+            const isSameUtcDay =
+              lastUpdatedDate.getUTCFullYear() === now.getUTCFullYear() &&
+              lastUpdatedDate.getUTCMonth() === now.getUTCMonth() &&
+              lastUpdatedDate.getUTCDate() === now.getUTCDate();
+            
+            if (!isSameUtcDay) {
+              rateLimits = {
+                ...rateLimits,
+                remaining: rateLimits.limit,
+                lastUpdated: now.getTime(),
+              };
+            }
+          }
+
           setGroqStatus({
             connected:  data.profile.aiProvider === 'groq',
             exhaustedUntilMidnight: isExhausted,
-            rateLimits: data.profile.groqRateLimits || null,
+            rateLimits: rateLimits,
           });
         }
       } catch {

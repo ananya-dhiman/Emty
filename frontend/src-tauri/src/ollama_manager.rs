@@ -541,6 +541,30 @@ impl OllamaManager {
         // We use the shell plugin sidecar mechanism to locate it.
         // However, since we need to manage env vars and run it manually,
         // we resolve the path and spawn directly.
+        let target = if cfg!(target_os = "windows") {
+            "x86_64-pc-windows-msvc"
+        } else if cfg!(target_os = "macos") {
+            if cfg!(target_arch = "aarch64") {
+                "aarch64-apple-darwin"
+            } else {
+                "x86_64-apple-darwin"
+            }
+        } else {
+            "x86_64-unknown-linux-gnu"
+        };
+        let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+        let sidecar_name = format!("ollama-{}{}", target, ext);
+
+        #[cfg(debug_assertions)]
+        {
+            let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("binaries")
+                .join(&sidecar_name);
+            if dev_path.exists() {
+                return Some(dev_path);
+            }
+        }
+
         let resource_dir = app_handle.path().resource_dir().ok()?;
 
         let binary_name = if cfg!(target_os = "windows") {
@@ -556,19 +580,6 @@ impl OllamaManager {
         }
 
         // Also check for Tauri sidecar naming convention
-        let target = if cfg!(target_os = "windows") {
-            "x86_64-pc-windows-msvc"
-        } else if cfg!(target_os = "macos") {
-            if cfg!(target_arch = "aarch64") {
-                "aarch64-apple-darwin"
-            } else {
-                "x86_64-apple-darwin"
-            }
-        } else {
-            "x86_64-unknown-linux-gnu"
-        };
-        let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
-        let sidecar_name = format!("ollama-{}{}", target, ext);
         let sidecar_path = resource_dir.join("binaries").join(&sidecar_name);
         if sidecar_path.exists() {
             return Some(sidecar_path);

@@ -222,6 +222,7 @@ Environment variables only; no dedicated secret-manager integration found.
 
 ### Code Style
 TypeScript strict configs in backend/frontend tsconfig files and frontend ESLint config (`frontend/eslint.config.js`).
+**STRICT RULE: ES Modules (ESM) Only.** Do not use CommonJS (`require` or `module.exports`). Enforce strict consistency across the application by exclusively using modern ES Modules `import`/`export` syntax. When importing older libraries (like `firebase-admin`), use their modular API paths (e.g., `import { initializeApp } from 'firebase-admin/app'`) rather than legacy namespace imports or CJS fallbacks.
 
 ### Git Workflow
 [Not implemented yet]
