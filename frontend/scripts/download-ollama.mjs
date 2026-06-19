@@ -26,7 +26,12 @@ const targets = [
     ext: '',
     isZip: true,
   },
-];
+].filter(t => {
+  if (process.platform === 'win32') return t.tauri.includes('windows');
+  if (process.platform === 'darwin') return t.tauri.includes('darwin');
+  if (process.platform === 'linux') return t.tauri.includes('linux');
+  return false;
+});
 
 const destDir = path.resolve(__dirname, '../src-tauri/binaries');
 

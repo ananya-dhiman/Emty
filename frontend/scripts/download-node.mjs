@@ -16,7 +16,12 @@ const targets = [
   { tauri: 'aarch64-apple-darwin', node: 'node-v20.11.0-darwin-arm64.tar.gz', ext: '', isTar: true },
   // { tauri: 'x86_64-apple-darwin', node: 'darwin-x64/node', ext: '' },
   // { tauri: 'x86_64-unknown-linux-gnu', node: 'linux-x64/node', ext: '' }
-];
+].filter(t => {
+  if (process.platform === 'win32') return t.tauri.includes('windows');
+  if (process.platform === 'darwin') return t.tauri.includes('darwin');
+  if (process.platform === 'linux') return t.tauri.includes('linux');
+  return false;
+});
 
 const destDir = path.resolve(__dirname, '../src-tauri/binaries');
 
