@@ -15,7 +15,8 @@ export interface VerificationResult {
  */
 export const verifyInsights = (
   emailBody: string,
-  insights: AIInsightExtraction
+  insights: AIInsightExtraction,
+  preExtractedUrls?: string[]
 ): VerificationResult => {
   const failedGroups: string[] = [];
   const corrected = JSON.parse(JSON.stringify(insights)) as AIInsightExtraction;
@@ -64,11 +65,16 @@ export const verifyInsights = (
 
   if (corrected.importantLinks && corrected.importantLinks.length > 0) {
     const validLinks = corrected.importantLinks.filter(l => {
+      // If the URL was pre-extracted from the payload, it is definitely grounded
+      if (preExtractedUrls && preExtractedUrls.includes(l.url)) {
+        return true;
+      }
+      
       // The parsed URL structure might look different from text (e.g. tracking links), 
       // but we can check if at least part of the url domain is in the body
       try {
         const urlObj = new URL(l.url);
-        const host = urlObj.hostname.replace(/^www\\./, '');
+        const host = urlObj.hostname.replace(/^www\./, '');
         return normalizedBody.includes(host);
       } catch {
         return false; // invalid url format

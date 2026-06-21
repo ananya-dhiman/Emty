@@ -1,6 +1,7 @@
 import { htmlToText } from 'html-to-text';
 
 export interface PreExtractedLink {
+    id: string;
     url: string;
     anchorText: string;
     context: string;
@@ -9,7 +10,7 @@ export interface PreExtractedLink {
 /**
  * Aggressively clean text to save LLM tokens
  */
-const cleanEmailText = (text: string): string => {
+const cleanEmailText = (text: string, preExtractedLinks?: PreExtractedLink[]): string => {
     let result = text;
     
     // 1. Strip common email reply headers (e.g., "On [Date], [User] wrote:")
@@ -25,9 +26,22 @@ const cleanEmailText = (text: string): string => {
         result = result.substring(0, signatureMatch);
     }
 
-    // 4. Strip all URLs from body — links are pre-extracted separately to save tokens
-    result = result.replace(/\bhttps?:\/\/[^\s<>"')\]]+/gi, '');
-    result = result.replace(/\bwww\.[^\s<>"')\]]+/gi, '');
+    // 4. Replace pre-extracted URLs with their ID, and strip the rest
+    if (preExtractedLinks && preExtractedLinks.length > 0) {
+        result = result.replace(/\bhttps?:\/\/[^\s<>"')\]]+/gi, (match) => {
+            const rawUrl = match.replace(/[),.;!?]+$/, '');
+            try {
+                const normalized = new URL(rawUrl).toString();
+                const foundLink = preExtractedLinks.find(l => l.url === normalized);
+                if (foundLink) return `[${foundLink.id}]`;
+            } catch { /* ignore */ }
+            return '';
+        });
+        result = result.replace(/\bwww\.[^\s<>"')\]]+/gi, '');
+    } else {
+        result = result.replace(/\bhttps?:\/\/[^\s<>"')\]]+/gi, '');
+        result = result.replace(/\bwww\.[^\s<>"')\]]+/gi, '');
+    }
 
     // 5. Compress excessive whitespace
     result = result.replace(/\n{3,}/g, '\n\n');
@@ -114,6 +128,7 @@ const getSurroundingContext = (body: string, matchIndex: number, matchLength: nu
  */
 export const extractLinksFromPayload = (payload: any): PreExtractedLink[] => {
     const linkMap = new Map<string, PreExtractedLink>();
+    let idCounter = 1;
 
     const processRawHtml = (html: string) => {
         // Capture <a href="url">anchor text</a>
@@ -130,6 +145,7 @@ export const extractLinksFromPayload = (payload: any): PreExtractedLink[] => {
                 if (isTrackingOrNoiseUrl(normalized, anchor, '')) continue;
                 if (!linkMap.has(normalized)) {
                     linkMap.set(normalized, {
+                        id: `L${idCounter++}`,
                         url: normalized,
                         anchorText: anchor || '',
                         context: '',
@@ -150,10 +166,16 @@ export const extractLinksFromPayload = (payload: any): PreExtractedLink[] => {
                 if (isTrackingOrNoiseUrl(normalized, '', ctx)) continue;
                 if (!linkMap.has(normalized)) {
                     linkMap.set(normalized, {
+                        id: `L${idCounter++}`,
                         url: normalized,
                         anchorText: '',
                         context: ctx,
                     });
+                } else {
+                    const existing = linkMap.get(normalized)!;
+                    if (!existing.context) {
+                        existing.context = ctx;
+                    }
                 }
             } catch { /* skip invalid URLs */ }
         }
@@ -196,11 +218,11 @@ export const extractLinksFromPayload = (payload: any): PreExtractedLink[] => {
 /**
  * Extract email body from Gmail message payload
  */
-export const extractEmailBody = (payload: any): string => {
+export const extractEmailBody = (payload: any, preExtractedLinks?: PreExtractedLink[]): string => {
     const extractTextFromParts = (parts: any[]): string => {
         const textPart = parts.find(p => p.mimeType === 'text/plain');
         if (textPart?.body?.data) {
-            return cleanEmailText(Buffer.from(textPart.body.data, 'base64').toString('utf-8'));
+            return cleanEmailText(Buffer.from(textPart.body.data, 'base64').toString('utf-8'), preExtractedLinks);
         }
 
         const htmlPart = parts.find(p => p.mimeType === 'text/html');
@@ -214,13 +236,13 @@ export const extractEmailBody = (payload: any): string => {
                     { selector: 'script', format: 'skip' },
                     { selector: 'style', format: 'skip' },
                 ],
-            }));
+            }), preExtractedLinks);
         }
 
         for (const part of parts) {
             if (part.parts) {
                 const nestedText = extractTextFromParts(part.parts);
-                if (nestedText) return cleanEmailText(nestedText);
+                if (nestedText) return cleanEmailText(nestedText, preExtractedLinks);
             }
         }
 
@@ -242,9 +264,9 @@ export const extractEmailBody = (payload: any): string => {
                     { selector: 'script', format: 'skip' },
                     { selector: 'style', format: 'skip' },
                 ],
-            }));
+            }), preExtractedLinks);
         }
-        return cleanEmailText(rawBody);
+        return cleanEmailText(rawBody, preExtractedLinks);
     }
 
     return '';
@@ -316,7 +338,7 @@ export const fetchFullEmailBody = async (
   const preExtractedLinks = extractLinksFromPayload(payload);
 
   // Body cleaning happens after link extraction
-  const body = extractEmailBody(payload);
+  const body = extractEmailBody(payload, preExtractedLinks);
 
   return { body, payload, headers, preExtractedLinks };
 };

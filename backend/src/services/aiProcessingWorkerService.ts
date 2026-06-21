@@ -226,7 +226,8 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
                 );
 
                 // --- STAGE 4: Verification (CoVe) ---
-                const verification = verifyInsights(parsedBodyResult?.body || email.snippet, deepResult.insights);
+                const preExtractedUrls = parsedBodyResult?.preExtractedLinks.map((l: any) => l.url) || [];
+                const verification = verifyInsights(parsedBodyResult?.body || email.snippet, deepResult.insights, preExtractedUrls);
                 deepResult.insights = verification.correctedInsights || deepResult.insights;
 
                 // Upsert Insight

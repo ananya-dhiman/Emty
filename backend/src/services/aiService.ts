@@ -544,14 +544,13 @@ export const extractInsightsFromEmail = async (
   const promptLinks: Array<{ id: string; displayString: string }> = [];
 
   const noiseRegex = /unsubscribe|report a problem|terms and conditions|privacy policy|security advice|view online|manage preferences|get app/i;
-  let idCounter = 1;
 
   for (const link of emailContent.preExtractedLinks || []) {
     const rawAnchor = link.anchorText || '';
     const anchor = cleanNoiseText(rawAnchor);
     if (noiseRegex.test(anchor) || noiseRegex.test(rawAnchor)) continue;
 
-    const id = `L${idCounter++}`;
+    const id = link.id;
     linkMap.set(id, link.url);
     linkMapAnchors.set(id, rawAnchor);
 
