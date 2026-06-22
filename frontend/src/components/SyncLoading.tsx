@@ -129,7 +129,7 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
 
       if (backendPercent >= 100 || data?.progressStage === 'completed') {
         if (syncRequestDone.current) {
-          finalizeSuccess();
+          void runColdStart();
         }
       }
       if (data?.syncState === 'error' || data?.progressStage === 'error') {
@@ -214,18 +214,24 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
             }
         }
 
-        syncRequestDone.current = true;
-        await fetchProgress();
-        // Run cold-start before navigating, even if backend is not at 100% yet.
-        // finalizeSuccess is called inside runColdStart after a short pause.
-        void runColdStart();
+            syncRequestDone.current = true;
+            await fetchProgress();
 
       } catch (err: any) {
-        console.error('[SyncLoading] Initial Sync Failed or Timed Out:', err);
-        setProgress((prev) => Math.max(prev, 1));
-        setSyncStatus('error');
-        setStageLabel('Sync issue');
-        setStatusDetail('The background sync may still continue. You can go to your dashboard now.');
+        console.error('[SyncLoading] Initial Sync request ended:', err);
+        const errMsg = err.message?.toLowerCase() || '';
+        const isTimeout = err.code === 'ECONNABORTED' || errMsg.includes('timeout') || errMsg.includes('network error');
+        
+        if (isTimeout) {
+            console.log('[SyncLoading] Request timed out on client (likely Mac WebKit timeout). Background sync continues.');
+            syncRequestDone.current = true;
+            // Let the pollInterval handle completion when progress hits 100%
+        } else {
+            setProgress((prev) => Math.max(prev, 1));
+            setSyncStatus('error');
+            setStageLabel('Sync issue');
+            setStatusDetail('The background sync may still continue. You can go to your dashboard now.');
+        }
       }
     };
 
