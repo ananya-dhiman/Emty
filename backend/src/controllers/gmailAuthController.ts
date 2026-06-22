@@ -170,7 +170,8 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
   <div class="card">
     <div class="icon">&#10003;</div>
     <h1>Gmail Connected</h1>
-    <p>Returning you to Emty&hellip;<br/>You can close this tab if it does not close automatically.</p>
+    <p>Returning you to Emty&hellip;<br/>If you are not redirected automatically, please click the button below.</p>
+    <a href="${successUrl}" style="display: inline-block; margin-top: 20px; padding: 10px 20px; background: #e5e5e5; color: #0f0f0f; text-decoration: none; border-radius: 6px; font-weight: 600;">Open Emty App</a>
   </div>
   <script>
     // Fire the deep link so the Tauri app receives gmail_success
@@ -206,7 +207,8 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
   <div class="card">
     <div class="icon">&#x26A0;</div>
     <h1>Connection Failed</h1>
-    <p>Something went wrong. Returning you to Emty&hellip;<br/>You can close this tab if it does not close automatically.</p>
+    <p>Something went wrong. Returning you to Emty&hellip;<br/>If you are not redirected automatically, please click the button below.</p>
+    <a href="${errorUrl}" style="display: inline-block; margin-top: 20px; padding: 10px 20px; background: #e5e5e5; color: #0f0f0f; text-decoration: none; border-radius: 6px; font-weight: 600;">Return to Emty App</a>
   </div>
   <script>
     window.location.href = '${errorUrl}';

@@ -247,8 +247,8 @@ const renderOAuthRedirectHtml = (res: Response, targetUrl: string, isSuccess: bo
     const title = isSuccess ? 'Login Successful' : 'Login Failed';
     const icon = isSuccess ? '&#10003;' : '&#x26A0;';
     const message = isSuccess 
-        ? 'Returning you to Emty&hellip;<br/>You can close this tab if it does not close automatically.'
-        : 'Something went wrong. Returning you to Emty&hellip;<br/>You can close this tab if it does not close automatically.';
+        ? 'Returning you to Emty&hellip;<br/>If you are not redirected automatically, please click the button below.'
+        : 'Something went wrong. Returning you to Emty&hellip;<br/>If you are not redirected automatically, please click the button below.';
         
     res.setHeader('Content-Type', 'text/html');
     res.send(`<!DOCTYPE html>
@@ -272,6 +272,7 @@ const renderOAuthRedirectHtml = (res: Response, targetUrl: string, isSuccess: bo
     <div class="icon">${icon}</div>
     <h1>${title}</h1>
     <p>${message}</p>
+    <a href="${targetUrl}" style="display: inline-block; margin-top: 20px; padding: 10px 20px; background: #e5e5e5; color: #0f0f0f; text-decoration: none; border-radius: 6px; font-weight: 600;">Open Emty App</a>
   </div>
   <script>
     window.location.href = '${targetUrl}';
