@@ -45,9 +45,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "nsis"
-    ],
+    "targets": "all",
     "windows": {
       "wix": null
     },
