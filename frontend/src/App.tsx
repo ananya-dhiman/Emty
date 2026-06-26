@@ -237,7 +237,7 @@ function App() {
       await invoke('open_in_browser', {
         url: `${API_BASE_URL}/api/auth/google/desktop/initiate`
       });
-    } catch (e) {
+    } catch {
       // Fallback for non-Tauri / browser preview context
       window.location.href = `${API_BASE_URL}/api/auth/google/desktop/initiate`;
     }
@@ -269,7 +269,7 @@ function App() {
         // Navigating the webview directly to Google causes "Origin header is not a valid URL".
         try {
           await invoke('open_in_browser', { url: data.authorizationUrl });
-        } catch (e) {
+        } catch {
           // Fallback for non-Tauri context (browser dev preview)
           window.location.href = data.authorizationUrl;
         }

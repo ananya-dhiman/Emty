@@ -441,8 +441,6 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     const token = localStorage.getItem('firebaseToken');
     if (!token) return;
 
-    // eslint-disable-next-line prefer-const
-    let pollInterval: ReturnType<typeof setInterval>;
     let isCurrentlyPolling = false;
     let lastStage = 'completed';
 
@@ -496,7 +494,7 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     };
 
     checkBackgroundProgress(); // Check immediately on mount
-    pollInterval = setInterval(checkBackgroundProgress, 4000);
+    const pollInterval = setInterval(checkBackgroundProgress, 4000);
 
     return () => clearInterval(pollInterval);
     // eslint-disable-next-line react-hooks/exhaustive-deps

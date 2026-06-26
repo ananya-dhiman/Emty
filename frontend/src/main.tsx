@@ -9,21 +9,19 @@ import { SystemLoader } from './components/SystemLoader';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { WidgetApp } from './components/Widget';
 
+/* eslint-disable react-refresh/only-export-components */
 function AppLauncher() {
   const [apiReady, setApiReady] = useState(false);
   const [backendReady, setBackendReady] = useState(false);
-  const [isWidget, setIsWidget] = useState(false);
+  const [isWidget] = useState(() => {
+    try {
+      return getCurrentWindow().label === 'widget';
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
-    try {
-      const windowLabel = getCurrentWindow().label;
-      if (windowLabel === 'widget') {
-        setIsWidget(true);
-      }
-    } catch (e) {
-      console.warn("Could not get Tauri window label", e);
-    }
-    
     initApi().finally(() => {
       setApiReady(true);
     });
@@ -40,7 +38,7 @@ function AppLauncher() {
             if (!isCancelled) setBackendReady(true);
             return;
          }
-      } catch (e) {
+      } catch {
          // Server not ready yet, will retry
       }
       if (!isCancelled) {

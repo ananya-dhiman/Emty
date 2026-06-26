@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import '../styles/Widget.css';
@@ -352,7 +353,6 @@ export function WidgetApp() {
 
     // Background polling — refresh widget cards while a sync is active
     // This mirrors the Dashboard's background progress polling
-    let pollInterval: ReturnType<typeof setInterval>;
     let isPolling = false;
     let lastStage = 'completed';
 
@@ -398,7 +398,7 @@ export function WidgetApp() {
       }
     };
 
-    pollInterval = setInterval(bgPoll, 5000);
+    const pollInterval = setInterval(bgPoll, 5000);
 
     return () => {
       document.body.classList.remove('widget-mode');
@@ -417,7 +417,11 @@ export function WidgetApp() {
     // Optimistic visual update
     setSubmitted(prev => {
       const next = new Set(prev);
-      newStatus ? next.add(id) : next.delete(id);
+      if (newStatus) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
       return next;
     });
 
@@ -436,7 +440,11 @@ export function WidgetApp() {
       // Revert optimistic update on failure
       setSubmitted(prev => {
         const next = new Set(prev);
-        isCurrentlyDone ? next.add(id) : next.delete(id);
+        if (isCurrentlyDone) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
         return next;
       });
     }
