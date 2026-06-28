@@ -519,7 +519,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme }) => {
               </svg>
             </div>
             <div className="lp-dl-os">WINDOWS</div>
-            <div className="lp-dl-ver">VERSION 1.0.0</div>
+            <div className="lp-dl-ver">VERSION 1.1.0</div>
             <a
               className="lp-btn-primary"
               href={import.meta.env.WINDOWS_EXE}
