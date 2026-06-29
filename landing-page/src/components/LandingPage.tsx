@@ -531,16 +531,20 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme }) => {
 
           {/* Mac */}
           <div className="lp-dl-card">
-            <div className="lp-dl-icon" style={{ opacity: 0.5 }}>
+            <div className="lp-dl-icon">
               <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.15 2.65.83 3.32 2.01-2.91 1.76-2.4 5.86.37 7.02-.75 1.54-1.78 3.03-3.1 4.2M12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.39 2.31-1.84 4.38-3.74 4.25z"/>
               </svg>
             </div>
-            <div className="lp-dl-os" style={{ opacity: 0.5 }}>MAC OS</div>
-            <div className="lp-dl-ver" style={{ opacity: 0.5 }}>APPLE SILICON / INTEL</div>
-            <div className="lp-btn-outline" style={{ marginTop: 'auto', fontSize: 13, padding: '12px 24px', opacity: 0.5, cursor: 'not-allowed' }}>
-              Coming Soon
-            </div>
+            <div className="lp-dl-os">MAC OS</div>
+            <div className="lp-dl-ver">APPLE SILICON / INTEL</div>
+            <a
+              className="lp-btn-primary"
+              href={import.meta.env.MAC_EXE}
+              style={{ marginTop: 'auto', fontSize: 13, padding: '12px 24px' }}
+            >
+              Download .exe
+            </a>
           </div>
 
           {/* Linux */}
