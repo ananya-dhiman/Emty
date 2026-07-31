@@ -49,6 +49,12 @@ export function runMigrations(db: Database.Database): void {
       logger.info("Applied migration v5: Add is_completed to insights");
     }
 
+    if (currentVersion < 6) {
+      migration_v6(db);
+      db.prepare("INSERT INTO schema_version (version) VALUES (6)").run();
+      logger.info("Applied migration v6: Add track folder fields to insights");
+    }
+
     const finalVersion = db
       .prepare("SELECT MAX(version) as version FROM schema_version")
       .get() as { version: number | null };
@@ -347,3 +353,24 @@ function migration_v5(db: Database.Database): void {
   }
 }
 
+/**
+ * Migration v6: Add track folder fields to insights table
+ */
+function migration_v6(db: Database.Database): void {
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(insights)").all() as any[];
+    if (!tableInfo.some((col) => col.name === "is_tracked")) {
+      db.exec("ALTER TABLE insights ADD COLUMN is_tracked INTEGER DEFAULT 0");
+    }
+    if (!tableInfo.some((col) => col.name === "tracking_note")) {
+      db.exec("ALTER TABLE insights ADD COLUMN tracking_note TEXT DEFAULT NULL");
+    }
+    if (!tableInfo.some((col) => col.name === "tracked_at")) {
+      db.exec("ALTER TABLE insights ADD COLUMN tracked_at INTEGER DEFAULT NULL");
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_insights_tracked ON insights(is_tracked, tracked_at)`);
+    logger.info("Added track folder fields to insights table");
+  } catch (error) {
+    logger.info("Migration v6 failed (non-critical):", error);
+  }
+}

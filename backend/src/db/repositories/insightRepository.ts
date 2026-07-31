@@ -36,11 +36,17 @@ export interface InsightRow {
   failed_verification_groups: string;
   source: string | null;
   is_completed: number;
+  is_tracked: number;
+  tracking_note: string | null;
+  tracked_at: number | null;
   created_at: number;
   updated_at: number;
 }
 
-export function create(data: Omit<InsightRow, "id" | "created_at" | "updated_at" | "is_completed"> & { is_completed?: number }): InsightRow {
+export function create(
+  data: Omit<InsightRow, "id" | "created_at" | "updated_at" | "is_completed" | "is_tracked" | "tracking_note" | "tracked_at"> &
+    { is_completed?: number; is_tracked?: number; tracking_note?: string | null; tracked_at?: number | null }
+): InsightRow {
   const db = getDb();
   const id = randomUUID();
   const now = Date.now();
@@ -51,8 +57,9 @@ export function create(data: Omit<InsightRow, "id" | "created_at" | "updated_at"
       labels, label_suggestions, importance_score, base_score, base_score_breakdown, base_score_computed_at,
       summary_snippet, summary_intent, dates, attachments, checklist, state_relevance, state_first_seen_at,
       state_last_signal_at, state_last_verified_at, extracted_facts, embedding, needs_review, ai_confidence,
-      ai_uncertainty_source, pipeline_stage_reached, verification_status, failed_verification_groups, source, is_completed, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ai_uncertainty_source, pipeline_stage_reached, verification_status, failed_verification_groups, source,
+      is_completed, is_tracked, tracking_note, tracked_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -89,7 +96,10 @@ export function create(data: Omit<InsightRow, "id" | "created_at" | "updated_at"
     data.verification_status || 'pending',
     data.failed_verification_groups || '[]',
     data.source,
-    data.is_completed || 0,
+    data.is_completed ?? 0,
+    data.is_tracked ?? 0,
+    data.tracking_note ?? null,
+    data.tracked_at ?? null,
     now,
     now
   );
@@ -97,7 +107,10 @@ export function create(data: Omit<InsightRow, "id" | "created_at" | "updated_at"
   return {
     id,
     ...data,
-    is_completed: data.is_completed || 0,
+    is_completed: data.is_completed ?? 0,
+    is_tracked: data.is_tracked ?? 0,
+    tracking_note: data.tracking_note ?? null,
+    tracked_at: data.tracked_at ?? null,
     created_at: now,
     updated_at: now,
   };
@@ -242,3 +255,42 @@ export function updateCompletedStatus(insightId: string, isCompleted: boolean): 
   stmt.run(isCompleted ? 1 : 0, Date.now(), insightId);
 }
 
+export function updateTrackingStatus(
+  insightId: string,
+  isTracked: boolean,
+  trackingNote?: string | null
+): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE insights
+    SET is_tracked = ?, tracking_note = ?, tracked_at = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(
+    isTracked ? 1 : 0,
+    isTracked ? (trackingNote ?? null) : null,
+    isTracked ? Date.now() : null,
+    Date.now(),
+    insightId
+  );
+}
+
+export function findAllTracked(accountId: string): InsightRow[] {
+  const db = getDb();
+  const stmt = db.prepare(`
+    SELECT * FROM insights
+    WHERE account_id = ? AND is_tracked = 1
+    ORDER BY tracked_at DESC
+  `);
+  return stmt.all(accountId) as InsightRow[];
+}
+
+export function findTrackedByUserId(userId: string): InsightRow[] {
+  const db = getDb();
+  const stmt = db.prepare(`
+    SELECT * FROM insights
+    WHERE user_id = ? AND is_tracked = 1
+    ORDER BY tracked_at DESC
+  `);
+  return stmt.all(userId) as InsightRow[];
+}

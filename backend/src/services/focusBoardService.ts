@@ -661,14 +661,27 @@ export const getPriorityRanking = async (params: {
     const matchedLabelRank = storedMatchedRank ?? computedBase.matchedLabelRank;
     const matchedLabels = computedBase.matchedLabels;
 
-    const recencyDate = insight.state?.lastSignalAt || insight.updatedAt || insight.createdAt || now;
+    const embeddedEmails = Array.isArray((insight as any).emails) ? (insight as any).emails : [];
+    
+    let actualEmailDate = null;
+    for (const email of embeddedEmails) {
+      if (email.internalDate) {
+        const time = new Date(email.internalDate).getTime();
+        if (!actualEmailDate || time > actualEmailDate) {
+          actualEmailDate = time;
+        }
+      }
+    }
+
+    const recencyDate = actualEmailDate 
+      ? new Date(actualEmailDate) 
+      : (insight.state?.lastSignalAt || insight.updatedAt || insight.createdAt || now);
+
     const ageHours = Math.max(
       0,
       (now.getTime() - new Date(recencyDate).getTime()) / (1000 * 60 * 60)
     );
     const recencyNorm = Math.exp(-ageHours / RECENCY_DECAY_HOURS);
-
-    const embeddedEmails = Array.isArray((insight as any).emails) ? (insight as any).emails : [];
     const derivedChecklist = Array.isArray((insight as any).checklist)
       ? (insight as any).checklist
       : embeddedEmails.flatMap((entry: any) =>
@@ -853,14 +866,21 @@ export const getPriorityRanking = async (params: {
     if (b.score.totalScore !== a.score.totalScore) {
       return b.score.totalScore - a.score.totalScore;
     }
-    const aTime =
-      a.timestamps.lastSignalAt?.getTime() ||
-      a.timestamps.updatedAt?.getTime() ||
-      0;
-    const bTime =
-      b.timestamps.lastSignalAt?.getTime() ||
-      b.timestamps.updatedAt?.getTime() ||
-      0;
+    const getActualTime = (item: PriorityRankingItem) => {
+      if (item.emailContextById) {
+        let maxTime = 0;
+        for (const ctx of Object.values(item.emailContextById)) {
+          if (ctx.internalDate) {
+            const time = new Date(ctx.internalDate).getTime();
+            if (time > maxTime) maxTime = time;
+          }
+        }
+        if (maxTime > 0) return maxTime;
+      }
+      return item.timestamps.lastSignalAt?.getTime() || item.timestamps.updatedAt?.getTime() || 0;
+    };
+    const aTime = getActualTime(a);
+    const bTime = getActualTime(b);
     if (bTime !== aTime) {
       return bTime - aTime;
     }

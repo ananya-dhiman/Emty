@@ -246,6 +246,8 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
   const [agendaItems, setAgendaItems] = useState<PriorityRankingItem[]>([]);
   const [completedItems, setCompletedItems] = useState<PriorityRankingItem[]>([]);
   const [isDoneOpen, setIsDoneOpen] = useState(false);
+  const [isTrackedOpen, setIsTrackedOpen] = useState(true);
+  const [trackedItems, setTrackedItems] = useState<any[]>([]);
   const [lowPriorityItems, setLowPriorityItems] = useState<LowPriorityEmailItem[]>([]);
   const [isLowPriorityOpen, setIsLowPriorityOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<'do' | 'done' | 'ignore'>('do');
@@ -375,6 +377,18 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
         setCompletedItems(response.data.completed || []);
         setLowPriorityItems(response.data.lowPriorityEmails || []);
 
+        // Fetch tracked items (non-blocking, cross-account)
+        try {
+          const trackedRes = await axios.get(
+            `${API_BASE_URL}/api/emails/tracked/all`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (trackedRes.data.success) {
+            setTrackedItems(trackedRes.data.tracked || []);
+          }
+        } catch {
+          // non-blocking
+        }
       } else {
         console.error("API returned success: false", response.data);
         setError(response.data.message);
@@ -1198,6 +1212,79 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
             </div>
           </div>
 
+          {/* TRACKED BOARD */}
+          {trackedItems.length > 0 && (
+            <div className="board" style={{ borderTop: '2px solid rgba(0,229,255,0.25)' }}>
+              <div
+                className="board-hd"
+                onClick={() => setIsTrackedOpen(!isTrackedOpen)}
+                style={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                <div className="board-bar" style={{ background: 'var(--accent, #00E5FF)' }}></div>
+                <span className="board-name">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none" style={{ marginRight: 6, verticalAlign: 'text-bottom', color: 'var(--accent, #00E5FF)' }}>
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  Tracked
+                </span>
+                <span className="board-desc">&nbsp;— threads you are monitoring</span>
+                <span className="board-badge">{trackedItems.length} threads</span>
+                <span style={{ marginLeft: '12px', color: 'var(--text-3)', transition: 'transform 0.2s', transform: isTrackedOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                </span>
+              </div>
+              {isTrackedOpen && (
+                <div className="track">
+                  {trackedItems.map((ti, idx) => (
+                    <div
+                      key={ti.insightId + idx}
+                      className={`kard ${selectedInsightId === ti.insightId ? 'sel' : ''}`}
+                      onClick={() => {
+                        setSelectedInsightId(ti.insightId);
+                        setSelectedLowPriorityMessageId(null);
+                        setSelectedSourceMessageId(null);
+                        setRightCol(true);
+                      }}
+                      style={{ borderLeft: '2px solid rgba(0,229,255,0.4)' }}
+                    >
+                      <div className="kard-top">
+                        <div className="kf">
+                          {ti.from?.name || (ti.from?.email ? ti.from.email.split('@')[0] : 'Unknown')}
+                        </div>
+                      </div>
+                      <div className="ks">{ti.summary?.shortSnippet || 'Tracked thread'}</div>
+                      {ti.trackingNote && (
+                        <div style={{
+                          fontSize: '10px',
+                          color: 'var(--accent, #00E5FF)',
+                          background: 'rgba(0,229,255,0.07)',
+                          border: '1px solid rgba(0,229,255,0.2)',
+                          borderRadius: '3px',
+                          padding: '2px 6px',
+                          marginTop: '4px',
+                          width: 'fit-content',
+                          maxWidth: '100%',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          fontFamily: 'var(--font-mono)',
+                        }}>{ti.trackingNote}</div>
+                      )}
+                      <div className="kard-tags">
+                        <span className="tag" style={{ borderColor: 'rgba(0,229,255,0.4)', color: 'var(--accent, #00E5FF)' }}>Tracked</span>
+                        {ti.matchedLabels?.slice(0, 1).map((lbl: string) => (
+                          <span className="tag tn" key={lbl}>{lbl}</span>
+                        ))}
+                        <span className="kt">
+                          {ti.trackedAt ? new Date(ti.trackedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {/* AGENDA */}
           <div className="agenda-head">
             <span className="agenda-ttl">{selectedLabel ? `Label: ${selectedLabel}` : 'All items'}</span>

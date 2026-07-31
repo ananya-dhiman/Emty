@@ -105,3 +105,10 @@ export async function autoPopulateFromMongo(): Promise<void> {
     logger.info("Failed to auto-populate local accounts from MongoDB:", error);
   }
 }
+
+export function findAllByUser(userId: string): LocalAccountRow[] {
+  const db = getDb();
+  return db
+    .prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY created_at ASC")
+    .all(userId) as LocalAccountRow[];
+}

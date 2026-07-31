@@ -15,6 +15,7 @@ import {
   toggleEmailCompletion,
 } from '../controllers/emailController';
 import { getSyncProgress } from '../controllers/syncProgressController';
+import { toggleTracking, getTrackedInsights, getAllTrackedInsights } from '../controllers/trackController';
 
 const router = express.Router();
 
@@ -43,6 +44,9 @@ router.put('/label-priorities', verifyToken, updateLabelPriorityOrder);
 router.post('/label-priorities/review', verifyToken, reviewLabelPriorityOrder);
 router.get('/priority-ranking', verifyToken, getPriorityRankingInsights);
 router.put('/insights/:insightId/complete', verifyToken, toggleEmailCompletion);
+router.put('/insights/:insightId/track', verifyToken, toggleTracking);
+router.get('/tracked', verifyToken, getTrackedInsights);
+router.get('/tracked/all', verifyToken, getAllTrackedInsights);
 
 // POST /api/emails/sync - Incremental email sync (manual trigger)
 // Protected route (needs verifyToken middleware)

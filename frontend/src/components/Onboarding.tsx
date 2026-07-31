@@ -565,10 +565,10 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
             <StepIndicator />
 
             <h1 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '6px' }}>
-              Choose your profile
+              What best describes you?
             </h1>
             <p style={{ color: 'var(--text-3)', fontSize: '13px', marginBottom: '32px', lineHeight: 1.6 }}>
-              Select a profile to start with sensible defaults for your inbox organization.
+              Pick a profile to pre-fill smart defaults for your inbox.
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -587,7 +587,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
                 </div>
                 <div>
                   <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 4px 0' }}>Student</h3>
-                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-3)' }}>Optimized for internships, placements, academic emails</p>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-3)' }}>Internships, placements, and academic emails</p>
                 </div>
               </div>
 
@@ -606,7 +606,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
                 </div>
                 <div>
                   <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 4px 0' }}>Working Professional</h3>
-                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-3)' }}>Focus on meetings, projects, work communications</p>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-3)' }}>Meetings, projects, and work communications</p>
                 </div>
               </div>
 
@@ -624,8 +624,8 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
                   <Settings size={24} />
                 </div>
                 <div>
-                  <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 4px 0' }}>Custom Setup</h3>
-                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-3)' }}>Start fresh, we'll learn from your email patterns</p>
+                  <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 4px 0' }}>Custom</h3>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-3)' }}>Start from scratch — Emty learns as you go</p>
                 </div>
               </div>
             </div>
@@ -646,11 +646,10 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
             <StepIndicator />
 
             <h1 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '6px' }}>
-              Help us understand your inbox
+              Tune your inbox filter
             </h1>
             <p style={{ color: 'var(--text-3)', fontSize: '13px', marginBottom: '32px', lineHeight: 1.6 }}>
-              Based on your recent emails, here are some patterns we noticed.
-              Remove anything that does not apply, or add your own.
+              Review the defaults we set for your profile. Remove anything that doesn't fit, or add your own.
               {loadingProfile && (
                 <span style={{ marginLeft: '8px', fontFamily: 'var(--font-mono)', fontSize: '10px' }}>
                   Loading...
@@ -659,8 +658,8 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
             </p>
 
             <SectionBox
-              title="Add specific instructions (optional)"
-              subtitle="Tell us exactly what matters, one idea at a time. You can always add more later."
+              title="Custom instructions (optional)"
+              subtitle="Describe what matters to you. Add one idea per line."
             >
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {intentBoxes.map((box, idx) => (
@@ -718,8 +717,8 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
             </SectionBox>
 
             <SectionBox
-              title="Topics and keywords we noticed"
-              subtitle="These show up often in your emails. Keep the ones that matter to you."
+              title="Keywords to watch"
+              subtitle="Keep topics that appear often in emails you care about."
             >
               <ChipInput
                 chips={keywords}
@@ -730,8 +729,8 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
             </SectionBox>
 
             <SectionBox
-              title="Senders we think matter"
-              subtitle="These domains send you frequent emails. Remove any that are not important."
+              title="Important senders"
+              subtitle="Domains whose emails you want prioritized. Remove any that don't apply."
             >
               <ChipInput
                 chips={senders}
@@ -742,8 +741,8 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
             </SectionBox>
 
             <SectionBox
-              title="Labels you care about"
-              subtitle="Labels from your inbox we saw being used. Adjust to fit your workflow."
+              title="Labels"
+              subtitle="Labels used to sort your inbox. Add or remove to match your workflow."
             >
               <ChipInput
                 chips={labelChips}
@@ -806,15 +805,13 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
             <StepIndicator />
 
             <h1 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '6px' }}>
-              Enable Cloud AI Analysis
+              Add your Groq API key
             </h1>
             <p style={{ color: 'var(--text-3)', fontSize: '13px', marginBottom: '8px', lineHeight: 1.6 }}>
-              Add a free Groq API key to unlock faster, higher-quality email analysis using
-              Llama 3.3 70B (14,400 free requests/day).
+              Groq powers Emty's AI analysis using Llama 3.3 70B — it's free (14,400 requests/day) and required to continue.
             </p>
             <p style={{ color: 'var(--text-3)', fontSize: '12px', marginBottom: '28px', lineHeight: 1.6 }}>
-              Sensitive emails containing financial, medical, or legal content are always
-              processed locally and never sent to any cloud service.
+              Sensitive emails (financial, medical, legal) are always processed locally — never sent to any cloud.
             </p>
 
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', marginBottom: '20px' }}>
@@ -867,25 +864,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
               )}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <button
-                id="groq-skip-btn"
-                onClick={handleSkipGroq}
-                disabled={groqVerifying}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--text-3)',
-                  fontFamily: 'var(--font-ui)',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  cursor: groqVerifying ? 'not-allowed' : 'pointer',
-                  padding: '8px 0',
-                  opacity: groqVerifying ? 0.5 : 1,
-                }}
-              >
-                Skip for now — use local AI only
-              </button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
               <button
                 id="groq-verify-btn"
                 onClick={handleVerifyAndSaveGroqKey}
@@ -920,9 +899,9 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
         <div style={{ width: '100%', maxWidth: '640px' }}>
           <StepIndicator />
 
-          <h1 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '6px' }}>Inbox Priorities</h1>
+          <h1 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '6px' }}>Set your priorities</h1>
           <p style={{ color: 'var(--text-3)', fontSize: '13px', marginBottom: '32px', lineHeight: 1.5 }}>
-            Define the labels we use to organize your inbox. Drag and drop them to set your routing priority — top is highest priority.
+            Drag the labels below to rank what matters most. The top item gets the highest priority.
           </p>
 
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', marginBottom: '32px' }}>
