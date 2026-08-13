@@ -1,0 +1,100 @@
+name: Release
+
+# Releases are a deliberate act, not a side effect of merging.
+# Pushing a v* tag is the trigger; workflow_dispatch is the manual escape hatch.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# Least privilege: this workflow may write releases and nothing else.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      # A failing Intel/Windows leg must not cancel its siblings — we want to
+      # know whether a break is platform-specific or global.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-14              # Apple Silicon
+            target: aarch64-apple-darwin
+            bundle: dmg
+            ext: dmg
+            alias: Emty-macos-aarch64.dmg
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundle: nsis
+            ext: exe
+            alias: Emty-windows-x64-setup.exe
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Caches ~/.cargo and src-tauri/target — turns a ~15 min Rust build
+      # into a few minutes on subsequent runs.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri -> target
+
+      # Sidecars (node ~67MB, ollama ~30MB) are pinned by version constants
+      # inside the download scripts, so key the cache on those files.
+      - uses: actions/cache@v4
+        with:
+          path: frontend/src-tauri/binaries
+          key: sidecars-${{ matrix.target }}-${{ hashFiles('frontend/scripts/download-*.mjs') }}
+
+      # npm ci, not npm install: install the lockfile exactly and fail loudly
+      # if it disagrees with package.json, rather than silently re-resolving.
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # beforeBuildCommand in tauri.conf.json builds the backend and fetches
+      # the host-matching sidecars, so no extra steps are needed here.
+      - uses: tauri-apps/tauri-action@v0
+        id: tauri
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: frontend
+          args: --target ${{ matrix.target }}
+          tagName: ${{ github.ref_name }}
+          releaseName: Emty ${{ github.ref_name }}
+          releaseDraft: true        # human gate — nothing is live until you publish
+          prerelease: false
+
+      # Tauri embeds the version in its filenames (Emty_1.2.0_x64-setup.exe),
+      # but /releases/latest/download/ matches on an exact name. Upload a second
+      # copy under a fixed name so the landing page can link to it forever.
+      - name: Upload version-less alias
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          dir="frontend/src-tauri/target/${{ matrix.target }}/release/bundle/${{ matrix.bundle }}"
+          src=$(ls "$dir"/*.${{ matrix.ext }} | head -1)
+          echo "Aliasing $src -> ${{ matrix.alias }}"
+          cp "$src" "${{ matrix.alias }}"
+          gh release upload "${{ github.ref_name }}" "${{ matrix.alias }}" --clobber
