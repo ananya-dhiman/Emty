@@ -14,6 +14,7 @@ import { SyncLoading } from './components/SyncLoading'
 import { AppIntro } from './components/AppIntro'
 import { Logo } from './components/Logo'
 import { API_BASE_URL } from './utils/api'
+import { startGmailConnect } from './utils/connectGmail'
 import MetricsDashboard from './pages/MetricsDashboard';
 
 // No static cache, always resolve API_BASE_URL at runtime
@@ -62,6 +63,11 @@ function App() {
   // NEW: track if user has connected gmail in frontend flow
   const [isGmailConnected, setIsGmailConnected] = useState(false);
 
+  // The account a just-completed Gmail connect belongs to. When ADDING a
+  // second account, the sync/onboarding flow must target that account —
+  // user.gmailAccountId always points at the first-connected one.
+  const [pendingAccountId, setPendingAccountId] = useState<string | null>(null);
+
   // Check notification permissions on mount
   useEffect(() => {
     const checkNotificationPermission = async () => {
@@ -98,6 +104,15 @@ function App() {
             const refreshed = await axios.post(`${API_BASE_URL}/api/auth/login`, { token: storedToken });
             if (refreshed.data.success) {
               setUser(refreshed.data.user);
+              // The backend returns accounts[] oldest-first — the newest entry
+              // is the account that was just connected. Target it for the
+              // sync + onboarding flow and make it the app-wide active account.
+              const accts = refreshed.data.user?.accounts;
+              if (Array.isArray(accts) && accts.length > 0) {
+                const newest = accts[accts.length - 1];
+                setPendingAccountId(newest.id);
+                localStorage.setItem('emty_active_account_id', newest.id);
+              }
             }
           }
         } catch (e) {
@@ -251,31 +266,7 @@ function App() {
     setError('');
 
     try {
-      const token = localStorage.getItem('firebaseToken');
-      if (!token) {
-        throw new Error('No authentication token found. Please log in again.');
-      }
-
-      const response = await axios.post(`${API_BASE_URL}/api/auth/google/initiate`, {}, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      const data = response.data;
-      if (data.success && data.authorizationUrl) {
-        // Open in the SYSTEM browser (Chrome/Edge), not the Tauri webview.
-        // This lets Google redirect to emty:// which the OS routes back to the app.
-        // Navigating the webview directly to Google causes "Origin header is not a valid URL".
-        try {
-          await invoke('open_in_browser', { url: data.authorizationUrl });
-        } catch {
-          // Fallback for non-Tauri context (browser dev preview)
-          window.location.href = data.authorizationUrl;
-        }
-      } else {
-        throw new Error(data.message || 'Failed to initiate Gmail connection');
-      }
+      await startGmailConnect();
     } catch (err: any) {
         console.error('Connect Gmail error:', err);
         setError(err?.response?.data?.message || err?.message || 'An error occurred initiating Gmail connection');
@@ -308,10 +299,23 @@ function App() {
       return <Profile user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} onLogout={handleLogout} />;
     }
     if (route === 'syncing') {
-      return <SyncLoading user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
+      return <SyncLoading user={user} accountId={pendingAccountId} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
     }
     if (route === 'onboarding') {
-      return <Onboarding user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
+      return (
+        <Onboarding
+          user={user}
+          accountId={pendingAccountId}
+          theme={theme}
+          setTheme={setTheme}
+          onNavigate={((r: 'dashboard') => {
+            // The just-connected account has been synced + onboarded — clear
+            // it so a later re-entry doesn't target a stale "new" account.
+            setPendingAccountId(null);
+            setRoute(r);
+          }) as any}
+        />
+      );
     }
     return <Dashboard user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
   }

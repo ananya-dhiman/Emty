@@ -23,6 +23,7 @@ import {
 import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService";
 import { resolveAIContextForUser } from "./aiProviderService";
 import { verifyInsights } from "./verificationService";
+import { UserIntentProfile } from "../model/UserIntentProfile";
 import logger from '../utils/logger';
 
 /**
@@ -61,6 +62,7 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
     let retries = 0;
     const INITIAL_BACKOFF_MS = 60 * 1000; // 1 minute
     const MAX_BACKOFF_MS = 7 * 60 * 1000; // 7 minutes
+    const MAX_LOOP_RETRIES = 3;
 
     while (true) {
         try {
@@ -102,11 +104,31 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
         `[AI WORKER] Provider attempts: ${aiContext.attempts.map(a => `${a.provider}:${a.model}:${a.source}`).join(" -> ")}`
     );
 
-    // BLOCKING SYNC WAIT: Ensure a valid chat model is fully pulled and ready before starting Deep Processing.
-    // This allows Tauri up to 30 minutes to download massive models like qwen2.5 seamlessly in the background.
+    // OLLAMA READINESS GATE: wait for a valid local chat model before Deep
+    // Processing. Heartbeats progress while waiting, and the wait is CAPPED:
+    // when cloud providers exist in the attempt chain we give Ollama only a
+    // short grace period and then proceed (cloud handles what it can; local-
+    // only emails land in the per-email retry log). When Ollama is the ONLY
+    // provider, we wait longer but fail LOUD with a terminal error instead of
+    // silently freezing the sync forever.
+    // Cloud capability = a non-ollama attempt in the chain OR a configured
+    // Groq key (Groq routing happens outside the attempt chain — see
+    // emailProcessingService's useGroq flag).
+    let hasCloudProvider = aiContext.attempts.some((a: any) => a.provider !== 'ollama');
+    if (!hasCloudProvider) {
+        try {
+            const profile = await UserIntentProfile.findUnique({ where: { userId } });
+            hasCloudProvider = profile?.aiProvider === 'groq' && !!profile?.groqApiKey;
+        } catch {
+            // keep false — worst case we wait the longer local-only cap
+        }
+    }
+    const OLLAMA_POLL_MS = 10000;
+    const maxAttempts = hasCloudProvider ? 12 : 60; // 2 min with cloud fallback, 10 min local-only
+
     let isModelReady = false;
     const OLLAMA_URL = process.env.OLLAMA_URL?.trim() || "http://127.0.0.1:11434";
-    for (let attempt = 0; attempt < 180; attempt++) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
             const tagsRes = await fetch(`${OLLAMA_URL}/api/tags`);
             if (tagsRes.ok) {
@@ -121,14 +143,28 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
             // Ignore connection errors during Ollama spin-up
         }
         if (attempt % 3 === 0) {
-            logger.debug(`[AI WORKER] Sync paused. Valid model not yet found. Waiting for Tauri to finish pulling models... (${attempt * 10}s)`);
+            logger.debug(`[AI WORKER] Waiting for local AI engine (Ollama) to become ready... (${attempt * 10}s)`);
+            // Heartbeat so stale-sync detection knows this run is alive
+            await syncCheckpointRepository.updateProgress(accountId, {
+                progress_message: `Waiting for local AI engine… (${attempt * 10}s)`,
+            });
         }
-        await new Promise(r => setTimeout(r, 10000)); // 10 second polling interval
+        await new Promise(r => setTimeout(r, OLLAMA_POLL_MS));
     }
 
     if (!isModelReady) {
-        logger.debug(`[AI WORKER] Sync aborted. No chat models became available within 30 minutes. Please check your internet connection or restart the app.`);
-        return; // Early exit without altering email processed status
+        if (hasCloudProvider) {
+            // Don't hold the whole batch hostage — cloud providers can process
+            // most emails; local-only ones fall into the per-email retry log.
+            logger.info(`[AI WORKER] Local AI engine not ready after ${maxAttempts * 10}s — continuing with cloud providers only.`);
+        } else {
+            logger.info(`[AI WORKER] No chat models became available within ${maxAttempts * 10}s and no cloud provider is configured. Marking sync as errored.`);
+            syncCheckpointRepository.markSyncError(
+                accountId,
+                'Local AI engine not available — check your connection and retry from the dashboard.'
+            );
+            return;
+        }
     }
 
     // Initialize sync checkpoint if needed  
@@ -530,14 +566,27 @@ export const runAiProcessingWorker = async (userId: string, accountId: string): 
 
         } catch (loopErr: any) {
             retries++;
+
+            // Bounded retries: after the cap, write a TERMINAL error state so
+            // the UI unsticks and the sidecar/Retry button can re-trigger us —
+            // never loop forever in a non-terminal 'retrying' stage.
+            if (retries > MAX_LOOP_RETRIES) {
+                logger.info(`[AI WORKER] Backlog drain failed after ${MAX_LOOP_RETRIES} retries: ${loopErr.message}. Marking sync as errored.`);
+                syncCheckpointRepository.markSyncError(
+                    accountId,
+                    `AI processing failed after ${MAX_LOOP_RETRIES} retries: ${loopErr.message || loopErr}`
+                );
+                return;
+            }
+
             const backoffMs = Math.min(MAX_BACKOFF_MS, INITIAL_BACKOFF_MS * Math.pow(2, retries - 1));
-            logger.info(`[AI WORKER] Backlog drain loop error: ${loopErr.message}. Retrying in ${backoffMs / 1000}s (Retry #${retries})...`);
-            
+            logger.info(`[AI WORKER] Backlog drain loop error: ${loopErr.message}. Retrying in ${backoffMs / 1000}s (Retry #${retries}/${MAX_LOOP_RETRIES})...`);
+
             await syncCheckpointRepository.updateProgress(accountId, {
                 progress_stage: "retrying",
                 progress_message: `Error syncing. Retrying in ${backoffMs / 1000}s... (${loopErr.message})`
             });
-            
+
             await new Promise(resolve => setTimeout(resolve, backoffMs));
         }
     }

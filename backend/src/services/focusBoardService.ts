@@ -376,6 +376,8 @@ export interface PriorityRankingItem {
   matchedLabels: string[];
   isActionRequired: boolean;
   isCompleted: boolean;
+  isTracked: boolean;
+  trackingNote: string | null;
   score: PriorityRankingScoreBreakdown;
   timestamps: {
     createdAt?: Date;
@@ -630,6 +632,8 @@ export const getPriorityRanking = async (params: {
       checklist: (() => { try { return JSON.parse(rawInsight.checklist || '[]'); } catch { return []; } })(),
       emails: (() => { try { return JSON.parse(rawInsight.emails || '[]'); } catch { return []; } })(),
       isCompleted: rawInsight.is_completed === 1,
+      isTracked: rawInsight.is_tracked === 1,
+      trackingNote: rawInsight.tracking_note ?? null,
     };
     const labels = (Array.isArray(insight.labels) ? insight.labels : []) as Array<{
       labelId?: Types.ObjectId;
@@ -775,6 +779,8 @@ export const getPriorityRanking = async (params: {
       matchedLabels,
       isActionRequired: insight.summary?.intent === "action_required",
       isCompleted: insight.isCompleted,
+      isTracked: insight.isTracked,
+      trackingNote: insight.trackingNote,
       score: {
         baseScore,
         dynamicScore,

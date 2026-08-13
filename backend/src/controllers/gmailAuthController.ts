@@ -9,6 +9,8 @@ import { generateOAuthUrl, exchangeCodeForTokens, refreshAccessToken, revokeToke
 import {UserModel} from '../model/User';
 import { htmlToText } from 'html-to-text';
 import { Types } from 'mongoose';
+import * as accountLocalRepository from '../db/repositories/accountLocalRepository';
+import * as userLocalRepository from '../db/repositories/userLocalRepository';
 
 import logger from '../utils/logger';
 
@@ -111,6 +113,7 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
         // ========== STEP 4: Check if this Gmail account already linked ==========
         const existingAccount = await GmailAccountModel.findOne({ userId: uid, emailAddress: email });
 
+        let accountDocId: string;
         if (!existingAccount) {
             // NEW Gmail account - create entry
             const newGmailAccount = new GmailAccountModel({
@@ -121,6 +124,7 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
                 tokenExpiry: tokens.expiry_date
             });
             await newGmailAccount.save();
+            accountDocId = String(newGmailAccount._id);
         } else {
             // EXISTING Gmail account - update tokens (in case user re-authenticated)
             const updateFields: Record<string, any> = {
@@ -138,6 +142,27 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
                 { userId: uid, emailAddress: email },
                 { $set: updateFields }
             );
+            accountDocId = String(existingAccount._id);
+        }
+
+        // Mirror into local SQLite immediately so /api/accounts sees the new
+        // account without a backend restart. First connected account becomes active.
+        try {
+            userLocalRepository.upsert(uid);
+            accountLocalRepository.upsert({
+                id: accountDocId,
+                user_id: uid,
+                email_address: email,
+                config_json: '{}',
+            });
+            const hasActive = accountLocalRepository
+                .findAllByUser(uid)
+                .some((a) => a.is_active === 1);
+            if (!hasActive) {
+                accountLocalRepository.setActive(accountDocId, uid);
+            }
+        } catch (mirrorErr: any) {
+            logger.info('Failed to mirror Gmail account into local DB:', mirrorErr?.message || mirrorErr);
         }
 
         // ========== STEP 5: Cleanup - Delete state from Redis ==========

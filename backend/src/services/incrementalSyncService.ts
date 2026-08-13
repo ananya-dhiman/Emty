@@ -29,7 +29,10 @@ import { computeBaseScore, getPriorityScoringContext } from "./focusBoardService
 
 import logger from '../utils/logger';
 
-const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT ? parseInt(process.env.SYNC_LOCK_TIMEOUT) : 3 * 60 * 1000;
+// Staleness now keys off the heartbeat (last_progress_at), which every
+// progress write refreshes — so 10 minutes of silence really means dead,
+// while a live hour-long AI run is never mistaken for stale.
+const SYNC_LOCK_TIMEOUT = process.env.SYNC_LOCK_TIMEOUT ? parseInt(process.env.SYNC_LOCK_TIMEOUT) : 10 * 60 * 1000;
 const TEST_MODE = true; // Set to false for production
 const MAX_EMAILS_TEST_MODE = 200;
 const MAX_FETCH_TEST_MODE = 500; // cap fetched candidate messages in test mode
@@ -80,6 +83,7 @@ type SyncProgressStage =
   | "metadata_filtering"
   | "scoring_emails"
   | "processing_emails"
+  | "retrying"
   | "finalizing"
   | "completed"
   | "error";

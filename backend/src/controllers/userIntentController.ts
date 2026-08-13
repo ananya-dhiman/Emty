@@ -9,6 +9,7 @@ import { runAndPersistColdStart } from "../services/coldStartService";
 import { runScoringWorker } from "../services/scoringWorkerService";
 import { runAiProcessingWorker } from "../services/aiProcessingWorkerService";
 import * as trainingDatasetRepository from "../db/repositories/trainingDatasetRepository";
+import * as syncCheckpointRepository from "../db/repositories/syncCheckpointRepository";
 import { encryptApiKey } from '../utils/cryptoService';
 import logger from '../utils/logger';
 
@@ -125,16 +126,24 @@ export const upsertIntentProfile = async (
     if (onboardingCompleted === true && !wasOnboardingCompleted) {
       logger.debug(`[ONBOARDING] Completed, starting background async sequence for user ${userId}`);
       (async () => {
-        try {
-          const account = await GmailAccountModel.findOne({ userId });
-          if (account) {
-            await runScoringWorker(userId, account._id.toString());
-            await runAiProcessingWorker(userId, account._id.toString());
+        // Process EVERY connected account, and on failure write a terminal
+        // error state so the UI unsticks and recovery can re-trigger.
+        const accounts = await GmailAccountModel.find({ userId }).sort({ createdAt: 1 });
+        for (const account of accounts) {
+          const accId = account._id.toString();
+          try {
+            await runScoringWorker(userId, accId);
+            await runAiProcessingWorker(userId, accId);
+          } catch (err: any) {
+            logger.info(`[BACKGROUND SEQUENCE FAIL] account ${accId}:`, err.message);
+            try {
+              syncCheckpointRepository.markSyncError(accId, err.message || String(err));
+            } catch { /* non-blocking */ }
           }
-        } catch (err: any) {
-          logger.info('[BACKGROUND SEQUENCE FAIL]', err.message);
         }
-      })();
+      })().catch((err: any) => {
+        logger.info('[BACKGROUND SEQUENCE FAIL]', err?.message || err);
+      });
     }
 
     res.status(200).json({ success: true, profile });

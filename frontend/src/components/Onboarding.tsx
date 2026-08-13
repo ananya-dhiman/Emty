@@ -16,6 +16,9 @@ interface LabelItem {
 
 interface OnboardingProps {
   user: any;
+  /** The account being onboarded — set when a NEW account was just connected.
+      Falls back to user.gmailAccountId (first-connected account). */
+  accountId?: string | null;
   theme: 'light' | 'dark';
   setTheme: (t: 'light' | 'dark') => void;
   onNavigate: (route: 'dashboard') => void;
@@ -174,7 +177,8 @@ function SectionBox({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProps) {
+export function Onboarding({ user, accountId, theme, setTheme, onNavigate }: OnboardingProps) {
+  const effectiveAccountId = accountId || user?.gmailAccountId || null;
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [profileType, setProfileType] = useState<'student' | 'working_professional' | 'custom' | null>(null);
 
@@ -238,10 +242,10 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
   // Load label priorities for step 3
   useEffect(() => {
     const fetchPriorities = async () => {
-      if (!user?.gmailAccountId || !token) { setLoadingLabels(false); return; }
+      if (!effectiveAccountId || !token) { setLoadingLabels(false); return; }
       try {
         const { data } = await axios.get(
-          `${API_BASE_URL}/api/emails/label-priorities?accountId=${user.gmailAccountId}`,
+          `${API_BASE_URL}/api/emails/label-priorities?accountId=${effectiveAccountId}`,
           { headers }
         );
         if (data.success && data.priorities) {
@@ -261,7 +265,7 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     };
     void fetchPriorities();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, effectiveAccountId]);
 
   // ─── Handlers ───────────────────────────────────────────────────────────────
 
@@ -410,19 +414,6 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
     }
   };
 
-  const handleSkipGroq = async () => {
-    try {
-      await axios.post(
-        `${API_BASE_URL}/api/intent/profile`,
-        { aiProvider: null },
-        { headers }
-      );
-    } catch {
-      // Non-blocking — skip silently
-    }
-    setStep(4);
-  };
-
   const handleSort = () => {
     if (dragItem.current !== null && dragOverItem.current !== null && dragItem.current !== dragOverItem.current) {
       const _labels = [...labels];
@@ -434,12 +425,12 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
 
   const handleAddLabel = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newLabelName.trim() || !user?.gmailAccountId || !token) return;
+    if (!newLabelName.trim() || !effectiveAccountId || !token) return;
     try {
       setSaving(true);
       const { data } = await axios.post(
         `${API_BASE_URL}/api/emails/labels`,
-        { accountId: user.gmailAccountId, name: newLabelName.trim(), description: newLabelDesc.trim() },
+        { accountId: effectiveAccountId, name: newLabelName.trim(), description: newLabelDesc.trim() },
         { headers }
       );
       if (data.success && data.label) {
@@ -468,23 +459,37 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
   };
 
   const handleConfirm = async () => {
-    console.log('[Onboarding] handleConfirm called. gmailAccountId:', user?.gmailAccountId, 'hasToken:', !!token);
-    if (!user?.gmailAccountId || !token) { onNavigate('dashboard'); return; }
+    console.log('[Onboarding] handleConfirm called. accountId:', effectiveAccountId, 'hasToken:', !!token);
+    if (!effectiveAccountId || !token) { onNavigate('dashboard'); return; }
     try {
       setSaving(true);
       await axios.put(
         `${API_BASE_URL}/api/emails/label-priorities`,
-        { accountId: user.gmailAccountId, orderedLabelIds: labels.map((l) => l.id) },
+        { accountId: effectiveAccountId, orderedLabelIds: labels.map((l) => l.id) },
         { headers }
       );
       await axios.post(
         `${API_BASE_URL}/api/emails/label-priorities/review`,
-        { accountId: user.gmailAccountId },
+        { accountId: effectiveAccountId },
         { headers }
       );
 
       await completeOnboardingAndStartProcessing();
-      
+
+      // Deterministically kick scoring + AI processing for THIS account.
+      // The profile-transition hook only fires on the first-ever onboarding,
+      // so added accounts rely on this call. The endpoint no-ops if a run is
+      // already actively heartbeating.
+      try {
+        await axios.post(
+          `${API_BASE_URL}/api/emails/process`,
+          { accountId: effectiveAccountId },
+          { headers }
+        );
+      } catch (procErr) {
+        console.warn('[Onboarding] Failed to kick email processing (non-blocking):', procErr);
+      }
+
       // User opted for live-stream dashboard! Route immediately to dashboard
       // where emails will pop in as the background worker runs.
       onNavigate('dashboard');
@@ -1002,6 +1007,14 @@ export function Onboarding({ user, theme, setTheme, onNavigate }: OnboardingProp
                 try {
                   setSaving(true);
                   await completeOnboardingAndStartProcessing();
+                  if (effectiveAccountId) {
+                    // Skip path still needs the processing kick for added accounts
+                    await axios.post(
+                      `${API_BASE_URL}/api/emails/process`,
+                      { accountId: effectiveAccountId },
+                      { headers }
+                    ).catch(() => { /* non-blocking */ });
+                  }
                 } catch (err) {
                   console.error('[Onboarding] Failed to complete onboarding on skip:', err);
                 } finally {

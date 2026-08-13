@@ -28,7 +28,9 @@ export async function generateOAuthUrl(oauth2Client:any,state:string):Promise<st
    
     const authorizationUrl= oauth2Client.generateAuthUrl({
         access_type: 'offline',
-        prompt: 'consent',
+        // select_account forces Google's account chooser so a user with an
+        // active session can connect a DIFFERENT mailbox (multi-account).
+        prompt: 'select_account consent',
         scope: scopes,
         include_granted_scopes: true,
         state: state
@@ -97,6 +99,19 @@ export async function refreshAccessToken(emailAddress: string, oauth2Client: any
     
 }
 
+/**
+ * Revokes a Google OAuth token (refresh token preferred — revoking it also
+ * invalidates the associated access tokens). Throws on non-2xx so callers
+ * can decide whether the failure is blocking.
+ */
 export async function revokeToken(token: string): Promise<void>{
-
+    if (!token) return;
+    const res = await fetch('https://oauth2.googleapis.com/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `token=${encodeURIComponent(token)}`,
+    });
+    if (!res.ok) {
+        throw new Error(`Google token revoke failed with status ${res.status}`);
+    }
 }

@@ -4,9 +4,8 @@ import axios from 'axios';
 import '../styles/Widget.css';
 import { API_BASE_URL, initApi } from '../utils/api';
 import type { PriorityRankingItem } from './Dashboard';
+import { TrackNoteEditor } from './TrackNoteEditor';
 import { invoke } from '@tauri-apps/api/core';
-
-const ACCOUNT_COLORS = ['#00E5FF', '#FFC857', '#A78BFA', '#4ADE80'];
 
 const openExternalLink = (url: string) => {
   const a = document.createElement('a');
@@ -85,6 +84,12 @@ export function WidgetApp() {
   // Tracked section
   const [trackedItems, setTrackedItems] = useState<any[]>([]);
   const [trackedOpen, setTrackedOpen] = useState(true);
+  const [trackError, setTrackError] = useState<string | null>(null);
+  const trackErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracked follows the active account (tracked/all returns every account's pins)
+  const visibleTracked = trackedItems.filter(
+    (ti) => !activeAccountId || !ti.accountId || ti.accountId === activeAccountId
+  );
 
   // Stores the actual Date of last completed sync so the ticker can reformat it
   const lastSyncAtRef = useRef<Date | null>(null);
@@ -217,33 +222,38 @@ export function WidgetApp() {
     try {
       setWidgetError(null);
 
-      // Resolve accounts list first (if not yet loaded)
+      // Refresh the accounts list every fetch so additions/removals made in
+      // the main window propagate to the widget's switcher.
       let resolvedAccounts = accounts;
-      if (resolvedAccounts.length === 0) {
-        try {
-          const accRes = await axios.get(`${API_BASE_URL}/api/accounts`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (accRes.data.success && accRes.data.accounts.length > 0) {
-            resolvedAccounts = accRes.data.accounts;
-            setAccounts(resolvedAccounts);
+      let reconciledId: string | null = null;
+      try {
+        const accRes = await axios.get(`${API_BASE_URL}/api/accounts`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (accRes.data.success && Array.isArray(accRes.data.accounts) && accRes.data.accounts.length > 0) {
+          resolvedAccounts = accRes.data.accounts;
+          setAccounts(resolvedAccounts);
 
-            // Restore last active account from localStorage
+          // Restore last active account from localStorage, and reconcile if
+          // the current one no longer exists (e.g. it was just removed).
+          const currentId = gmailAccountIdRef.current;
+          const currentValid = !!currentId && resolvedAccounts.some((a: any) => a.id === currentId);
+          if (!currentValid) {
             const saved = localStorage.getItem('emty_active_account_id');
             const match = resolvedAccounts.find((a: any) => a.id === saved);
-            if (!activeAccountId) {
-              const firstId = match ? match.id : resolvedAccounts[0].id;
-              setActiveAccountId(firstId);
-              gmailAccountIdRef.current = firstId;
-            }
+            const firstId = match ? match.id : resolvedAccounts[0].id;
+            setActiveAccountId(firstId);
+            gmailAccountIdRef.current = firstId;
+            reconciledId = firstId;
           }
-        } catch {
-          // Non-blocking — fall back to verify endpoint
         }
+      } catch {
+        // Non-blocking — fall back to verify endpoint
       }
 
-      // Resolve account id to use for fetching emails
-      const accountId = overrideAccountId ?? activeAccountId ?? await resolveAccountId();
+      // Resolve account id to use for fetching emails (reconciled id wins —
+      // the state update above hasn't landed yet within this run)
+      const accountId = overrideAccountId ?? reconciledId ?? activeAccountId ?? await resolveAccountId();
       if (!accountId) {
         setWidgetError('No Gmail account found. Connect Gmail in the main Emty window.');
         setIsLoading(false);
@@ -364,29 +374,119 @@ export function WidgetApp() {
     localStorage.setItem('emty_active_account_id', accountId);
     setIsLoading(true);
     fetchData(accountId);
+
+    // Tell the backend so the sidecar's background sync follows this account
+    const token = getToken();
+    if (token) {
+      axios.put(
+        `${API_BASE_URL}/api/accounts/${accountId}/active`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      ).catch(() => { /* non-blocking */ });
+    }
   };
 
-  // Toggle tracking state on an insight
+  const flashTrackError = (msg: string) => {
+    setTrackError(msg);
+    if (trackErrorTimerRef.current) clearTimeout(trackErrorTimerRef.current);
+    trackErrorTimerRef.current = setTimeout(() => setTrackError(null), 4000);
+  };
+
+  // Toggle tracking state on an insight — optimistic, reverts + surfaces errors
   const toggleTrack = async (id: string, currentlyTracked: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
+    const token = getToken();
+    if (!token) {
+      flashTrackError('Not logged in — open the main Emty window first.');
+      return;
+    }
+
+    const prevTracked = trackedItems;
+    if (currentlyTracked) {
+      setTrackedItems(prevTracked.filter((ti) => ti.insightId !== id));
+    } else {
+      const item = items.find((d) => d.id === id);
+      setTrackedItems([
+        {
+          insightId: id,
+          gmailThreadId: item?.originalItem.gmailThreadId,
+          from: item?.originalItem.from,
+          summary: item?.originalItem.summary,
+          matchedLabels: item?.originalItem.matchedLabels || [],
+          trackingNote: null,
+          trackedAt: Date.now(),
+          accountId: activeAccountId,
+        },
+        ...prevTracked,
+      ]);
+    }
+
     try {
-      const token = getToken();
-      if (!token) return;
-      await axios.put(
+      const res = await axios.put(
         `${API_BASE_URL}/api/emails/insights/${id}/track`,
         { isTracked: !currentlyTracked },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      if (!res.data?.success) throw new Error(res.data?.message || 'Tracking update failed');
       await fetchData();
-    } catch (err) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
       console.warn('[Widget] Failed to toggle tracking', err);
+      setTrackedItems(prevTracked);
+      flashTrackError(err?.response?.data?.message || err?.message || 'Could not update tracking.');
     }
+  };
+
+  // Save / clear the sticky note on a tracked insight
+  const saveTrackingNote = async (id: string, note: string) => {
+    const token = getToken();
+    if (!token) return;
+    const trimmed = note.trim();
+    const prevTracked = trackedItems;
+    setTrackedItems(prevTracked.map((ti) =>
+      ti.insightId === id ? { ...ti, trackingNote: trimmed || null } : ti
+    ));
+    try {
+      const res = await axios.put(
+        `${API_BASE_URL}/api/emails/insights/${id}/track`,
+        { trackingNote: trimmed || null },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.data?.success) throw new Error(res.data?.message || 'Note update failed');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      setTrackedItems(prevTracked);
+      flashTrackError(err?.response?.data?.message || err?.message || 'Could not save the note.');
+    }
+  };
+
+  const handleSaveNote = (id: string, note: string) => {
+    void saveTrackingNote(id, note);
   };
 
   useEffect(() => {
     document.body.classList.add('widget-mode');
     const root = document.getElementById('root');
     if (root) root.classList.add('widget-mode');
+
+    // Theme comes from data-mode on <html>; the widget window mirrors the
+    // main window's persisted choice and follows live changes via storage events.
+    const applyTheme = () => {
+      const saved = localStorage.getItem('app-theme');
+      document.documentElement.setAttribute('data-mode', saved === 'light' ? 'light' : 'dark');
+    };
+    applyTheme();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'app-theme') applyTheme();
+      // Follow account switches made from the main window
+      if (e.key === 'emty_active_account_id' && e.newValue && e.newValue !== gmailAccountIdRef.current) {
+        setActiveAccountId(e.newValue);
+        gmailAccountIdRef.current = e.newValue;
+        setIsLoading(true);
+        void fetchData(e.newValue);
+      }
+    };
+    window.addEventListener('storage', onStorage);
 
     // Ensure the API URL is resolved via Tauri IPC before any requests
     const bootstrap = async () => {
@@ -456,11 +556,14 @@ export function WidgetApp() {
         );
 
         if (data?.success && data.progressStage) {
-          if (data.progressStage !== 'completed') {
+          const finished =
+            ['completed', 'error', 'idle'].includes(data.progressStage) ||
+            data.syncState === 'error';
+          if (!finished) {
             // A sync is running in main window — silently refresh cards
             await fetchData();
           } else {
-            if (lastStage !== 'completed') {
+            if (!['completed', 'error', 'idle'].includes(lastStage)) {
               // Final fetch to reflect completed state
               await fetchData();
             }
@@ -479,8 +582,10 @@ export function WidgetApp() {
     return () => {
       document.body.classList.remove('widget-mode');
       if (root) root.classList.remove('widget-mode');
+      window.removeEventListener('storage', onStorage);
       clearInterval(pollInterval);
       clearInterval(ticker);
+      if (trackErrorTimerRef.current) clearTimeout(trackErrorTimerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -578,8 +683,15 @@ export function WidgetApp() {
               <div className="w-dc-from">{d.from}</div>
               <div className="w-dc-title">{d.title}</div>
               <div className="w-dc-summary">{d.summary}</div>
-              {trackingNote && (
-                <span className="w-tracking-note">{trackingNote}</span>
+              {isTracked && (
+                <TrackNoteEditor
+                  insightId={d.id}
+                  note={trackingNote ?? null}
+                  onSave={handleSaveNote}
+                  viewClass="w-tracking-note w-note-btn"
+                  editClass="w-tracking-note w-note-editing"
+                  emptyClass="w-note-empty"
+                />
               )}
             </div>
             <div className="w-dc-meta">
@@ -637,9 +749,9 @@ export function WidgetApp() {
     });
   };
 
-  // Render cross-account tracked section
+  // Render the tracked section (follows the active account)
   const renderTrackedSection = () => {
-    if (trackedItems.length === 0) return null;
+    if (visibleTracked.length === 0) return null;
 
     return (
       <>
@@ -648,14 +760,12 @@ export function WidgetApp() {
             <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
           </svg>
           Tracked
-          <span className="w-tracked-hd-count">{trackedItems.length}</span>
+          <span className="w-tracked-hd-count">{visibleTracked.length}</span>
           <svg className={`w-tracked-chevron ${trackedOpen ? 'open' : ''}`} viewBox="0 0 16 16" fill="none">
             <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </div>
-        {trackedOpen && trackedItems.map((ti, idx) => {
-          const accIndex = accounts.findIndex((a) => a.id === ti.accountId);
-          const dotColor = ACCOUNT_COLORS[accIndex >= 0 ? accIndex % ACCOUNT_COLORS.length : 0];
+        {trackedOpen && visibleTracked.map((ti, idx) => {
           const fromName = ti.from?.name || ti.from?.email || 'Unknown';
           const snippet = ti.summary?.shortSnippet || '';
           return (
@@ -677,16 +787,16 @@ export function WidgetApp() {
                   {fromName.split(' ').map((w: string) => w[0]).join('').substring(0, 2).toUpperCase() || '?'}
                 </div>
                 <div className="w-dc-body">
-                  <div className="w-dc-from">
-                    {accounts.length > 1 && (
-                      <span className="w-card-account-dot" style={{ background: dotColor }} />
-                    )}
-                    {fromName}
-                  </div>
+                  <div className="w-dc-from">{fromName}</div>
                   <div className="w-dc-title">{snippet}</div>
-                  {ti.trackingNote && (
-                    <span className="w-tracking-note">{ti.trackingNote}</span>
-                  )}
+                  <TrackNoteEditor
+                    insightId={ti.insightId}
+                    note={ti.trackingNote ?? null}
+                    onSave={handleSaveNote}
+                    viewClass="w-tracking-note w-note-btn"
+                    editClass="w-tracking-note w-note-editing"
+                    emptyClass="w-note-empty"
+                  />
                 </div>
               </div>
               <div className="w-dc-actions">
@@ -709,6 +819,9 @@ export function WidgetApp() {
   };
 
   const pendingCount = items.filter((d) => !submitted.has(d.id)).length;
+  const syncedLabel = ['never synced', 'syncing...', 'sync failed'].includes(lastSyncText)
+    ? lastSyncText
+    : `synced ${lastSyncText}`;
 
   return (
     <div className="w-widget">
@@ -717,98 +830,93 @@ export function WidgetApp() {
         <div className="w-hd-top">
           <div className="w-hd-left-group">
             <span className="w-today-lbl">
-              TODAY<span style={{ color: 'rgba(255,255,255,0.1)', margin: '0 4px' }}></span>
-              <span style={{ color: 'var(--text-2, #A3A3A3)', fontSize: '12px' }}>
-                {getDisplayDate()}
-              </span>
+              TODAY <span className="w-today-date">{getDisplayDate()}</span>
             </span>
-            <span className="w-filtered-lbl">{filteredCount} filtered out</span>
+            <span className="w-filtered-lbl">{filteredCount} filtered · {syncedLabel}</span>
           </div>
           <div className="w-hd-right">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <button
-                id="widget-open-app-btn"
-                className="w-open-btn"
-                onClick={openMainApp}
-                aria-label="Open Emty app"
-                title="Open Emty"
-              >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                  <line x1="9" y1="3" x2="9" y2="21"/>
-                </svg>
-                OPEN
-              </button>
-              <button
-                className="w-sync-btn"
-                onClick={doSync}
-                disabled={isSyncing}
-                aria-label="Sync"
-              >
-                <svg
-                  className={isSyncing ? 'spin' : ''}
-                  width="12" height="12" viewBox="0 0 24 24"
-                  fill="none" stroke="currentColor" strokeWidth="2"
-                  strokeLinecap="round" strokeLinejoin="round"
+            {/* Account switcher — overlapping avatars + add button */}
+            <div className="w-acct-stack">
+              {accounts.map((acc) => (
+                <button
+                  key={acc.id}
+                  className={`w-acct-av ${activeAccountId === acc.id ? '' : 'inactive'}`}
+                  onClick={() => switchAccount(acc.id)}
+                  title={acc.emailAddress}
                 >
-                  <polyline points="23 4 23 10 17 10"/>
-                  <polyline points="1 20 1 14 7 14"/>
-                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-                </svg>
-                {isSyncing ? 'SYNCING' : 'SYNC'}
-              </button>
+                  {acc.emailAddress.charAt(0)}
+                </button>
+              ))}
+              <button className="w-acct-add" onClick={openMainApp} title="Add / switch account">+</button>
             </div>
-            <span className="w-sync-time">{lastSyncText}</span>
+            <button
+              id="widget-open-app-btn"
+              className="w-open-btn"
+              onClick={openMainApp}
+              aria-label="Open Emty app"
+              title="Open Emty"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <line x1="9" y1="3" x2="9" y2="21"/>
+              </svg>
+              OPEN
+            </button>
+            <button
+              className="w-sync-btn"
+              onClick={doSync}
+              disabled={isSyncing}
+              aria-label="Sync"
+              title={isSyncing ? 'Syncing' : 'Sync'}
+            >
+              <svg
+                className={isSyncing ? 'spin' : ''}
+                width="12" height="12" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" strokeWidth="2"
+                strokeLinecap="round" strokeLinejoin="round"
+              >
+                <polyline points="23 4 23 10 17 10"/>
+                <polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+              </svg>
+            </button>
           </div>
         </div>
       </div>
-
-      {/* Account switcher — only when more than one account is connected */}
-      {accounts.length > 1 && (
-        <div className="w-account-switcher">
-          {accounts.map((acc, index) => (
-            <button
-              key={acc.id}
-              className={`w-account-tab ${activeAccountId === acc.id ? 'active' : ''}`}
-              onClick={() => switchAccount(acc.id)}
-              title={acc.emailAddress}
-            >
-              <span
-                className="w-account-tab-dot"
-                style={{ background: ACCOUNT_COLORS[index % ACCOUNT_COLORS.length] }}
-              />
-              {acc.emailAddress.split('@')[0]}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* Filter tab bar */}
       <div className="w-filter-bar">
         <button
           className={`w-filter-tab ${activeFilter === 'all' ? 'active' : ''}`}
           onClick={() => setActiveFilter('all')}
-        >All</button>
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          All
+        </button>
         <button
           className={`w-filter-tab ${activeFilter === 'tracked' ? 'active' : ''}`}
           onClick={() => setActiveFilter('tracked')}
         >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
           Tracked
-          {trackedItems.length > 0 && (
-            <span className="w-filter-count">{trackedItems.length}</span>
+          {visibleTracked.length > 0 && (
+            <span className="w-filter-count">{visibleTracked.length}</span>
           )}
         </button>
         <button
           className={`w-filter-tab ${activeFilter === 'urgent' ? 'active' : ''}`}
           onClick={() => setActiveFilter('urgent')}
-        >Urgent</button>
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Urgent
+        </button>
       </div>
 
       <div className="w-scroll">
         {/* Tracked-only view */}
         {activeFilter === 'tracked' ? (
           <>
-            {trackedItems.length === 0 ? (
+            {visibleTracked.length === 0 ? (
               <div className="w-empty-msg">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-empty-icon">
                   <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
@@ -821,7 +929,10 @@ export function WidgetApp() {
           <>
             <div className="w-sec">
               <span className="w-sec-dot"></span>
-              <span className="w-sec-lbl">Action Items</span>
+              <span className="w-sec-lbl">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
+                Action Items
+              </span>
               <span className="w-sec-count">{pendingCount} pending</span>
             </div>
             <div id="w-deadline-list">
@@ -852,10 +963,14 @@ export function WidgetApp() {
               )}
             </div>
             {/* Tracked section appended below the main list in All/Urgent views */}
-            {activeFilter !== 'tracked' && renderTrackedSection()}
+            {renderTrackedSection()}
           </>
         )}
       </div>
+
+      {trackError && (
+        <div className="w-track-error" role="alert">{trackError}</div>
+      )}
     </div>
   );
 }

@@ -35,24 +35,37 @@ export const getSyncProgress = async (
       res.status(200).json({
         success: true,
         syncState: "idle",
+        // 'idle' is a terminal stage for the UI — a never-synced account
+        // must not render as "syncing".
+        progressStage: "idle",
         progressPercent: 0,
-        progressStage: "initializing",
         progressMessage: "Waiting to start sync...",
         totalCandidates: 0,
         processedCandidates: 0,
+        lastProgressAt: null,
+        isStalled: false,
         updatedAt: new Date().toISOString(),
       });
       return;
     }
 
-      res.status(200).json({
+    const stage = checkpoint.progress_stage ?? "initializing";
+    const lastProgressAt = checkpoint.last_progress_at || checkpoint.updated_at || null;
+    const STALL_THRESHOLD_MS = 10 * 60 * 1000;
+    const isTerminal = ["completed", "error", "idle"].includes(stage);
+    const isStalled =
+      !isTerminal && !!lastProgressAt && Date.now() - lastProgressAt > STALL_THRESHOLD_MS;
+
+    res.status(200).json({
         success: true,
         syncState: checkpoint.sync_state,
         progressPercent: checkpoint.progress_percent ?? 0,
-        progressStage: checkpoint.progress_stage ?? "initializing",
+        progressStage: stage,
         progressMessage: checkpoint.progress_message ?? "",
         totalCandidates: checkpoint.total_candidates ?? 0,
         processedCandidates: checkpoint.processed_candidates ?? 0,
+        lastProgressAt: lastProgressAt ? new Date(lastProgressAt).toISOString() : null,
+        isStalled,
         updatedAt: new Date(
           checkpoint.last_progress_at || checkpoint.updated_at || Date.now()
         ).toISOString(),

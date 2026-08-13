@@ -25,6 +25,9 @@ pub struct SyncState {
     pub last_sync_timestamp: Option<u64>,
     pub sync_interval_minutes: Option<u64>,
     pub account_id: Option<String>,
+    // Heartbeat: refreshed by every backend progress write. Used to tell a
+    // live (slow) sync from one that died mid-run.
+    pub last_progress_at: Option<u64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -126,7 +129,30 @@ pub fn start_sync_timer(app_handle: AppHandle, port: u16) {
 
             if let Some(state) = fetch_active_sync_state(port).await {
                 if state.sync_state == "in_progress" || state.sync_state == "syncing" {
+                    // Skip only while the run is actually alive. A sync whose
+                    // heartbeat (last_progress_at) went silent for 15+ minutes
+                    // is stuck (crash / network drop) — fall through so the
+                    // trigger below can steal the stale lock and resume it.
+                    const STALL_THRESHOLD_MS: u64 = 15 * 60 * 1000;
+                    let heartbeat = state.last_progress_at.unwrap_or(0);
+                    let heartbeat_age = unix_now_ms().saturating_sub(heartbeat);
+                    if heartbeat == 0 || heartbeat_age < STALL_THRESHOLD_MS {
+                        continue;
+                    }
+
+                    if let Some(aid) = &state.account_id {
+                        trigger_sync(port, aid, "urgent").await;
+                    }
                     continue;
+                }
+
+                // Errored syncs auto-retry on the next tick after the interval,
+                // and immediately if they errored recently (recovery path).
+                if state.sync_state == "error" {
+                    if let Some(aid) = &state.account_id {
+                        trigger_sync(port, aid, "urgent").await;
+                        continue;
+                    }
                 }
 
                 if let (Some(last_sync), Some(aid)) = (state.last_sync_timestamp, state.account_id) {

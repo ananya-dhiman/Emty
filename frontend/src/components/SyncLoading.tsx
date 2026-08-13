@@ -7,21 +7,27 @@ import '../index.css';
 
 interface SyncLoadingProps {
   user: any;
+  /** The account to sync — set when a NEW account was just connected.
+      Falls back to user.gmailAccountId (first-connected account). */
+  accountId?: string | null;
   theme: 'light' | 'dark';
   setTheme: (t: 'light' | 'dark') => void;
   onNavigate: (route: 'dashboard' | 'onboarding') => void;
 }
 
-export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingProps) {
+export function SyncLoading({ user, accountId, theme, setTheme, onNavigate }: SyncLoadingProps) {
   const [progress, setProgress] = useState(1);
-  const [syncStatus, setSyncStatus] = useState<'syncing' | 'completed' | 'error'>('syncing');
+  const [syncStatus, setSyncStatus] = useState<'syncing' | 'completed' | 'error' | 'stalled'>('syncing');
   const [stageLabel, setStageLabel] = useState('Initializing sync');
   const [statusDetail, setStatusDetail] = useState('We are securely fetching and organizing your emails into your new priority stack.');
   const [typedDetail, setTypedDetail] = useState('');
 
-  // Keep a ref to always read the latest user prop inside the effect closure
+  // Keep refs to always read the latest props inside the effect closure
   const userRef = useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
+  const accountIdRef = useRef(accountId);
+  useEffect(() => { accountIdRef.current = accountId; }, [accountId]);
+  const getAccountId = () => accountIdRef.current || userRef.current?.gmailAccountId || null;
 
   const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const fallbackInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -29,7 +35,8 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
   const hasInitiated = useRef(false);
   const lastBackendMovementAt = useRef<number>(Date.now());
   const lastBackendPercent = useRef<number>(0);
-  const syncStatusRef = useRef<'syncing' | 'completed' | 'error'>('syncing');
+  const lastUpdatedAtRef = useRef<string | null>(null);
+  const syncStatusRef = useRef<'syncing' | 'completed' | 'error' | 'stalled'>('syncing');
   const syncRequestDone = useRef(false);
   const completionHandled = useRef(false);
   const coldStartDone = useRef(false);
@@ -39,9 +46,12 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
     auth_setup: 'Authenticating access',
     fetch_candidates: 'Fetching candidate emails',
     metadata_filtering: 'Filtering metadata',
+    scoring_emails: 'Scoring emails',
     processing_emails: 'Processing inbox content',
+    retrying: 'Recovering — retrying',
     finalizing: 'Finalizing',
     completed: 'Completed',
+    idle: 'Waiting',
     error: 'Sync issue',
   };
 
@@ -51,7 +61,7 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
 
   useEffect(() => {
     const sourceText =
-      syncStatus === 'syncing'
+      syncStatus === 'syncing' || syncStatus === 'stalled'
         ? statusDetail
         : syncStatus === 'error'
           ? 'The background sync is still running, but you can head to your dashboard now.'
@@ -87,8 +97,8 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
     // from processed emails and saves them to UserIntentProfile.
     // Non-blocking: failure does not prevent navigation to dashboard.
     const runColdStart = async () => {
-      const currentUser = userRef.current;
-      if (coldStartDone.current || !currentUser?.gmailAccountId) return;
+      const targetAccountId = getAccountId();
+      if (coldStartDone.current || !targetAccountId) return;
       coldStartDone.current = true;
 
       setStageLabel('Learning patterns');
@@ -98,7 +108,7 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
         const headers = await getAuthHeaders();
         await axios.post(
           `${API_BASE_URL}/api/intent/cold-start`,
-          { accountId: currentUser.gmailAccountId },
+          { accountId: targetAccountId },
           headers ? { headers } : undefined
         );
         setStatusDetail('Patterns saved. Preparing your dashboard...');
@@ -118,6 +128,23 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
       if (backendPercent > lastBackendPercent.current) {
         lastBackendPercent.current = backendPercent;
         lastBackendMovementAt.current = Date.now();
+      }
+
+      // Heartbeat movement: the backend refreshes updatedAt on every progress
+      // write even when the percent doesn't move (e.g. long AI passes).
+      if (data?.updatedAt && data.updatedAt !== lastUpdatedAtRef.current) {
+        lastUpdatedAtRef.current = data.updatedAt;
+        lastBackendMovementAt.current = Date.now();
+        if (syncStatusRef.current === 'stalled') {
+          setSyncStatus('syncing'); // it came back to life
+        }
+      }
+
+      // Backend-side stall verdict (heartbeat silent for 10+ min)
+      if (data?.isStalled === true && syncStatusRef.current === 'syncing') {
+        setSyncStatus('stalled');
+        setStageLabel('Sync stalled');
+        setStatusDetail('No progress for a while — the network may have dropped. Retry, or continue to your dashboard.');
       }
 
       setProgress((prev) => Math.max(prev, backendPercent));
@@ -147,12 +174,12 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
     };
 
     const fetchProgress = async () => {
-      const currentUser = userRef.current;
-      if (!currentUser?.gmailAccountId) return;
+      const targetAccountId = getAccountId();
+      if (!targetAccountId) return;
       try {
         const headers = await getAuthHeaders();
         const { data } = await axios.get(
-          `${API_BASE_URL}/api/emails/sync-progress?accountId=${currentUser.gmailAccountId}`,
+          `${API_BASE_URL}/api/emails/sync-progress?accountId=${targetAccountId}`,
           headers ? { headers } : undefined
         );
         if (data?.success) applyProgressFromBackend(data);
@@ -169,42 +196,51 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
       void fetchProgress();
     }, 1000);
 
-    // Fallback heartbeat: if backend progress is stale for 30s, nudge by +1 up to 95.
+    // Fallback heartbeat: nudge the bar while waiting, and flag a STALL when
+    // the backend heartbeat has been silent for 3 minutes.
+    const STALL_AFTER_MS = 3 * 60 * 1000;
     fallbackInterval.current = setInterval(() => {
       if (syncStatusRef.current !== 'syncing') return;
-      const isStale = Date.now() - lastBackendMovementAt.current >= 30000;
-      if (!isStale) return;
-      setProgress((prev) => Math.min(prev + 1, 95));
+      const sinceMovement = Date.now() - lastBackendMovementAt.current;
+      if (sinceMovement >= STALL_AFTER_MS) {
+        setSyncStatus('stalled');
+        setStageLabel('Sync stalled');
+        setStatusDetail('No progress for a few minutes — the network may have dropped. Retry, or continue to your dashboard.');
+        return;
+      }
+      if (sinceMovement >= 30000) {
+        setProgress((prev) => Math.min(prev + 1, 95));
+      }
     }, 30000);
 
     // Start actual API Sync Call — reads user from ref to avoid stale closure
     const initiateSync = async () => {
-      // Wait up to 3s for user.gmailAccountId to be populated (in case of async user load)
+      // Wait up to 3s for an account id to be populated (in case of async user load)
       let attempts = 0;
-      while (!userRef.current?.gmailAccountId && attempts < 6) {
+      while (!getAccountId() && attempts < 6) {
         await new Promise((r) => setTimeout(r, 500));
         attempts++;
       }
-      const currentUser = userRef.current;
+      const targetAccountId = getAccountId();
       try {
-        if (!currentUser || !currentUser.gmailAccountId) {
-            console.warn('[SyncLoading] No user or gmailAccountId after waiting. Skipping sync call.');
+        if (!targetAccountId) {
+            console.warn('[SyncLoading] No account id after waiting. Skipping sync call.');
             syncRequestDone.current = true;
             finalizeSuccess();
             return;
         } else {
-            console.log('[SyncLoading] Initiating sync call to backend for account:', currentUser.gmailAccountId);
+            console.log('[SyncLoading] Initiating sync call to backend for account:', targetAccountId);
             try {
               if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
                 const { invoke } = await import('@tauri-apps/api/core');
-                await invoke('set_active_account', { accountId: currentUser.gmailAccountId });
+                await invoke('set_active_account', { accountId: targetAccountId });
               }
             } catch (e) {
               console.warn('[SyncLoading] Failed to set active account in Tauri', e);
             }
             const headers = await getAuthHeaders();
             const response = await axios.post(`${API_BASE_URL}/api/emails/sync`, {
-              accountId: currentUser.gmailAccountId
+              accountId: targetAccountId
             }, headers ? { headers } : undefined);
             console.log('[SyncLoading] Sync call completed successfully.', response.data);
 
@@ -246,7 +282,38 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
       if (completionTimer.current) clearTimeout(completionTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run exactly once on mount 
+  }, []); // Run exactly once on mount
+
+  // Manual retry after a stall — re-POSTs the sync; the backend resumes from
+  // its persisted checkpoint (and steals the stale lock if one is wedged).
+  const retrySync = async () => {
+    const targetAccountId = accountId || userRef.current?.gmailAccountId;
+    if (!targetAccountId) { onNavigate('dashboard'); return; }
+
+    setSyncStatus('syncing');
+    setStageLabel('Retrying sync');
+    setStatusDetail('Retrying — resuming from the last checkpoint...');
+    lastBackendMovementAt.current = Date.now();
+
+    try {
+      let token = localStorage.getItem('firebaseToken');
+      if (!token && auth.currentUser) token = await auth.currentUser.getIdToken();
+      await axios.post(
+        `${API_BASE_URL}/api/emails/sync`,
+        { accountId: targetAccountId },
+        token ? { headers: { Authorization: `Bearer ${token}` } } : undefined
+      );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      const msg = (err?.message || '').toLowerCase();
+      const isTimeout = err?.code === 'ECONNABORTED' || msg.includes('timeout') || msg.includes('network error');
+      if (!isTimeout) {
+        setSyncStatus('stalled');
+        setStageLabel('Retry failed');
+        setStatusDetail('Could not restart the sync — check your connection and try again.');
+      }
+    }
+  };
 
 
   return (
@@ -294,7 +361,7 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
                 {stageLabel}
               </span>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-2)', lineHeight: 1.55 }}>
-                <div style={{ marginBottom: '3px' }}>[{String(progress).padStart(3, '0')}%] {syncStatus === 'syncing' ? 'sync/live' : syncStatus === 'error' ? 'sync/error' : 'sync/done'}</div>
+                <div style={{ marginBottom: '3px' }}>[{String(progress).padStart(3, '0')}%] {syncStatus === 'syncing' ? 'sync/live' : syncStatus === 'stalled' ? 'sync/stalled' : syncStatus === 'error' ? 'sync/error' : 'sync/done'}</div>
                 <div style={{ color: 'var(--text-3)', minHeight: '34px' }}>
                   {typedDetail}
                   <span className="typing-cursor">|</span>
@@ -304,29 +371,47 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
               <div style={{ width: '100%', maxWidth: '420px', height: '8px', background: 'var(--surface-2)', borderRadius: '999px', overflow: 'hidden', marginTop: '10px', border: '1px solid var(--border-lt)' }}>
                   <div style={{
                       height: '100%',
-                      background: syncStatus === 'error' ? 'var(--amber, #f8b02b)' : 'var(--text-1)',
+                      background: (syncStatus === 'error' || syncStatus === 'stalled') ? 'var(--amber, #f8b02b)' : 'var(--text-1)',
                       width: `${progress}%`,
                       transition: 'width 0.45s ease-out'
                   }}></div>
               </div>
 
-              {syncStatus === 'error' && (
-                 <button
-                   onClick={() => onNavigate('dashboard')}
-                   style={{
-                      marginTop: '10px',
-                      width: 'fit-content',
-                      padding: '10px 22px',
-                      background: 'var(--text-1)',
-                      color: 'var(--bg)',
-                      border: '1px solid var(--text-1)',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      fontFamily: 'var(--font-ui)'
-                   }}>
-                   Go to Dashboard
-                 </button>
+              {(syncStatus === 'error' || syncStatus === 'stalled') && (
+                 <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
+                   {syncStatus === 'stalled' && (
+                     <button
+                       onClick={() => { void retrySync(); }}
+                       style={{
+                          width: 'fit-content',
+                          padding: '10px 22px',
+                          background: 'var(--amber, #f8b02b)',
+                          color: '#000',
+                          border: '1px solid var(--amber, #f8b02b)',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          fontFamily: 'var(--font-ui)'
+                       }}>
+                       Retry Sync
+                     </button>
+                   )}
+                   <button
+                     onClick={() => onNavigate('dashboard')}
+                     style={{
+                        width: 'fit-content',
+                        padding: '10px 22px',
+                        background: 'var(--text-1)',
+                        color: 'var(--bg)',
+                        border: '1px solid var(--text-1)',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        fontFamily: 'var(--font-ui)'
+                     }}>
+                     Go to Dashboard
+                   </button>
+                 </div>
               )}
             </div>
 
@@ -336,7 +421,7 @@ export function SyncLoading({ user, theme, setTheme, onNavigate }: SyncLoadingPr
               display: 'flex',
               justifyContent: 'flex-end',
               alignItems: 'flex-start',
-              color: syncStatus === 'error' ? 'var(--amber, #f8b02b)' : 'var(--text-1)',
+              color: (syncStatus === 'error' || syncStatus === 'stalled') ? 'var(--amber, #f8b02b)' : 'var(--text-1)',
               fontFamily: 'var(--font-ui)',
               lineHeight: 1
             }}>

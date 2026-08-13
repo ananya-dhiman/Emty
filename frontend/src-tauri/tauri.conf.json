@@ -31,7 +31,7 @@
         "label": "widget",
         "title": "Emty Widget",
         "width": 340,
-        "height": 380,
+        "height": 490,
         "resizable": false,
         "alwaysOnTop": false,
         "decorations": false,

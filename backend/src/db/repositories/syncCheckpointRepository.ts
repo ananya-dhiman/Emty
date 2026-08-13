@@ -124,10 +124,10 @@ export function updateProgress(accountId: string, progressData: {
     updates.push("total_candidates = ?");
     values.push(progressData.total_candidates);
   }
-  if (progressData.last_progress_at !== undefined) {
-    updates.push("last_progress_at = ?");
-    values.push(progressData.last_progress_at);
-  }
+  // Heartbeat: every progress write refreshes last_progress_at so stale-sync
+  // detection can tell a live (slow) run from a dead one.
+  updates.push("last_progress_at = ?");
+  values.push(progressData.last_progress_at ?? Date.now());
 
   if (updates.length === 0) return;
 
@@ -159,12 +159,37 @@ export function markSyncError(accountId: string, errorMessage: string): void {
   const db = getDb();
   const now = Date.now();
 
+  // Also move progress_stage to a TERMINAL value — the frontend's syncing
+  // indicator gates on progress_stage, so leaving it mid-pipeline kept the
+  // UI spinning forever even after handled errors.
   const stmt = db.prepare(`
     UPDATE sync_checkpoints
-    SET sync_state = ?, last_sync_error = ?, sync_started_at = NULL, updated_at = ?
+    SET sync_state = ?, last_sync_error = ?, sync_started_at = NULL,
+        progress_stage = 'error', progress_percent = 99, progress_message = ?,
+        last_progress_at = ?, updated_at = ?
     WHERE account_id = ?
   `);
-  stmt.run("error", errorMessage, now, accountId);
+  stmt.run("error", errorMessage, errorMessage, now, now, accountId);
+}
+
+/**
+ * Boot sweep: any checkpoint still 'syncing' when the backend starts was
+ * interrupted (crash / kill / power loss). Mark it as error so the UI
+ * unsticks and the sidecar's on-launch check re-triggers the sync.
+ */
+export function failInterruptedSyncs(): number {
+  const db = getDb();
+  const now = Date.now();
+  const stmt = db.prepare(`
+    UPDATE sync_checkpoints
+    SET sync_state = 'error', sync_started_at = NULL,
+        progress_stage = 'error', progress_percent = 99,
+        progress_message = 'Sync interrupted — will retry automatically',
+        last_sync_error = 'Sync interrupted by app restart',
+        updated_at = ?
+    WHERE sync_state = 'syncing'
+  `);
+  return stmt.run(now).changes;
 }
 
 export function recordSync(accountId: string, succeededCount: number, failedCount: number): void {
@@ -191,10 +216,18 @@ export function getByAccountId(accountId: string): SyncCheckpointRow | null {
 export function resetStaleSyncLock(accountId: string, staleThresholdMs: number): number {
   const db = getDb();
   const now = Date.now();
+  // Staleness keys off the heartbeat (last_progress_at) so a live long-running
+  // AI pass — which ticks progress constantly — is never mistaken for a dead
+  // one. Also reset progress_stage so the UI's spinner clears.
   const stmt = db.prepare(`
     UPDATE sync_checkpoints
-    SET sync_state = 'idle', sync_started_at = NULL, updated_at = ?
-    WHERE account_id = ? AND sync_state = 'syncing' AND sync_started_at IS NOT NULL AND sync_started_at < ?
+    SET sync_state = 'idle', sync_started_at = NULL,
+        progress_stage = 'error', progress_percent = 99,
+        progress_message = 'Sync stalled — retrying',
+        updated_at = ?
+    WHERE account_id = ? AND sync_state = 'syncing'
+      AND COALESCE(last_progress_at, sync_started_at) IS NOT NULL
+      AND COALESCE(last_progress_at, sync_started_at) < ?
   `);
   const result = stmt.run(now, accountId, staleThresholdMs);
   return result.changes;

@@ -13,6 +13,7 @@ import rulesEngine from '../services/rulesEngine';
 import incrementalSyncService from '../services/incrementalSyncService';
 import { runScoringWorker } from '../services/scoringWorkerService';
 import { runAiProcessingWorker } from '../services/aiProcessingWorkerService';
+import * as syncCheckpointRepository from '../db/repositories/syncCheckpointRepository';
 import logger from '../utils/logger';
 import {
     AI_LABEL_SUGGESTION_MIN_MATCHES,
@@ -811,6 +812,63 @@ export const getPriorityRankingInsights = async (req: AuthRequest, res: Response
         }
         logger.info('Error getting priority ranking insights:', error.message);
         res.status(500).json({ success: false, message: 'Failed to get priority ranking insights: ' + error.message });
+    }
+};
+
+/**
+ * POST /api/emails/process — kick the scoring + AI workers for an account.
+ * Safe to call repeatedly: no-ops (alreadyRunning) while a run is actively
+ * heartbeating. Used after onboarding confirm (first OR added account) and by
+ * the dashboard's stall-retry, so staged emails are always processed even if
+ * an earlier fire-and-forget chain died.
+ */
+export const processEmails = async (req: AuthRequest, res: Response): Promise<void> => {
+    const uid = req.user?.uid;
+    const { accountId } = req.body;
+
+    if (!uid || !accountId || typeof accountId !== 'string') {
+        res.status(400).json({ success: false, message: 'accountId is required' });
+        return;
+    }
+
+    try {
+        const gmailAccount = await GmailAccountModel.findById(accountId);
+        if (!gmailAccount || gmailAccount.userId !== uid) {
+            res.status(403).json({ success: false, message: 'Unauthorized: Invalid Gmail account' });
+            return;
+        }
+
+        // A run that heart-beat within the stall window is genuinely alive — don't double-run.
+        const STALL_THRESHOLD_MS = 10 * 60 * 1000;
+        const checkpoint = syncCheckpointRepository.getByAccountId(accountId);
+        const lastBeat = checkpoint?.last_progress_at || checkpoint?.updated_at || 0;
+        const activeStages = ['scoring_emails', 'processing_emails', 'retrying', 'finalizing'];
+        const isActivelyRunning =
+            checkpoint &&
+            (checkpoint.sync_state === 'syncing' || activeStages.includes(checkpoint.progress_stage || '')) &&
+            Date.now() - lastBeat < STALL_THRESHOLD_MS;
+
+        if (isActivelyRunning) {
+            res.status(200).json({ success: true, alreadyRunning: true });
+            return;
+        }
+
+        (async () => {
+            try {
+                await runScoringWorker(uid, accountId);
+                await runAiProcessingWorker(uid, accountId);
+            } catch (err: any) {
+                logger.info('[PROCESS ENDPOINT] Worker chain failed:', err.message || err);
+                try {
+                    syncCheckpointRepository.markSyncError(accountId, err.message || String(err));
+                } catch { /* non-blocking */ }
+            }
+        })();
+
+        res.status(202).json({ success: true, alreadyRunning: false, message: 'Processing started' });
+    } catch (error: any) {
+        logger.info('Error starting processing:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to start processing: ' + error.message });
     }
 };
 

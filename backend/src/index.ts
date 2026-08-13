@@ -7,6 +7,7 @@ import app from "./server";
 import logger from "./utils/logger";
 import { initializeDatabase, closeDatabase } from "./db/sqlite";
 import { autoPopulateFromMongo } from "./db/repositories/accountLocalRepository";
+import { failInterruptedSyncs } from "./db/repositories/syncCheckpointRepository";
 
 /**
  * Main server entry point
@@ -21,6 +22,13 @@ const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/emty";
  */
 try {
     initializeDatabase();
+
+    // Boot sweep: any sync left 'syncing' by a crash/kill is marked errored so
+    // the UI unsticks and the sidecar's on-launch check re-triggers it.
+    const interrupted = failInterruptedSyncs();
+    if (interrupted > 0) {
+        logger.info(`Recovered ${interrupted} interrupted sync(s) from previous session`);
+    }
 } catch (error) {
     logger.info("Failed to initialize SQLite database:", error);
     process.exit(1);

@@ -59,7 +59,7 @@ export function create(
       state_last_signal_at, state_last_verified_at, extracted_facts, embedding, needs_review, ai_confidence,
       ai_uncertainty_source, pipeline_stage_reached, verification_status, failed_verification_groups, source,
       is_completed, is_tracked, tracking_note, tracked_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -255,24 +255,33 @@ export function updateCompletedStatus(insightId: string, isCompleted: boolean): 
   stmt.run(isCompleted ? 1 : 0, Date.now(), insightId);
 }
 
-export function updateTrackingStatus(
-  insightId: string,
-  isTracked: boolean,
-  trackingNote?: string | null
-): void {
+/**
+ * Tracking preserves an existing note and the original tracked_at;
+ * untracking clears both (per the Tracked-folder spec).
+ */
+export function setTracked(insightId: string, isTracked: boolean): void {
   const db = getDb();
   const stmt = db.prepare(`
     UPDATE insights
-    SET is_tracked = ?, tracking_note = ?, tracked_at = ?, updated_at = ?
+    SET is_tracked = ?,
+        tracking_note = CASE WHEN ? = 1 THEN tracking_note ELSE NULL END,
+        tracked_at = CASE WHEN ? = 1 THEN COALESCE(tracked_at, ?) ELSE NULL END,
+        updated_at = ?
     WHERE id = ?
   `);
-  stmt.run(
-    isTracked ? 1 : 0,
-    isTracked ? (trackingNote ?? null) : null,
-    isTracked ? Date.now() : null,
-    Date.now(),
-    insightId
-  );
+  const flag = isTracked ? 1 : 0;
+  stmt.run(flag, flag, flag, Date.now(), Date.now(), insightId);
+}
+
+/** Note-only update; only applies while the insight is tracked. */
+export function setTrackingNote(insightId: string, note: string | null): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE insights
+    SET tracking_note = ?, updated_at = ?
+    WHERE id = ? AND is_tracked = 1
+  `);
+  stmt.run(note, Date.now(), insightId);
 }
 
 export function findAllTracked(accountId: string): InsightRow[] {

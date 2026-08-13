@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import '../styles/Dashboard.css';
 import { API_BASE_URL } from '../utils/api';
+import { startGmailConnect } from '../utils/connectGmail';
 
 
 interface ProfileProps {
@@ -468,12 +469,79 @@ function PreferencesPanel({ accountId }: { accountId: string }) {
 export function Profile({ user, theme, setTheme, onNavigate, onLogout }: ProfileProps) {
   const [openPrefPanel, setOpenPrefPanel] = useState<string | null>(null);
 
-  const accountId = user?.gmailAccountId || 'primary';
   const email = user?.email || 'user@example.com';
-  const initials = email.charAt(0).toUpperCase();
 
   const togglePanel = (id: string) =>
     setOpenPrefPanel((prev) => (prev === id ? null : id));
+
+  // Connected Gmail accounts (multi-account)
+  const [accounts, setAccounts] = useState<Array<{ id: string; emailAddress: string; isActive?: boolean }>>([]);
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
+  const [addAccountError, setAddAccountError] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem('firebaseToken');
+    if (!token) return;
+    axios.get(`${API_BASE_URL}/api/accounts`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => {
+        if (res.data.success && Array.isArray(res.data.accounts)) {
+          setAccounts(res.data.accounts);
+          setAccountsLoaded(true);
+        }
+      })
+      .catch(() => { /* non-blocking */ });
+  }, []);
+
+  // Until the real list loads, fall back to the primary account so the page
+  // isn't empty; once loaded, the list is authoritative (even when empty).
+  const profileAccounts: Array<{ id: string; emailAddress: string; isActive?: boolean }> =
+    accountsLoaded || accounts.length > 0
+      ? accounts
+      : (user?.gmailAccountId ? [{ id: user.gmailAccountId, emailAddress: email }] : []);
+
+  const handleAddAccount = async () => {
+    setAddAccountError(null);
+    try {
+      await startGmailConnect();
+    } catch (err: any) {
+      setAddAccountError(err?.response?.data?.message || err?.message || 'Could not start Gmail connect.');
+    }
+  };
+
+  const handleRemoveAccount = async (acc: { id: string; emailAddress: string }) => {
+    const confirmed = window.confirm(
+      `Disconnect ${acc.emailAddress}?\n\nIts access to Gmail will be revoked and all emails Emty processed for it will be removed from this device.`
+    );
+    if (!confirmed) return;
+
+    setAddAccountError(null);
+    setRemovingId(acc.id);
+    try {
+      const token = localStorage.getItem('firebaseToken');
+      const res = await axios.delete(`${API_BASE_URL}/api/accounts/${acc.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.data?.success) throw new Error(res.data?.message || 'Failed to remove account');
+
+      const remaining: Array<{ id: string; emailAddress: string; isActive?: boolean }> =
+        Array.isArray(res.data.accounts) ? res.data.accounts : accounts.filter((a) => a.id !== acc.id);
+      setAccounts(remaining);
+      setAccountsLoaded(true);
+
+      // Keep the app-wide active-account pointer valid (shared with widget/dashboard)
+      const stored = localStorage.getItem('emty_active_account_id');
+      if (stored === acc.id) {
+        const next = remaining.find((a) => a.isActive) || remaining[0];
+        if (next) localStorage.setItem('emty_active_account_id', next.id);
+        else localStorage.removeItem('emty_active_account_id');
+      }
+    } catch (err: any) {
+      setAddAccountError(err?.response?.data?.message || err?.message || 'Could not remove the account.');
+    } finally {
+      setRemovingId(null);
+    }
+  };
 
   // Ollama + GPU info (desktop only)
   const [ollamaInfo, setOllamaInfo] = useState<{
@@ -710,6 +778,10 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
                 padding: '12px 20px',
                 borderBottom: '1px solid var(--border-lt)',
                 background: 'var(--panel)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px',
               }}
             >
               <span
@@ -722,150 +794,202 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
                   color: 'var(--text-2)',
                 }}
               >
-                Connected Account
+                Connected Accounts
               </span>
-            </div>
-
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '12px',
-                padding: '16px 20px',
-                borderBottom: openPrefPanel === accountId ? '1px solid var(--border-lt)' : 'none',
-              }}
-            >
-              <div
+              <button
+                id="profile-add-account-btn"
+                onClick={handleAddAccount}
                 style={{
-                  width: '36px',
-                  height: '36px',
-                  background: 'var(--accent)',
-                  color: 'var(--accent-inv)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontFamily: 'var(--font-mono)',
+                  padding: '4px 10px',
+                  fontSize: '11px',
                   fontWeight: 600,
-                  fontSize: '14px',
-                  flexShrink: 0,
+                  fontFamily: 'var(--font-mono)',
+                  background: 'var(--accent-lt)',
+                  color: 'var(--accent)',
+                  border: '1px solid var(--accent-border-soft)',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
                 }}
               >
-                {initials}
-              </div>
-
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-1)' }}>
-                  {email}
-                </div>
-                <div
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '10px',
-                    color: 'var(--text-3)',
-                    marginTop: '3px',
-                  }}
-                >
-                  Connected via Google
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
-                <button
-                  id={`toggle-prefs-${accountId}`}
-                  onClick={() => togglePanel(accountId)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '6px 14px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    fontFamily: 'var(--font-ui)',
-                    background: openPrefPanel === accountId ? 'var(--accent)' : 'var(--surface)',
-                    color: openPrefPanel === accountId ? 'var(--accent-inv)' : 'var(--text-2)',
-                    border: `1px solid ${openPrefPanel === accountId ? 'var(--accent)' : 'var(--border-lt)'}`,
-                    cursor: 'pointer',
-                    transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-                  }}
-                  onMouseOver={(e) => {
-                    if (openPrefPanel !== accountId) {
-                      e.currentTarget.style.background = 'var(--surface-2)';
-                    }
-                  }}
-                  onMouseOut={(e) => {
-                    if (openPrefPanel !== accountId) {
-                      e.currentTarget.style.background = 'var(--surface)';
-                    }
-                  }}
-                >
-                  <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <circle cx="12" cy="12" r="3" />
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                  </svg>
-                  Preferences
-                  <svg
-                    width="10"
-                    height="10"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    style={{
-                      transform: openPrefPanel === accountId ? 'rotate(180deg)' : 'none',
-                      transition: 'transform 0.2s',
-                    }}
-                  >
-                    <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-
-                <button
-                  id="profile-logout-btn"
-                  onClick={onLogout}
-                  style={{
-                    padding: '6px 14px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    fontFamily: 'var(--font-ui)',
-                    background: 'var(--surface)',
-                    color: 'var(--red)',
-                    border: '1px solid var(--border-lt)',
-                    cursor: 'pointer',
-                    transition: 'background 0.2s',
-                  }}
-                  onMouseOver={(e) => (e.currentTarget.style.background = 'var(--red-bg)')}
-                  onMouseOut={(e) => (e.currentTarget.style.background = 'var(--surface)')}
-                >
-                  Log Out
-                </button>
-              </div>
+                + Add account
+              </button>
             </div>
-
-            {openPrefPanel === accountId && user?.gmailAccountId && (
-              <PreferencesPanel accountId={user.gmailAccountId} />
+            {addAccountError && (
+              <div style={{ padding: '10px 20px', fontSize: '11px', color: 'var(--red)', fontFamily: 'var(--font-mono)', borderBottom: '1px solid var(--border-lt)' }}>
+                {addAccountError}
+              </div>
             )}
 
-            {openPrefPanel === accountId && !user?.gmailAccountId && (
+            {profileAccounts.length === 0 && (
               <div
                 style={{
                   padding: '16px 20px',
-                  borderTop: '1px solid var(--border-lt)',
                   fontFamily: 'var(--font-mono)',
                   fontSize: '11px',
                   color: 'var(--text-3)',
                 }}
               >
-                Preferences are available after connecting a Gmail account.
+                No Gmail account connected yet.
               </div>
             )}
+
+            {profileAccounts.map((acc, idx) => (
+              <div key={acc.id}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                    padding: '16px 20px',
+                    borderBottom: (openPrefPanel === acc.id || idx < profileAccounts.length - 1)
+                      ? '1px solid var(--border-lt)'
+                      : 'none',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      background: 'var(--accent)',
+                      color: 'var(--accent-inv)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontFamily: 'var(--font-mono)',
+                      fontWeight: 600,
+                      fontSize: '14px',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {acc.emailAddress.charAt(0).toUpperCase()}
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {acc.emailAddress}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '10px',
+                        color: 'var(--text-3)',
+                        marginTop: '3px',
+                      }}
+                    >
+                      Connected via Google{acc.isActive ? ' · active' : ''}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+                    <button
+                      id={`toggle-prefs-${acc.id}`}
+                      onClick={() => togglePanel(acc.id)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '6px 14px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        fontFamily: 'var(--font-ui)',
+                        background: openPrefPanel === acc.id ? 'var(--accent)' : 'var(--surface)',
+                        color: openPrefPanel === acc.id ? 'var(--accent-inv)' : 'var(--text-2)',
+                        border: `1px solid ${openPrefPanel === acc.id ? 'var(--accent)' : 'var(--border-lt)'}`,
+                        cursor: 'pointer',
+                        transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                      }}
+                      onMouseOver={(e) => {
+                        if (openPrefPanel !== acc.id) {
+                          e.currentTarget.style.background = 'var(--surface-2)';
+                        }
+                      }}
+                      onMouseOut={(e) => {
+                        if (openPrefPanel !== acc.id) {
+                          e.currentTarget.style.background = 'var(--surface)';
+                        }
+                      }}
+                    >
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                      </svg>
+                      Preferences
+                      <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        style={{
+                          transform: openPrefPanel === acc.id ? 'rotate(180deg)' : 'none',
+                          transition: 'transform 0.2s',
+                        }}
+                      >
+                        <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+
+                    <button
+                      id={`remove-account-${acc.id}`}
+                      onClick={() => void handleRemoveAccount(acc)}
+                      disabled={removingId === acc.id}
+                      title={`Disconnect ${acc.emailAddress}`}
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        fontFamily: 'var(--font-ui)',
+                        background: 'var(--surface)',
+                        color: 'var(--red)',
+                        border: '1px solid var(--red-border)',
+                        cursor: removingId === acc.id ? 'default' : 'pointer',
+                        opacity: removingId === acc.id ? 0.6 : 1,
+                        transition: 'background 0.2s',
+                      }}
+                      onMouseOver={(e) => (e.currentTarget.style.background = 'var(--red-bg)')}
+                      onMouseOut={(e) => (e.currentTarget.style.background = 'var(--surface)')}
+                    >
+                      {removingId === acc.id ? 'Removing…' : 'Remove'}
+                    </button>
+
+                    {idx === 0 && (
+                      <button
+                        id="profile-logout-btn"
+                        onClick={onLogout}
+                        style={{
+                          padding: '6px 14px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          fontFamily: 'var(--font-ui)',
+                          background: 'var(--surface)',
+                          color: 'var(--red)',
+                          border: '1px solid var(--border-lt)',
+                          cursor: 'pointer',
+                          transition: 'background 0.2s',
+                        }}
+                        onMouseOver={(e) => (e.currentTarget.style.background = 'var(--red-bg)')}
+                        onMouseOut={(e) => (e.currentTarget.style.background = 'var(--surface)')}
+                      >
+                        Log Out
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {openPrefPanel === acc.id && (
+                  <PreferencesPanel accountId={acc.id} />
+                )}
+              </div>
+            ))}
           </div>
 
           {/* AI Providers Section (Combined Local & Cloud) */}

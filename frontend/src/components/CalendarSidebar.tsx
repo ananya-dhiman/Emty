@@ -9,6 +9,19 @@ interface CalendarSidebarProps {
   onClose: () => void;
 }
 
+type DayEntry = { type: 'd' | 'e'; item: PriorityRankingItem };
+
+const getItemSubject = (item: PriorityRankingItem) =>
+  item.emailContextById?.[item.gmailThreadId]?.subject || item.summary.shortSnippet || 'No subject';
+
+const getItemInitials = (item: PriorityRankingItem) =>
+  (item.from.name || item.from.email || '?')
+    .split(' ')
+    .map((w) => w[0])
+    .join('')
+    .substring(0, 2)
+    .toUpperCase();
+
 export function CalendarSidebar({ isOpen, items, onSelectEmail, onClose }: CalendarSidebarProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
@@ -19,27 +32,35 @@ export function CalendarSidebar({ isOpen, items, onSelectEmail, onClose }: Calen
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0 is Sunday
 
-  // Get items with dates that fall in this month
-  // Pre-process items
+  // date-key → entries (deadlines first, then events)
   const processedItems = useMemo(() => {
-    const map = new Map<string, { deadlines: PriorityRankingItem[], events: PriorityRankingItem[] }>();
+    const map = new Map<string, DayEntry[]>();
     items.forEach(item => {
       if (!Array.isArray(item.dates)) return;
       item.dates.forEach(d => {
         if (!d.date) return;
         const dObj = new Date(d.date);
         if (Number.isNaN(dObj.getTime())) return;
+        if (d.type !== 'deadline' && d.type !== 'event') return;
         const key = `${dObj.getFullYear()}-${dObj.getMonth()}-${dObj.getDate()}`;
-        if (!map.has(key)) map.set(key, { deadlines: [], events: [] });
-        if (d.type === 'deadline') map.get(key)!.deadlines.push(item);
-        if (d.type === 'event') map.get(key)!.events.push(item);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push({ type: d.type === 'deadline' ? 'd' : 'e', item });
       });
     });
+    map.forEach(entries => entries.sort((a, b) => (a.type === b.type ? 0 : a.type === 'd' ? -1 : 1)));
     return map;
   }, [items]);
 
+  const keyOf = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+
   const changeMonth = (delta: number) => {
     setCurrentDate(new Date(year, month + delta, 1));
+  };
+
+  const goToday = () => {
+    const today = new Date();
+    setCurrentDate(today);
+    setSelectedDate(today);
   };
 
   const isSameDay = (d1: Date | null, d2: Date) => {
@@ -47,24 +68,19 @@ export function CalendarSidebar({ isOpen, items, onSelectEmail, onClose }: Calen
     return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
   };
 
-  const isToday = (d: Date) => {
-    const today = new Date();
-    return isSameDay(today, d);
-  };
+  const isToday = (d: Date) => isSameDay(new Date(), d);
 
+  // 42 cells (leading + trailing padding days) so the grid always fills 6 rows
   const generateCalendarDays = () => {
     const days = [];
     const prevMonthDays = new Date(year, month, 0).getDate();
-    
-    // Previous month padding
+
     for (let i = firstDayOfMonth - 1; i >= 0; i--) {
       days.push({ day: prevMonthDays - i, isCurrentMonth: false, date: new Date(year, month - 1, prevMonthDays - i) });
     }
-    // Current month days
     for (let i = 1; i <= daysInMonth; i++) {
       days.push({ day: i, isCurrentMonth: true, date: new Date(year, month, i) });
     }
-    // Next month padding
     const remainingSlots = 42 - days.length; // 6 rows * 7 days
     for (let i = 1; i <= remainingSlots; i++) {
       days.push({ day: i, isCurrentMonth: false, date: new Date(year, month + 1, i) });
@@ -73,96 +89,134 @@ export function CalendarSidebar({ isOpen, items, onSelectEmail, onClose }: Calen
   };
 
   const daysLabels = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
-  const monthNames = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+  const monthName = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][month];
 
-  // Get items for the selected date
-  const selectedItems = useMemo(() => {
+  // Entries for the selected date
+  const selectedEntries = useMemo<DayEntry[]>(() => {
     if (!selectedDate) return [];
-    const key = `${selectedDate.getFullYear()}-${selectedDate.getMonth()}-${selectedDate.getDate()}`;
-    const dayData = processedItems.get(key);
-    if (!dayData) return [];
-    
-    // Combine and deduplicate if same item is both a deadline and event
-    const uniqueItems = new Map<string, PriorityRankingItem>();
-    dayData.deadlines.forEach(i => uniqueItems.set(i.insightId, i));
-    dayData.events.forEach(i => uniqueItems.set(i.insightId, i));
-    
-    return Array.from(uniqueItems.values());
+    return processedItems.get(keyOf(selectedDate)) || [];
+  }, [selectedDate, processedItems]);
+
+  const deadlineCount = selectedEntries.filter(e => e.type === 'd').length;
+  const eventCount = selectedEntries.filter(e => e.type === 'e').length;
+
+  // Upcoming — next 7 days after the selected date (or today)
+  const upcoming = useMemo(() => {
+    const base = selectedDate || new Date();
+    const rows: Array<{ date: Date; entry: DayEntry }> = [];
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + i);
+      const entries = processedItems.get(keyOf(d)) || [];
+      entries.forEach(entry => rows.push({ date: d, entry }));
+    }
+    return rows.slice(0, 6);
   }, [selectedDate, processedItems]);
 
   return (
     <div className={`cal-sidebar ${!isOpen ? 'col' : ''}`}>
-      <div className="cal-head">
-        <span className="cal-title">CALENDAR</span>
-        <button className="cal-close" onClick={onClose}>
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 2L9 9M9 2L2 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
-        </button>
+      <div className="cv-main">
+        {/* Toolbar */}
+        <div className="cv-toolbar">
+          <span className="cv-title">{monthName} <span className="cv-title-year">{year}</span></span>
+          <div className="cv-nav">
+            <button className="cv-nav-btn" onClick={() => changeMonth(-1)} aria-label="Previous month">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M7 2L3 5L7 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </button>
+            <button className="cv-nav-btn" onClick={() => changeMonth(1)} aria-label="Next month">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 2L7 5L3 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </button>
+          </div>
+          <button className="cv-today-btn" onClick={goToday}>TODAY</button>
+          <div className="cv-legend">
+            <span className="cv-legend-item"><span className="cv-legend-sq" style={{ background: 'var(--red)' }} />Deadline</span>
+            <span className="cv-legend-item"><span className="cv-legend-sq" style={{ background: 'var(--event)' }} />Event</span>
+          </div>
+          <button className="cv-close" onClick={onClose} aria-label="Close calendar">
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 2L9 9M9 2L2 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+
+        {/* Month grid */}
+        <div className="cv-grid">
+          {daysLabels.map(lbl => (
+            <div className="cv-dw" key={lbl}>{lbl}</div>
+          ))}
+          {generateCalendarDays().map((d, i) => {
+            const entries = processedItems.get(keyOf(d.date)) || [];
+            const shown = entries.slice(0, 2);
+            const overflow = entries.length - shown.length;
+
+            return (
+              <div
+                className={`cv-cell ${!d.isCurrentMonth ? 'off' : ''} ${isToday(d.date) ? 'today' : ''} ${isSameDay(selectedDate, d.date) ? 'sel' : ''}`}
+                key={i}
+                onClick={() => setSelectedDate(d.date)}
+              >
+                {d.day}
+                {d.isCurrentMonth && shown.map((entry, j) => (
+                  <div className={`cv-chip ${entry.type}`} key={j}>
+                    {getItemSubject(entry.item)}
+                  </div>
+                ))}
+                {d.isCurrentMonth && overflow > 0 && (
+                  <span className="cv-more">+{overflow} more</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="cal-nav">
-        <button className="cal-nav-btn" onClick={() => changeMonth(-1)}>
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M7 2L3 5L7 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
-        </button>
-        <span className="cal-month">{monthNames[month]} {year}</span>
-        <button className="cal-nav-btn" onClick={() => changeMonth(1)}>
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 2L7 5L3 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
-        </button>
-      </div>
+      {/* Day rail */}
+      <div className="cv-rail">
+        <div className="cv-rail-hd">
+          <div className="cv-rail-title">
+            {selectedDate
+              ? selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
+              : 'Select a date'}
+          </div>
+          <div className="cv-rail-meta">
+            {deadlineCount} deadline{deadlineCount === 1 ? '' : 's'} · {eventCount} event{eventCount === 1 ? '' : 's'}
+          </div>
+        </div>
 
-      <div className="cal-grid">
-        {daysLabels.map(lbl => (
-          <div className="cal-dw" key={lbl}>{lbl}</div>
-        ))}
-        {generateCalendarDays().map((d, i) => {
-          const key = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
-          const dayData = processedItems.get(key);
-          const hasDeadline = dayData && dayData.deadlines.length > 0;
-          const hasEvent = dayData && dayData.events.length > 0;
-          
-          return (
-            <div 
-              className={`cal-day ${!d.isCurrentMonth ? 'off' : ''} ${isToday(d.date) ? 'today' : ''} ${isSameDay(selectedDate, d.date) ? 'sel' : ''}`}
-              key={i}
-              onClick={() => setSelectedDate(d.date)}
+        <div className="cv-rail-list">
+          {selectedEntries.length === 0 && (
+            <div className="cv-rail-empty">No deadlines or events this day.</div>
+          )}
+          {selectedEntries.map((entry, idx) => (
+            <div
+              className={`cv-ritem ${entry.type}`}
+              key={entry.item.insightId + idx}
+              onClick={() => onSelectEmail(entry.item)}
             >
-              {d.day}
-              <div className="cal-dots">
-                {hasDeadline && <div className="cdot d" />}
-                {hasEvent && <div className="cdot e" />}
+              <div className="cv-ritem-top">
+                <div className="cv-rav">{getItemInitials(entry.item)}</div>
+                <span className="cv-rfrom">{entry.item.from.name || entry.item.from.email.split('@')[0]}</span>
+                <span className={`cv-rtype ${entry.type}`}>{entry.type === 'd' ? 'Deadline' : 'Event'}</span>
               </div>
+              <div className="cv-rsub">{getItemSubject(entry.item)}</div>
+              <div className="cv-rsnip">{entry.item.summary.shortSnippet}</div>
             </div>
-          );
-        })}
-      </div>
+          ))}
 
-      <div className="cal-agenda-head">
-        <span className="cah-title">{selectedDate ? selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) : 'Select a date'}</span>
-        <span className="cah-count">{selectedItems.length} items</span>
-      </div>
-
-      <div className="cal-list">
-        {selectedItems.length === 0 && (
-          <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: '11px', textAlign: 'center' }}>No deadlines or events this day.</div>
-        )}
-        {selectedItems.map(item => {
-          const key = `${selectedDate?.getFullYear()}-${selectedDate?.getMonth()}-${selectedDate?.getDate()}`;
-          const dayData = processedItems.get(key);
-          const isDeadline = dayData?.deadlines.some(d => d.insightId === item.insightId);
-          const isEvent = dayData?.events.some(d => d.insightId === item.insightId);
-
-          return (
-            <div className="cal-item" key={item.insightId} onClick={() => onSelectEmail(item)}>
-              <div className="ci-top">
-                <span className="ci-from">{item.from.name || item.from.email.split('@')[0]}</span>
-                <span className="ci-type-wrap">
-                   {isDeadline && <span className="ci-type d">Deadline</span>}
-                   {isEvent && <span className="ci-type e">Event</span>}
-                </span>
-              </div>
-              <div className="ci-snip">{item.summary.shortSnippet}</div>
-            </div>
-          )
-        })}
+          {upcoming.length > 0 && (
+            <>
+              <div className="cv-up-lbl">Upcoming this week</div>
+              {upcoming.map(({ date, entry }, idx) => (
+                <div
+                  className="cv-up-row"
+                  key={entry.item.insightId + idx}
+                  onClick={() => onSelectEmail(entry.item)}
+                >
+                  <span className="cv-up-date">{date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                  <span className={`cv-up-sq ${entry.type}`} />
+                  <span className="cv-up-title">{getItemSubject(entry.item)}</span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

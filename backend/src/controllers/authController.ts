@@ -67,8 +67,10 @@ export const loginOrRegister = async (req: AuthRequest, res: Response): Promise<
             await user.save();
         }
 
-        // Check if Gmail is connected
-        const gmailAccount = await GmailAccountModel.findOne({ userId: uid });
+        // Check if Gmail is connected — return ALL accounts, oldest first,
+        // so gmailAccountId stays deterministic (first-connected account).
+        const gmailAccounts = await GmailAccountModel.find({ userId: uid }).sort({ createdAt: 1 });
+        const gmailAccount = gmailAccounts[0] || null;
         const isGmailConnected = !!gmailAccount;
 
         res.status(200).json({
@@ -82,6 +84,7 @@ export const loginOrRegister = async (req: AuthRequest, res: Response): Promise<
                 firebaseId: user.firebaseId,
                 isGmailConnected,
                 gmailAccountId: gmailAccount ? gmailAccount._id : null,
+                accounts: gmailAccounts.map((a) => ({ id: String(a._id), emailAddress: a.emailAddress })),
                 ai: await buildAiSettingsResponse(user),
             }
         });
@@ -141,7 +144,8 @@ export const verifyTokenEndpoint = async (req: AuthRequest, res: Response): Prom
             return;
         }
 
-        const gmailAccount = await GmailAccountModel.findOne({ userId: req.user.uid });
+        const gmailAccounts = await GmailAccountModel.find({ userId: req.user.uid }).sort({ createdAt: 1 });
+        const gmailAccount = gmailAccounts[0] || null;
         const isGmailConnected = !!gmailAccount;
 
         res.status(200).json({
@@ -155,6 +159,7 @@ export const verifyTokenEndpoint = async (req: AuthRequest, res: Response): Prom
                 firebaseId: user.firebaseId,
                 isGmailConnected,
                 gmailAccountId: gmailAccount ? gmailAccount._id : null,
+                accounts: gmailAccounts.map((a) => ({ id: String(a._id), emailAddress: a.emailAddress })),
                 ai: await buildAiSettingsResponse(user),
             }
         });

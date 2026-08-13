@@ -64,7 +64,9 @@ export const setActiveAccount = async (req: Request, res: Response) => {
       }
     }
 
-    accountLocalRepository.setActive(accountId);
+    const owner = localAccount?.user_id
+      ?? (await GmailAccount.findUnique({ where: { id: accountId } }))?.userId;
+    accountLocalRepository.setActive(accountId, owner);
     return res.status(200).json({ success: true });
   } catch (error: any) {
     logger.debug("Error setting active account:", error);

@@ -13,6 +13,7 @@ import {
   reviewLabelPriorityOrder,
   getPriorityRankingInsights,
   toggleEmailCompletion,
+  processEmails,
 } from '../controllers/emailController';
 import { getSyncProgress } from '../controllers/syncProgressController';
 import { toggleTracking, getTrackedInsights, getAllTrackedInsights } from '../controllers/trackController';
@@ -54,5 +55,9 @@ router.get('/tracked/all', verifyToken, getAllTrackedInsights);
 // Returns: sync results with processed/succeeded/failed counts
 router.post('/sync', verifyToken, syncEmails);
 router.get('/sync-progress', verifyToken, getSyncProgress);
+
+// POST /api/emails/process - Kick scoring + AI workers for staged emails
+// (no-ops with alreadyRunning:true while a run is actively heartbeating)
+router.post('/process', verifyToken, processEmails);
 
 export default router;

@@ -58,13 +58,18 @@ export function findById(id: string): LocalAccountRow | null {
   );
 }
 
-export function setActive(id: string): void {
+export function setActive(id: string, userId?: string): void {
   const db = getDb();
   const now = Date.now();
-  
-  // Reset all to 0
-  db.prepare("UPDATE accounts SET is_active = 0, updated_at = ?").run(now);
-  
+
+  // Reset within the user's accounts when a userId is known; the unscoped
+  // path remains for the sidecar, which has no user context.
+  if (userId) {
+    db.prepare("UPDATE accounts SET is_active = 0, updated_at = ? WHERE user_id = ?").run(now, userId);
+  } else {
+    db.prepare("UPDATE accounts SET is_active = 0, updated_at = ?").run(now);
+  }
+
   // Set target to 1
   db.prepare("UPDATE accounts SET is_active = 1, updated_at = ? WHERE id = ?").run(now, id);
 }
@@ -80,8 +85,42 @@ export function getActiveAccount(): LocalAccountRow | null {
 
 export async function autoPopulateFromMongo(): Promise<void> {
   try {
-    const mongoAccounts = await GmailAccountModel.find().lean();
-    if (!mongoAccounts || mongoAccounts.length === 0) return;
+    const allMongoAccounts = await GmailAccountModel.find().lean();
+    const db = getDb();
+    const localUserIds = new Set(
+      (db.prepare("SELECT id FROM users").all() as Array<{ id: string }>).map((u) => u.id)
+    );
+
+    // Bail before pruning when the primary DB returns nothing. "Zero accounts"
+    // is indistinguishable from "Mongo is unhealthy or pointed at the wrong DB",
+    // and pruning on that signal would delete every local account row. Ghost
+    // cleanup below still runs whenever Mongo returns a non-empty set, which is
+    // the case it was written for.
+    if (allMongoAccounts.length === 0) return;
+
+    // Reconcile: prune local rows (for users known to this install) whose
+    // account no longer exists in the primary DB. Without this, a wiped or
+    // reconnected primary DB leaves ghost accounts locally — which then show
+    // up in the switcher and 403 every request made against them.
+    const mongoIds = new Set(allMongoAccounts.map((acc) => String(acc._id)));
+    const localRows = db
+      .prepare("SELECT id, user_id, email_address FROM accounts")
+      .all() as Array<{ id: string; user_id: string; email_address: string }>;
+    for (const row of localRows) {
+      if (localUserIds.size > 0 && !localUserIds.has(row.user_id)) continue;
+      if (!mongoIds.has(row.id)) {
+        db.prepare("DELETE FROM accounts WHERE id = ?").run(row.id);
+        logger.info(`Pruned stale local account ${row.email_address} (no longer in primary DB)`);
+      }
+    }
+
+    // Mongo is shared across users; only mirror accounts belonging to users
+    // known to this local install (fall back to all on a fresh DB).
+    let mongoAccounts = allMongoAccounts;
+    if (localUserIds.size > 0) {
+      mongoAccounts = allMongoAccounts.filter((acc) => localUserIds.has(acc.userId));
+      if (mongoAccounts.length === 0) return;
+    }
 
     for (const acc of mongoAccounts) {
       upsert({
@@ -104,6 +143,23 @@ export async function autoPopulateFromMongo(): Promise<void> {
   } catch (error) {
     logger.info("Failed to auto-populate local accounts from MongoDB:", error);
   }
+}
+
+/**
+ * Removes an account and ALL its locally stored data (emails, insights,
+ * sync state, retry logs, feedback) in one transaction.
+ */
+export function purgeAccountData(accountId: string): void {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM insights WHERE account_id = ?").run(accountId);
+    db.prepare("DELETE FROM email_messages WHERE account_id = ?").run(accountId);
+    db.prepare("DELETE FROM processed_email_log WHERE account_id = ?").run(accountId);
+    db.prepare("DELETE FROM feedback WHERE account_id = ?").run(accountId);
+    db.prepare("DELETE FROM sync_checkpoints WHERE account_id = ?").run(accountId);
+    db.prepare("DELETE FROM accounts WHERE id = ?").run(accountId);
+  });
+  tx();
 }
 
 export function findAllByUser(userId: string): LocalAccountRow[] {
