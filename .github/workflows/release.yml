@@ -87,6 +87,27 @@ jobs:
           printf '%s' "$BACKEND_ENV" > backend/.env
           echo "wrote backend/.env ($(wc -l < backend/.env) lines)"
 
+      # frontend/.env is gitignored too. Vite substitutes import.meta.env.VITE_*
+      # at BUILD time, so without this every value becomes `undefined` and
+      # utils/firebase.ts:16 (getAuth at module scope) throws auth/invalid-api-key
+      # before React mounts — the app opens to a white screen on every window.
+      #
+      # Unlike BACKEND_ENV these are not secrets: the Firebase *web* config
+      # (apiKey, authDomain, appId) is public by design and ships in every
+      # Firebase client, protected by Security Rules rather than secrecy. It
+      # lives in a secret here only because the file is gitignored.
+      - name: Write frontend .env
+        shell: bash
+        env:
+          FRONTEND_ENV: ${{ secrets.FRONTEND_ENV }}
+        run: |
+          if [ -z "$FRONTEND_ENV" ]; then
+            echo "::error::FRONTEND_ENV secret is empty or unset. The build would produce an app that opens to a white screen (Firebase init throws with undefined config). Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          printf '%s' "$FRONTEND_ENV" > frontend/.env
+          echo "wrote frontend/.env ($(grep -c 'VITE_' frontend/.env) VITE_ vars)"
+
       # npm ci, not npm install: install the lockfile exactly and fail loudly
       # if it disagrees with package.json, rather than silently re-resolving.
       - name: Install backend dependencies
