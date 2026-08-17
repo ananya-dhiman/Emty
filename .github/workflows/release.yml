@@ -43,6 +43,15 @@ jobs:
             frontend/package-lock.json
             backend/package-lock.json
 
+      # The committed lockfiles were written by npm 11; Node 20 ships npm 10,
+      # which resolves a different tree from the same package.json and rejects
+      # them ("Missing: gcp-metadata@... from lock file"). Pin so CI and local
+      # use the same resolver. Note a local `npm ci --dry-run` does NOT catch
+      # this — it passes even when CI fails.
+      - name: Pin npm to match the committed lockfiles
+        shell: bash
+        run: npm i -g npm@11.10.1
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -59,6 +68,24 @@ jobs:
         with:
           path: frontend/src-tauri/binaries
           key: sidecars-${{ matrix.target }}-${{ hashFiles('frontend/scripts/download-*.mjs') }}
+
+      # The packaged app loads backend/dist/.env at runtime (backend/src/env.ts)
+      # and index.ts exits(1) if it cannot reach Mongo, so a build without real
+      # values produces an installer whose sidecar dies silently on launch.
+      # backend/.env is gitignored, hence the secret. Passed via env: rather
+      # than interpolated into the run: body so the value never appears in the
+      # rendered shell command.
+      - name: Write backend .env
+        shell: bash
+        env:
+          BACKEND_ENV: ${{ secrets.BACKEND_ENV }}
+        run: |
+          if [ -z "$BACKEND_ENV" ]; then
+            echo "::error::BACKEND_ENV secret is empty or unset. The build would produce an app whose backend exits on launch. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          printf '%s' "$BACKEND_ENV" > backend/.env
+          echo "wrote backend/.env ($(wc -l < backend/.env) lines)"
 
       # npm ci, not npm install: install the lockfile exactly and fail loudly
       # if it disagrees with package.json, rather than silently re-resolving.
