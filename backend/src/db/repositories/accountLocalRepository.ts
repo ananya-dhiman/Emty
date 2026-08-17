@@ -109,8 +109,13 @@ export async function autoPopulateFromMongo(): Promise<void> {
     for (const row of localRows) {
       if (localUserIds.size > 0 && !localUserIds.has(row.user_id)) continue;
       if (!mongoIds.has(row.id)) {
-        db.prepare("DELETE FROM accounts WHERE id = ?").run(row.id);
-        logger.info(`Pruned stale local account ${row.email_address} (no longer in primary DB)`);
+        // Purge every table keyed to the account, not just the accounts row.
+        // Deleting the row alone orphaned its insights, emails, checkpoints and
+        // feedback, which kept driving notifications for accounts the user had
+        // already removed — and left checkpoints pointing at an account the AI
+        // worker could no longer resolve ("Gmail account not found").
+        purgeAccountData(row.id);
+        logger.info(`Pruned stale local account ${row.email_address} and its data (no longer in primary DB)`);
       }
     }
 

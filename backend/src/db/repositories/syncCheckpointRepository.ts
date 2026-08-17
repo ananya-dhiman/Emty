@@ -173,9 +173,20 @@ export function markSyncError(accountId: string, errorMessage: string): void {
 }
 
 /**
- * Boot sweep: any checkpoint still 'syncing' when the backend starts was
+ * Boot sweep: any checkpoint left mid-flight when the backend starts was
  * interrupted (crash / kill / power loss). Mark it as error so the UI
  * unsticks and the sidecar's on-launch check re-triggers the sync.
+ *
+ * Two shapes have to be caught, not one:
+ *
+ *   sync_state = 'syncing'   the lock was never released
+ *   progress_stage mid-flight while sync_state is already 'idle'
+ *
+ * The second happens when the lock is released without the stage being
+ * moved to a terminal value. Nothing else repairs it: the stall detector
+ * only reports, and the UI gates its spinner on progress_stage, so the
+ * account spins forever on a sync that finished long ago. Keying this
+ * sweep solely on sync_state left those rows stuck permanently.
  */
 export function failInterruptedSyncs(): number {
   const db = getDb();
@@ -188,6 +199,8 @@ export function failInterruptedSyncs(): number {
         last_sync_error = 'Sync interrupted by app restart',
         updated_at = ?
     WHERE sync_state = 'syncing'
+       OR (progress_stage IS NOT NULL
+           AND progress_stage NOT IN ('completed', 'error', 'idle'))
   `);
   return stmt.run(now).changes;
 }

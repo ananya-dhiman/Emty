@@ -55,6 +55,12 @@ export function runMigrations(db: Database.Database): void {
       logger.info("Applied migration v6: Add track folder fields to insights");
     }
 
+    if (currentVersion < 7) {
+      migration_v7(db);
+      db.prepare("INSERT INTO schema_version (version) VALUES (7)").run();
+      logger.info("Applied migration v7: Purge data orphaned by removed accounts");
+    }
+
     const finalVersion = db
       .prepare("SELECT MAX(version) as version FROM schema_version")
       .get() as { version: number | null };
@@ -372,5 +378,62 @@ function migration_v6(db: Database.Database): void {
     logger.info("Added track folder fields to insights table");
   } catch (error) {
     logger.info("Migration v6 failed (non-critical):", error);
+  }
+}
+
+/**
+ * Migration v7: Purge rows left behind by accounts that were removed.
+ *
+ * Until now, pruning a stale account deleted only its row in `accounts`,
+ * orphaning everything keyed to it. Those orphans kept feeding notifications
+ * for accounts the user had already disconnected, and left checkpoints the AI
+ * worker could not resolve ("Gmail account not found"). The prune now calls
+ * purgeAccountData, but existing installs still carry the debris — this clears
+ * it once.
+ *
+ * Guarded on `accounts` being non-empty: an empty table means either a fresh
+ * install (nothing to orphan) or a database whose accounts have not been
+ * populated yet, and deleting every row on that signal would wipe real data.
+ */
+function migration_v7(db: Database.Database): void {
+  try {
+    const accountCount = (
+      db.prepare("SELECT COUNT(*) AS c FROM accounts").get() as { c: number }
+    ).c;
+
+    if (accountCount === 0) {
+      logger.info("Migration v7: no accounts present, skipping orphan purge");
+      return;
+    }
+
+    const tables = [
+      "insights",
+      "email_messages",
+      "processed_email_log",
+      "feedback",
+      "sync_checkpoints",
+    ];
+
+    const tx = db.transaction(() => {
+      let total = 0;
+      for (const table of tables) {
+        const { changes } = db
+          .prepare(
+            `DELETE FROM ${table}
+              WHERE account_id IS NOT NULL
+                AND account_id NOT IN (SELECT id FROM accounts)`
+          )
+          .run();
+        if (changes > 0) {
+          logger.info(`Migration v7: removed ${changes} orphaned row(s) from ${table}`);
+          total += changes;
+        }
+      }
+      logger.info(`Migration v7: purged ${total} orphaned row(s) in total`);
+    });
+
+    tx();
+  } catch (error) {
+    logger.info("Migration v7 failed (non-critical):", error);
   }
 }
