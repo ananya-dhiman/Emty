@@ -451,19 +451,23 @@ function migration_v7(db: Database.Database): void {
  * shared by many processes; this backend ships as a per-machine sidecar,
  * where a nonce lookup became an internet round trip, an outage hung both
  * OAuth flows, and REDIS_URL had to ship inside every installer.
+ *
+ * Deliberately NOT wrapped in a swallowing try/catch like the migrations
+ * above it. Those add optional columns or tidy junk, so carrying on without
+ * them is fine. This table is load-bearing: without it every OAuth call
+ * fails, and a backend that boots "successfully" into a state where nobody
+ * can sign in is exactly the silent degradation this store was written to
+ * eliminate. Let it throw — runMigrations logs and rethrows, and index.ts
+ * exits rather than pretending to be healthy.
  */
 function migration_v8(db: Database.Database): void {
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS oauth_state (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        expires_at INTEGER NOT NULL
-      );
-    `);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_oauth_state_expires ON oauth_state(expires_at)`);
-    logger.info("Created oauth_state table");
-  } catch (error) {
-    logger.info("Migration v8 failed (non-critical):", error);
-  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS oauth_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_oauth_state_expires ON oauth_state(expires_at)`);
+  logger.info("Created oauth_state table");
 }

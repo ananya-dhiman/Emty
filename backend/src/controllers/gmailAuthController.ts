@@ -17,7 +17,7 @@ import logger from '../utils/logger';
 // /auth/google
 // ✔ req.user exists
 // ✔ generate state
-// ✔ redis SET state → userId (TTL)
+// ✔ store state → userId in the local OAuth state store (TTL)
 // ✔ generate OAuth URL (pass state)
 // ✔ redirect
 export const initiateGoogleOAuth = async (req:AuthRequest, res:Response): Promise<void> => {
@@ -64,12 +64,12 @@ export const initiateGoogleOAuth = async (req:AuthRequest, res:Response): Promis
 // /auth/google/callback
 // Process: 
 // 1. Google sends back: code (authorization code) + state (security token)
-// 2. Validate state exists in Redis (proves user initiated this flow)
-// 3. Extract userId from Redis using state
+// 2. Validate state exists in the local store (proves user initiated this flow)
+// 3. Extract userId from the local store using state
 // 4. Exchange code for access_token + refresh_token
 // 5. Fetch Gmail profile (email address)
 // 6. Save/Update Gmail account in database
-// 7. Delete state from Redis (one-time use)
+// 7. Delete state from the local store (one-time use)
 
 export const store_credentials = async (req:AuthRequest, res:Response): Promise<void> => {
     const oauth2Client = createOAuthClient();
@@ -77,7 +77,7 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
     const state: string = req.query.state as string;
             const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     try {
-        // ========== STEP 1: Validate state from Redis ==========
+        // ========== STEP 1: Validate state from the local store ==========
         // State is the security token we created and stored in initiateGoogleOAuth
         // If state is invalid/missing, this is a suspicious request (CSRF attack)
         
