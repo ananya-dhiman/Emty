@@ -7,7 +7,7 @@ import mongoose from 'mongoose';
 import logger from '../utils/logger';
 import crypto from 'crypto';
 import { createOAuthClient } from '../utils/createOAuth';
-import { client } from '../utils/redis';
+import * as oauthState from '../utils/oauthStateStore';
 import { google } from 'googleapis';
 
 const buildAiSettingsResponse = async (_user: any) => ({
@@ -228,7 +228,7 @@ export const initiateDesktopOAuth = async (req: AuthRequest, res: Response): Pro
         const oauth2Client = createOAuthClient();
         const state = crypto.randomBytes(32).toString('hex');
         
-        await client.setEx(
+        await oauthState.setEx(
             `desktop_oauth:state:${state}`,
             300, 
             'pending'
@@ -300,7 +300,7 @@ export const desktopOAuthCallback = async (req: AuthRequest, res: Response): Pro
         }
 
         const stateId = stateParam.replace('desktop_login_', '');
-        const stateExists = await client.get(`desktop_oauth:state:${stateId}`);
+        const stateExists = await oauthState.get(`desktop_oauth:state:${stateId}`);
 
         if (!stateExists) {
             renderOAuthRedirectHtml(res, `${frontendUrl}?error=session_expired`, false);
@@ -340,7 +340,7 @@ export const desktopOAuthCallback = async (req: AuthRequest, res: Response): Pro
 
         const customToken = await admin.auth().createCustomToken(user.firebaseId);
 
-        await client.del(`desktop_oauth:state:${stateId}`);
+        await oauthState.del(`desktop_oauth:state:${stateId}`);
 
         renderOAuthRedirectHtml(res, `${frontendUrl}?desktop_login_token=${customToken}`, true);
     } catch (error: any) {

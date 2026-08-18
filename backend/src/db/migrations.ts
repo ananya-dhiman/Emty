@@ -61,6 +61,12 @@ export function runMigrations(db: Database.Database): void {
       logger.info("Applied migration v7: Purge data orphaned by removed accounts");
     }
 
+    if (currentVersion < 8) {
+      migration_v8(db);
+      db.prepare("INSERT INTO schema_version (version) VALUES (8)").run();
+      logger.info("Applied migration v8: Create oauth_state table");
+    }
+
     const finalVersion = db
       .prepare("SELECT MAX(version) as version FROM schema_version")
       .get() as { version: number | null };
@@ -435,5 +441,29 @@ function migration_v7(db: Database.Database): void {
     tx();
   } catch (error) {
     logger.info("Migration v7 failed (non-critical):", error);
+  }
+}
+
+/**
+ * Migration v8: Local store for short-lived OAuth state nonces.
+ *
+ * Replaces the cloud Redis these lived in. Redis suited a hosted backend
+ * shared by many processes; this backend ships as a per-machine sidecar,
+ * where a nonce lookup became an internet round trip, an outage hung both
+ * OAuth flows, and REDIS_URL had to ship inside every installer.
+ */
+function migration_v8(db: Database.Database): void {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS oauth_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_oauth_state_expires ON oauth_state(expires_at)`);
+    logger.info("Created oauth_state table");
+  } catch (error) {
+    logger.info("Migration v8 failed (non-critical):", error);
   }
 }

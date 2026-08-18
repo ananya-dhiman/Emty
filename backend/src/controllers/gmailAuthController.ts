@@ -3,7 +3,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { GmailAccountModel } from '../model/GmailAccount';
 import { google } from 'googleapis';
 import crypto from 'crypto';
-import { client } from '../utils/redis';
+import * as oauthState from '../utils/oauthStateStore';
 import { createOAuthClient } from '../utils/createOAuth';
 import { generateOAuthUrl, exchangeCodeForTokens, refreshAccessToken, revokeToken } from '../services/gmailAuth';
 import {UserModel} from '../model/User';
@@ -39,7 +39,7 @@ export const initiateGoogleOAuth = async (req:AuthRequest, res:Response): Promis
         const state = crypto.randomBytes(32).toString('hex');
         const uidString = uid || '';
 
-        await client.setEx(
+        await oauthState.setEx(
             `oauth:state:${state}`,
             300, // TTL in seconds (5 minutes)
             uidString
@@ -86,8 +86,8 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
             return;
         }
 
-        // Look up state in Redis to get the userId
-        const uid = await client.get(`oauth:state:${state}`);
+        // Look up state in the local store to get the userId
+        const uid = await oauthState.get(`oauth:state:${state}`);
 
         if (!uid) {
             res.redirect(`${frontendUrl}/?gmail_error=invalid_state`);
@@ -165,9 +165,9 @@ export const store_credentials = async (req:AuthRequest, res:Response): Promise<
             logger.info('Failed to mirror Gmail account into local DB:', mirrorErr?.message || mirrorErr);
         }
 
-        // ========== STEP 5: Cleanup - Delete state from Redis ==========
+        // ========== STEP 5: Cleanup - Delete state from the local store ==========
         // State is one-time use. Delete it to prevent reuse.
-        await client.del(`oauth:state:${state}`);
+        await oauthState.del(`oauth:state:${state}`);
 
         // Serve an HTML page that fires the deep link into the Tauri app
         // and then closes the browser tab. A plain redirect to emty:// leaves

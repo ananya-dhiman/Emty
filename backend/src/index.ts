@@ -8,6 +8,7 @@ import logger from "./utils/logger";
 import { initializeDatabase, closeDatabase } from "./db/sqlite";
 import { autoPopulateFromMongo } from "./db/repositories/accountLocalRepository";
 import { failInterruptedSyncs } from "./db/repositories/syncCheckpointRepository";
+import { sweepExpired } from "./utils/oauthStateStore";
 
 /**
  * Main server entry point
@@ -28,6 +29,13 @@ try {
     const interrupted = failInterruptedSyncs();
     if (interrupted > 0) {
         logger.info(`Recovered ${interrupted} interrupted sync(s) from previous session`);
+    }
+
+    // OAuth nonces are short-lived; SQLite has no TTL of its own, so drop
+    // any rows left over from a previous session.
+    const sweptNonces = sweepExpired();
+    if (sweptNonces > 0) {
+        logger.info(`Swept ${sweptNonces} expired OAuth state row(s)`);
     }
 } catch (error) {
     logger.info("Failed to initialize SQLite database:", error);
