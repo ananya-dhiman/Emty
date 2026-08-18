@@ -8,6 +8,7 @@ import logger from "./utils/logger";
 import { initializeDatabase, closeDatabase } from "./db/sqlite";
 import { autoPopulateFromMongo } from "./db/repositories/accountLocalRepository";
 import { failInterruptedSyncs } from "./db/repositories/syncCheckpointRepository";
+import { resolveRedirectUri } from "./utils/createOAuth";
 import { sweepExpired } from "./utils/oauthStateStore";
 
 /**
@@ -52,10 +53,27 @@ mongoose
         await autoPopulateFromMongo();
 
         // Start server after successful DB connection
-        app.listen(PORT, () => {
+        const server = app.listen(PORT, () => {
             logger.info(`Server running on port ${PORT}`);
+            logger.info(`OAuth redirect URI: ${resolveRedirectUri()}`);
             logger.debug(`Health check: http://localhost:${PORT}/health`);
             logger.debug(`Auth endpoint: http://localhost:${PORT}/api/auth`);
+        });
+
+        // Without this, a taken port emits an unhandled 'error' event and the
+        // sidecar dies silently — the app then sits on its loading screen
+        // forever with nothing explaining why. The launcher picks a free port
+        // before spawning us, but that check and this bind are not atomic.
+        server.on("error", (err: NodeJS.ErrnoException) => {
+            if (err.code === "EADDRINUSE") {
+                logger.info(
+                    `Port ${PORT} is already in use — another process took it between ` +
+                    `the launcher's check and this bind. Emty cannot start.`
+                );
+            } else {
+                logger.info("HTTP server error:", err);
+            }
+            process.exit(1);
         });
     })
     .catch((error) => {

@@ -12,6 +12,34 @@ use std::time::Duration;
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_autostart::ManagerExt;
 
+/// Ports the backend sidecar may bind, in preference order.
+///
+/// This is a fixed list rather than any free port because Google validates the
+/// OAuth redirect URI against what is registered in Cloud Console. Every port
+/// here must have `http://localhost:<port>/api/auth/google/callback`
+/// registered, otherwise OAuth fails with redirect_uri_mismatch on that port.
+const BACKEND_PORT_CANDIDATES: [u16; 5] = [5000, 5001, 5002, 5003, 5004];
+
+/// Returns the first candidate port nothing else is listening on.
+///
+/// There is an unavoidable race between checking and the sidecar binding, so
+/// the sidecar still handles EADDRINUSE itself; this just makes the common
+/// case work. Binding to 127.0.0.1 matches where the sidecar listens.
+fn pick_backend_port() -> Option<u16> {
+    BACKEND_PORT_CANDIDATES.iter().copied().find(|port| {
+        match std::net::TcpListener::bind(("127.0.0.1", *port)) {
+            Ok(listener) => {
+                drop(listener); // release immediately so the sidecar can take it
+                true
+            }
+            Err(_) => {
+                log::info!("Port {} is in use, trying the next candidate", port);
+                false
+            }
+        }
+    })
+}
+
 // Helper: parse and emit a deep link URL to the main window
 fn handle_deep_link_url(app: &tauri::AppHandle, url_str: &str) {
     log::info!("Deep link received: {}", url_str);
@@ -183,9 +211,24 @@ pub fn run() {
                 .expect("Failed to resolve app data dir");
             std::fs::create_dir_all(&app_data_dir).ok();
 
-            // Try to use a fixed port (5000) for OAuth redirect matching, fallback to random if used
-            let port = 5000;
-            // Note: In production we should ensure 5000 is available, or use deep linking.
+            // Google validates the OAuth redirect URI against a registered
+            // list, so the backend cannot bind a truly random port — every
+            // candidate here must also be registered in Google Cloud Console.
+            //
+            // 5000 was previously hardcoded with no fallback, which is a real
+            // problem on macOS: AirPlay Receiver binds 5000 by default, so the
+            // sidecar would fail to listen and the app would hang on the
+            // loading screen with no explanation.
+            let port = pick_backend_port().unwrap_or_else(|| {
+                log::error!(
+                    "No backend port free among {:?}; falling back to {} and letting the \
+                     sidecar surface the bind error",
+                    BACKEND_PORT_CANDIDATES,
+                    BACKEND_PORT_CANDIDATES[0]
+                );
+                BACKEND_PORT_CANDIDATES[0]
+            });
+            log::info!("Backend port: {}", port);
 
             // ---------------------------------------------------------------
             // GPU detection (fast, synchronous, informational only)
