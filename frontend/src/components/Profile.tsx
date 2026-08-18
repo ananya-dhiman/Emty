@@ -583,13 +583,35 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
     connected: boolean;
     exhaustedUntilMidnight?: boolean;
     rateLimits: { remaining: number; limit: number; lastUpdated: number } | null;
-  }>({ connected: false, rateLimits: null });
+    // Set by the backend only for failures a retry cannot fix: Groq retired
+    // every model we support, the key was rejected, or the stored key could
+    // not be decrypted. Without this the app just degrades quietly to local AI.
+    lastError?: { code: string; message: string; at: string } | null;
+  }>({ connected: false, rateLimits: null, lastError: null });
   const [showGroqKeyInput, setShowGroqKeyInput] = useState(false);
   const [groqKeyDraft, setGroqKeyDraft]         = useState('');
   const [groqKeyError, setGroqKeyError]         = useState<string | null>(null);
   const [groqKeyVerifying, setGroqKeyVerifying] = useState(false);
   const [groqKeySaved, setGroqKeySaved]         = useState(false);
   const [aiTab, setAiTab]                       = useState<'local' | 'cloud'>('cloud');
+
+  // A permanent failure outranks everything else here: if cloud AI is broken,
+  // that is what the user needs to see, not a stale rate-limit bar.
+  const groqBadge = groqStatus.lastError
+    ? { label: 'DEGRADED',      color: 'var(--red)' }
+    : groqStatus.exhaustedUntilMidnight
+      ? { label: 'EXHAUSTED',   color: 'var(--red)' }
+      : groqStatus.connected
+        ? { label: 'CONNECTED', color: 'var(--green)' }
+        : { label: 'NOT CONNECTED', color: 'var(--text-3)' };
+
+  const groqBadgeDetail = groqStatus.lastError
+    ? `${groqStatus.lastError.message} Falling back to local AI.`
+    : groqStatus.exhaustedUntilMidnight
+      ? 'Groq API Exhausted — Tokens Per Day limit reached. Resets at midnight UTC.'
+      : groqStatus.connected
+        ? 'Groq API active — model selected automatically.'
+        : 'Running in local-only mode.';
 
   const token = localStorage.getItem('firebaseToken');
 
@@ -634,6 +656,7 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
             connected:  data.profile.aiProvider === 'groq',
             exhaustedUntilMidnight: isExhausted,
             rateLimits: rateLimits,
+            lastError: data.profile.groqLastError || null,
           });
         }
       } catch {
@@ -1153,20 +1176,18 @@ export function Profile({ user, theme, setTheme, onNavigate, onLogout }: Profile
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   {/* Connection status */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '9px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', border: `1px solid ${groqStatus.exhaustedUntilMidnight ? 'var(--red)' : groqStatus.connected ? 'var(--green)' : 'var(--text-3)'}`, color: groqStatus.exhaustedUntilMidnight ? 'var(--red)' : groqStatus.connected ? 'var(--green)' : 'var(--text-3)' }}>
-                      {groqStatus.exhaustedUntilMidnight ? 'EXHAUSTED' : groqStatus.connected ? 'CONNECTED' : 'NOT CONNECTED'}
+                    <span style={{ fontSize: '9px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', border: `1px solid ${groqBadge.color}`, color: groqBadge.color }}>
+                      {groqBadge.label}
                     </span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: (groqStatus.connected || groqStatus.exhaustedUntilMidnight) ? 'var(--text-1)' : 'var(--text-3)' }}>
-                      {groqStatus.exhaustedUntilMidnight 
-                        ? 'Groq API Exhausted — Tokens Per Day limit reached. Resets at midnight UTC.'
-                        : groqStatus.connected
-                          ? 'Groq API active — Llama 3.3 70B'
-                          : 'Running in local-only mode.'}
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: (groqStatus.connected || groqStatus.exhaustedUntilMidnight || groqStatus.lastError) ? 'var(--text-1)' : 'var(--text-3)' }}>
+                      {groqBadgeDetail}
                     </span>
                   </div>
 
                   {/* Rate limits */}
-                  {groqStatus.connected && groqStatus.rateLimits && (
+                  {/* Hidden while degraded — request counts from before the
+                      failure are stale and only distract from the real issue. */}
+                  {groqStatus.connected && !groqStatus.lastError && groqStatus.rateLimits && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-2)' }}>
                         Requests remaining today: {groqStatus.rateLimits.remaining} / {groqStatus.rateLimits.limit}

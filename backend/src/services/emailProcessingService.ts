@@ -5,7 +5,7 @@
 
 import { google } from 'googleapis';
 import { fetchFullEmailBody, extractEmailBody, extractAttachmentMetadata, PreExtractedLink } from './emailBodyService';
-import { extractInsightsFromEmail, AIInsightExtraction, AIParsingError } from './aiService';
+import { extractInsightsFromEmail, AIInsightExtraction, AIParsingError, recordGroqPermanentError } from './aiService';
 import { AIResolvedContext } from './aiProviderService';
 import { UserIntentProfile } from '../model/UserIntentProfile';
 import { decryptApiKey } from '../utils/cryptoService';
@@ -183,7 +183,17 @@ export const processEmailDeep = async (
                     groqApiKey = decryptApiKey(profile.groqApiKey);
                 }
             } catch (keyErr: any) {
+                // Reaching here means the stored key could not be read at all —
+                // typically decryptApiKey failing because CRYPTO_SECRET changed
+                // since the key was saved. That never fixes itself on retry, and
+                // silently dropping to Ollama is how this stayed invisible before,
+                // so record it for the Profile > cloud LLM badge.
                 logger.info(`[AI ROUTE] Failed to read Groq key for user ${options.userId}: ${keyErr.message}`);
+                await recordGroqPermanentError(
+                    options.userId,
+                    'key_unreadable',
+                    'Saved Groq key could not be decrypted. Re-enter it in Profile.'
+                );
             }
         }
 

@@ -39,6 +39,14 @@ export interface IUserIntentProfile extends Document {
     limit:       number;
     lastUpdated: number;         // Unix ms timestamp
   } | null;
+  // Set only for failures a retry cannot fix — Groq retired every model we
+  // support, or the key was rejected. Cleared on the next successful call.
+  // Surfaced in Profile > cloud LLM so silent degradation to Ollama is visible.
+  groqLastError?: {
+    code:    'no_model' | 'invalid_key';
+    message: string;
+    at:      Date;
+  } | null;
 
   // Metadata
   onboardingCompleted: boolean;
@@ -77,6 +85,14 @@ const UserIntentProfileSchema = new Schema<IUserIntentProfile>(
       remaining:   { type: Number },
       limit:       { type: Number },
       lastUpdated: { type: Number },
+    },
+    groqLastError: {
+      type: {
+        code:    { type: String },
+        message: { type: String },
+        at:      { type: Date },
+      },
+      default: null,
     },
 
     onboardingCompleted: { type: Boolean, default: false },

@@ -430,7 +430,123 @@ const extractWithOllama = async (
 };
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const GROQ_MODELS_URL = 'https://api.groq.com/openai/v1/models';
+
+/**
+ * Groq retires hosted models on a rolling basis — roughly every couple of
+ * months — and a name that works today can be gone tomorrow. That already bit
+ * us once: llama-3.3-70b-versatile was hardcoded here, Groq decommissioned it,
+ * every request failed, and the silent Ollama fallback made it look like a
+ * broken API key.
+ *
+ * Emty ships as a desktop app with no updater, so a hardcoded model name means
+ * the next rotation breaks AI processing for every installed copy until each
+ * user reinstalls. Instead we resolve against the live model list at runtime
+ * and take the best one actually available, so the app heals itself.
+ *
+ * Ordered best-first. Every entry must be verified to return parseable JSON
+ * for the extraction prompt before being added — a model that "works" but
+ * emits prose would silently poison every insight.
+ *
+ * qwen/qwen3.6-27b is deliberately NOT here despite being one of Groq's
+ * suggested replacements: it emits inline <think> blocks into content, blows
+ * the token budget and does not parse as JSON.
+ */
+const GROQ_MODEL_PREFERENCE = [
+  'openai/gpt-oss-120b',
+  'openai/gpt-oss-20b',
+];
+
+const GROQ_MODEL_CACHE_TTL_MS = 60 * 60 * 1000;
+let groqModelCache: { model: string; at: number } | null = null;
+
+export class GroqNoModelError extends Error {
+  constructor(available: string[]) {
+    super(
+      `No supported Groq chat model available. Tried [${GROQ_MODEL_PREFERENCE.join(', ')}], ` +
+      `account offers [${available.join(', ')}]`
+    );
+    this.name = 'GroqNoModelError';
+  }
+}
+
+export function invalidateGroqModelCache(): void {
+  groqModelCache = null;
+}
+
+/**
+ * Records a failure that will not fix itself with a retry — no usable model on
+ * the account, or a rejected key. Surfaced in Profile > cloud LLM so the user
+ * learns about it the same day rather than noticing the queue is slow weeks
+ * later. Transient failures (429 / 5xx / timeouts) must not come through here;
+ * they have their own retry and groqTpdExhaustedAt handling.
+ */
+export async function recordGroqPermanentError(
+  userId: string | undefined,
+  code: 'no_model' | 'invalid_key' | 'key_unreadable',
+  message: string
+): Promise<void> {
+  if (!userId) return;
+  try {
+    await UserIntentProfileModel.updateOne(
+      { userId },
+      { $set: { groqLastError: { code, message, at: new Date() } } }
+    );
+  } catch (err: any) {
+    logger.info(`[AI] Could not record Groq error state: ${err?.message}`);
+  }
+}
+
+/** Clears the marker above once Groq answers successfully again. */
+async function clearGroqPermanentError(userId: string | undefined): Promise<void> {
+  if (!userId) return;
+  try {
+    await UserIntentProfileModel.updateOne(
+      { userId, groqLastError: { $ne: null } },
+      { $set: { groqLastError: null } }
+    );
+  } catch {
+    // Non-critical: the marker clears on the next successful call.
+  }
+}
+
+/**
+ * Resolves which Groq model to call. Cached, so this is one request per hour
+ * rather than one per email.
+ *
+ * Deliberately does NOT fall back to "whatever the account lists first" — that
+ * list includes whisper-large-v3, canopylabs/orpheus-* and
+ * meta-llama/llama-prompt-guard-*, none of which are chat models. Better to
+ * fail clearly and let the caller fall back to Ollama.
+ */
+export const resolveGroqModel = async (groqApiKey: string): Promise<string> => {
+  // Escape hatch: pin a model without a code change.
+  const pinned = process.env.GROQ_MODEL?.trim();
+  if (pinned) return pinned;
+
+  if (groqModelCache && Date.now() - groqModelCache.at < GROQ_MODEL_CACHE_TTL_MS) {
+    return groqModelCache.model;
+  }
+
+  const res = await fetch(GROQ_MODELS_URL, {
+    headers: { Authorization: `Bearer ${groqApiKey}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Groq API error: ${res.status} ${(await res.text()).slice(0, 200)}`);
+  }
+
+  const body = await res.json() as { data?: Array<{ id: string }> };
+  const available = (body.data ?? []).map(m => m.id);
+
+  const chosen = GROQ_MODEL_PREFERENCE.find(m => available.includes(m));
+  if (!chosen) throw new GroqNoModelError(available);
+
+  if (groqModelCache?.model !== chosen) {
+    logger.info(`[AI] Resolved Groq model: ${chosen}`);
+  }
+  groqModelCache = { model: chosen, at: Date.now() };
+  return chosen;
+};
 
 /**
  * Calls the Groq cloud API (OpenAI-compatible endpoint).
@@ -439,8 +555,10 @@ const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const extractWithGroq = async (
   prompt: string,
   groqApiKey: string,
-  userId?: string
+  userId?: string,
+  model?: string
 ): Promise<AIInsightExtraction> => {
+  const GROQ_MODEL = model ?? await resolveGroqModel(groqApiKey);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 120_000);
 
@@ -456,7 +574,15 @@ const extractWithGroq = async (
         model: GROQ_MODEL,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
-        max_tokens: 600,
+        // The gpt-oss models reason before answering, and those hidden tokens
+        // are billed against max_tokens. At the default effort a single email
+        // burns ~326 reasoning tokens and can crowd out the JSON entirely,
+        // leaving empty content and finish_reason 'length'. 'low' cuts that to
+        // ~36 with no loss of extraction quality, and the raised ceiling keeps
+        // a long email from truncating mid-object. Ignored by non-reasoning
+        // models, so it is safe across the preference list.
+        reasoning_effort: 'low',
+        max_tokens: 1200,
         stream: true,
       }),
       signal: controller.signal,
@@ -641,13 +767,41 @@ export const extractInsightsFromEmail = async (
       while (groqAttemptCount < 2 && !groqSuccess) {
         try {
           groqAttemptCount++;
-          logger.debug(`[AI] Routing to Groq | model=${GROQ_MODEL} (Attempt ${groqAttemptCount})`);
-          groqResult = await extractWithGroq(prompt, options.groqApiKey, options.userId);
+          const groqModel = await resolveGroqModel(options.groqApiKey);
+          logger.debug(`[AI] Routing to Groq | model=${groqModel} (Attempt ${groqAttemptCount})`);
+          groqResult = await extractWithGroq(prompt, options.groqApiKey, options.userId, groqModel);
           const enriched = applyInferenceFallback(groqResult, emailContent);
           logger.debug('[AI] Groq extraction succeeded');
+          await clearGroqPermanentError(options.userId);
           return resolveLinks(enriched);
         } catch (groqErr: any) {
           const errMsg = groqErr?.message?.toLowerCase() || "";
+
+          // No usable chat model on this account — permanent until Emty ships a
+          // new preference list or Groq adds one back. Record it so the UI can
+          // say so instead of silently degrading to Ollama forever.
+          if (groqErr instanceof GroqNoModelError) {
+            logger.info(`[AI] ${groqErr.message}`);
+            await recordGroqPermanentError(options.userId, 'no_model', groqErr.message);
+            break;
+          }
+
+          // A model that vanished mid-run: drop the cached choice, re-resolve
+          // once, and try again before giving up.
+          if (
+            (errMsg.includes('model_not_found') || errMsg.includes('does not exist') ||
+             errMsg.includes('decommissioned')) && groqAttemptCount === 1
+          ) {
+            logger.info('[AI] Groq model no longer available — re-resolving and retrying once');
+            invalidateGroqModelCache();
+            continue;
+          }
+
+          if (errMsg.includes('401') || errMsg.includes('invalid_api_key')) {
+            logger.info('[AI] Groq rejected the API key');
+            await recordGroqPermanentError(options.userId, 'invalid_key', 'Groq rejected the API key');
+            break;
+          }
 
           // Check if it's a 429 error
           if (errMsg.includes("429")) {
@@ -687,8 +841,9 @@ export const extractInsightsFromEmail = async (
   } else if (options.useGroq && options.groqApiKey) {
     // Fallback for when userId is not provided (just one attempt)
     try {
-      logger.debug(`[AI] Routing to Groq | model=${GROQ_MODEL}`);
-      const result = await extractWithGroq(prompt, options.groqApiKey, options.userId);
+      const groqModel = await resolveGroqModel(options.groqApiKey);
+      logger.debug(`[AI] Routing to Groq | model=${groqModel}`);
+      const result = await extractWithGroq(prompt, options.groqApiKey, options.userId, groqModel);
       const enriched = applyInferenceFallback(result, emailContent);
       logger.debug('[AI] Groq extraction succeeded');
       return resolveLinks(enriched);
