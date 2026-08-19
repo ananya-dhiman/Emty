@@ -98,17 +98,34 @@ export async function autoPopulateFromMongo(): Promise<void> {
     // the case it was written for.
     if (allMongoAccounts.length === 0) return;
 
-    // Reconcile: prune local rows (for users known to this install) whose
-    // account no longer exists in the primary DB. Without this, a wiped or
-    // reconnected primary DB leaves ghost accounts locally — which then show
-    // up in the switcher and 403 every request made against them.
+    // Nothing to mirror, and nothing safe to prune, until somebody has signed
+    // in on this machine.
+    //
+    // This used to fall back to mirroring EVERY account in Mongo when the users
+    // table was empty — "fall back to all on a fresh DB". Mongo is shared by all
+    // Emty users, so on a fresh install that copied every other user's connected
+    // email address onto this device, and the auto-select below could then mark
+    // a stranger's account as active. Returning early is the only correct
+    // behaviour: with no local user there is nobody to mirror accounts *for*.
+    if (localUserIds.size === 0) {
+      logger.info("No local users yet — skipping account mirror until someone signs in");
+      return;
+    }
+
+    // Reconcile: prune local rows whose account no longer exists in the primary
+    // DB. Without this, a wiped or reconnected primary DB leaves ghost accounts
+    // locally — which then show up in the switcher and 403 every request made
+    // against them.
+    //
+    // Accounts whose owner is not a user of this install are pruned too. They
+    // were previously skipped, which is why a different person's account copied
+    // here by the old fresh-install behaviour could never be cleaned up.
     const mongoIds = new Set(allMongoAccounts.map((acc) => String(acc._id)));
     const localRows = db
       .prepare("SELECT id, user_id, email_address FROM accounts")
       .all() as Array<{ id: string; user_id: string; email_address: string }>;
     for (const row of localRows) {
-      if (localUserIds.size > 0 && !localUserIds.has(row.user_id)) continue;
-      if (!mongoIds.has(row.id)) {
+      if (!localUserIds.has(row.user_id) || !mongoIds.has(row.id)) {
         // Purge every table keyed to the account, not just the accounts row.
         // Deleting the row alone orphaned its insights, emails, checkpoints and
         // feedback, which kept driving notifications for accounts the user had
@@ -119,13 +136,10 @@ export async function autoPopulateFromMongo(): Promise<void> {
       }
     }
 
-    // Mongo is shared across users; only mirror accounts belonging to users
-    // known to this local install (fall back to all on a fresh DB).
-    let mongoAccounts = allMongoAccounts;
-    if (localUserIds.size > 0) {
-      mongoAccounts = allMongoAccounts.filter((acc) => localUserIds.has(acc.userId));
-      if (mongoAccounts.length === 0) return;
-    }
+    // Mongo is shared across users, so only ever mirror accounts belonging to a
+    // user of this install. There is no fallback branch by design — see above.
+    const mongoAccounts = allMongoAccounts.filter((acc) => localUserIds.has(acc.userId));
+    if (mongoAccounts.length === 0) return;
 
     for (const acc of mongoAccounts) {
       upsert({
@@ -148,6 +162,52 @@ export async function autoPopulateFromMongo(): Promise<void> {
   } catch (error) {
     logger.info("Failed to auto-populate local accounts from MongoDB:", error);
   }
+}
+
+/**
+ * Deletes rows whose account_id no longer matches any account.
+ *
+ * purgeAccountData only reaches data for accounts that still have a row in
+ * `accounts`; once that row is gone by any path, everything keyed to it is
+ * stranded. Reconnecting the same mailbox mints a fresh account id, so this
+ * happens routinely and strands the previous id's insights — which keep
+ * driving notifications for a mailbox the user thinks they removed.
+ *
+ * Migration v7 cleared the backlog once. This runs every boot so it cannot
+ * build up again.
+ */
+export function purgeOrphanedData(): number {
+  const db = getDb();
+  const tables = [
+    "insights",
+    "email_messages",
+    "processed_email_log",
+    "feedback",
+    "sync_checkpoints",
+  ];
+
+  // Guard for the same reason autoPopulateFromMongo guards: an empty accounts
+  // table means "not populated yet", not "everything is orphaned".
+  const accountCount = (
+    db.prepare("SELECT COUNT(*) AS c FROM accounts").get() as { c: number }
+  ).c;
+  if (accountCount === 0) return 0;
+
+  let total = 0;
+  const tx = db.transaction(() => {
+    for (const table of tables) {
+      const { changes } = db
+        .prepare(
+          `DELETE FROM ${table}
+            WHERE account_id IS NOT NULL
+              AND account_id NOT IN (SELECT id FROM accounts)`
+        )
+        .run();
+      total += changes;
+    }
+  });
+  tx();
+  return total;
 }
 
 /**

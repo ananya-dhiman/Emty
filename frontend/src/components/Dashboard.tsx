@@ -341,6 +341,20 @@ export function Dashboard({ user, theme, setTheme, onNavigate }: DashboardProps)
     setSelectedLowPriorityMessageId(null);
     setSelectedSourceMessageId(null);
     setRightCol(false);
+    // Clear every per-account view too, not just the selection. The AI Queue
+    // counter in particular used to survive the switch, so the header kept
+    // reporting the previous account's progress ("6 / 51") over an empty list
+    // — which reads as "the app is working but nothing appears" rather than
+    // "you are looking at a different account". Null means "unknown until the
+    // next poll answers for THIS account", and the banner hides while null.
+    setSyncStats(null);
+    setSyncStalled(false);
+    setFocusItems([]);
+    setActionItems([]);
+    setAgendaItems([]);
+    setCompletedItems([]);
+    setTrackedItems([]);
+    setLowPriorityItems([]);
     // Tell the backend so the sidecar's background sync follows this account
     const token = localStorage.getItem('firebaseToken');
     if (token) {

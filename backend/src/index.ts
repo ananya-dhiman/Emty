@@ -6,7 +6,7 @@ import app from "./server";
 
 import logger from "./utils/logger";
 import { initializeDatabase, closeDatabase } from "./db/sqlite";
-import { autoPopulateFromMongo } from "./db/repositories/accountLocalRepository";
+import { autoPopulateFromMongo, purgeOrphanedData } from "./db/repositories/accountLocalRepository";
 import { failInterruptedSyncs } from "./db/repositories/syncCheckpointRepository";
 import { resolveRedirectUri } from "./utils/createOAuth";
 import { sweepExpired } from "./utils/oauthStateStore";
@@ -51,6 +51,15 @@ mongoose
         
         // Auto-sync accounts to local DB cache
         await autoPopulateFromMongo();
+
+        // Reconciling accounts can leave data behind: an account row removed
+        // by any path strands everything keyed to it, and reconnecting the
+        // same mailbox mints a new id. Sweep after, so the orphans that
+        // migration v7 cleared once cannot accumulate again.
+        const orphans = purgeOrphanedData();
+        if (orphans > 0) {
+            logger.info(`Purged ${orphans} row(s) orphaned by removed accounts`);
+        }
 
         // Start server after successful DB connection
         const server = app.listen(PORT, () => {
