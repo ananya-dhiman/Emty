@@ -124,6 +124,12 @@ jobs:
         id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the update payloads. With createUpdaterArtifacts enabled and a
+          # pubkey in tauri.conf.json, Tauri REQUIRES the private key: without it the
+          # build fails outright ("A public key has been found, but no private key")
+          # rather than quietly shipping unsigned artifacts. Verified locally.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: frontend
           args: --target ${{ matrix.target }}

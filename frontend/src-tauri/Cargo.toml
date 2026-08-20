@@ -32,6 +32,9 @@ url = "2"
 sysinfo = "0.36.1"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
+# Self-update: updater fetches and verifies, process restarts into the new build.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [target."cfg(any(target_os = \"macos\", windows, target_os = \"linux\"))".dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

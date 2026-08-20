@@ -68,6 +68,52 @@ function App() {
   // user.gmailAccountId always points at the first-connected one.
   const [pendingAccountId, setPendingAccountId] = useState<string | null>(null);
 
+  // Set once an update has been downloaded and verified, and is waiting for a
+  // restart. Nothing else in the app depends on it.
+  const [updateReady, setUpdateReady] = useState(false);
+
+  // Self-update check.
+  //
+  // download() and install() are called separately rather than using
+  // downloadAndInstall(): on Windows the installer closes the app as it runs,
+  // and Emty lives in the tray with a widget open, so yanking it away
+  // mid-task is hostile. Instead we fetch quietly in the background and let
+  // the user pick the moment. Ignored prompts apply on next launch anyway.
+  //
+  // Every failure here is non-blocking. No network, GitHub unreachable, or a
+  // malformed manifest must never delay startup or show an error — the user
+  // simply stays on their current version.
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof (window as any).__TAURI_INTERNALS__ === 'undefined') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { check } = await import('@tauri-apps/plugin-updater');
+        const update = await check();
+        if (!update || cancelled) return;
+        console.log(`[updater] ${update.version} available (current ${update.currentVersion})`);
+        await update.download();
+        if (!cancelled) setUpdateReady(true);
+      } catch (e) {
+        console.warn('[updater] check failed, staying on current version:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const applyUpdate = async () => {
+    try {
+      const { relaunch } = await import('@tauri-apps/plugin-process');
+      const { check } = await import('@tauri-apps/plugin-updater');
+      const update = await check();
+      if (update) await update.install();
+      await relaunch();
+    } catch (e) {
+      console.error('[updater] install failed:', e);
+      setUpdateReady(false);
+    }
+  };
+
   // Check notification permissions on mount
   useEffect(() => {
     const checkNotificationPermission = async () => {
@@ -291,12 +337,40 @@ function App() {
     }
   };
 
+  // Shown over whichever screen is active once an update is staged. Deliberately
+  // dismissible and out of the way — an ignored update still applies on next
+  // launch, so nothing is lost by declining now.
+  const updatePrompt = updateReady ? (
+    <div
+      style={{
+        position: 'fixed', bottom: 16, right: 16, zIndex: 9999,
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '10px 14px', borderRadius: 8,
+        background: 'var(--panel)', border: '1px solid var(--border-lt)',
+        fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-1)',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+      }}
+    >
+      <span>Update ready</span>
+      <button className="lp-btn-primary" style={{ fontSize: 11, padding: '5px 10px' }} onClick={applyUpdate}>
+        Restart
+      </button>
+      <button
+        onClick={() => setUpdateReady(false)}
+        style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}
+        title="Later — applies on next launch"
+      >
+        ×
+      </button>
+    </div>
+  ) : null;
+
   if (user && isGmailConnected) {
     if (route === 'metrics') {
-      return <MetricsDashboard />;
+      return <>{updatePrompt}<MetricsDashboard /></>;
     }
     if (route === 'profile') {
-      return <Profile user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} onLogout={handleLogout} />;
+      return <>{updatePrompt}<Profile user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} onLogout={handleLogout} /></>;
     }
     if (route === 'syncing') {
       return <SyncLoading user={user} accountId={pendingAccountId} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
@@ -317,7 +391,7 @@ function App() {
         />
       );
     }
-    return <Dashboard user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} />;
+    return <>{updatePrompt}<Dashboard user={user} theme={theme} setTheme={setTheme} onNavigate={setRoute as any} /></>;
   }
 
   if (user && !isGmailConnected) {

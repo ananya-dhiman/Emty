@@ -176,6 +176,12 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--autostart"])))
+        // Self-update. The updater verifies each payload against the public key
+        // compiled in from tauri.conf.json before installing, so a release can
+        // only come from whoever holds the matching private key. `process`
+        // provides the relaunch once an update is staged.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let _ = app.autolaunch().enable();
             let args: Vec<String> = std::env::args().collect();
