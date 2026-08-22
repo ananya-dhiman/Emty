@@ -1,2 +1,8 @@
 # Claude Code — machine-local settings. .claude/launch.json is shared.
 .claude/settings.local.json
+
+# Tauri update signing keys. NEVER commit the private key: whoever holds it
+# can sign an update and push arbitrary code to every installed copy of Emty.
+*.key
+**/.tauri/
+frontend/~/
