@@ -118,6 +118,31 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      # TEMPORARY diagnostic - delete this step once signing works.
+      # Prints only non-secret facts: lengths, the first/last 4 characters, and
+      # the decoded comment line (a fixed public string). The key body is never
+      # printed. This exists because "Missing comment in secret key" means the
+      # value CI receives is not the key file contents, and we cannot see it.
+      - name: Diagnose signing secret
+        shell: bash
+        env:
+          K: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          P: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          echo "key length : ${#K}   (expected 348)"
+          echo "key first4 : ${K:0:4}   (expected dW50)"
+          echo "key last4  : ${K: -4}   (expected Cg==)"
+          echo "pw  length : ${#P}"
+          if printf %s "$K" | base64 -d > dec.tmp 2>/dev/null; then
+            echo "base64     : decodes OK"
+            echo "line count : $(wc -l < dec.tmp)   (expected 1)"
+            echo "line1      : $(head -1 dec.tmp)"
+            echo "line2 chars: $(sed -n 2p dec.tmp | wc -c)   (expected 213)"
+          else
+            echo "base64     : FAILED TO DECODE - value is not valid base64"
+          fi
+          rm -f dec.tmp
+
       # beforeBuildCommand in tauri.conf.json builds the backend and fetches
       # the host-matching sidecars, so no extra steps are needed here.
       - uses: tauri-apps/tauri-action@v0
