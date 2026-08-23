@@ -33,6 +33,20 @@ const TAPE_ITEMS = [
 ];
 const TAPE_DOUBLED = [...TAPE_ITEMS, ...TAPE_ITEMS];
 
+/* ─── DOWNLOADS ───
+   GitHub resolves /releases/latest/ to the newest published release at
+   request time, so these URLs never need updating when we ship. CI uploads
+   these fixed filenames alongside Tauri's versioned ones. */
+const DL_BASE   = 'https://github.com/ananya-dhiman/Emty/releases/latest/download';
+const DL_WINDOWS = `${DL_BASE}/Emty-windows-x64-setup.exe`;
+const DL_MAC     = `${DL_BASE}/Emty-macos-aarch64.dmg`;
+const RELEASE_API = 'https://api.github.com/repos/ananya-dhiman/Emty/releases/latest';
+
+/* Generic "Download App" buttons should hand Mac visitors the .dmg. */
+const isMac = typeof navigator !== 'undefined' &&
+  /Mac/i.test(navigator.userAgent || '');
+const DL_PRIMARY = isMac ? DL_MAC : DL_WINDOWS;
+
 /* ─── FAQ DATA ─── */
 const FAQ_ITEMS = [
   {
@@ -232,6 +246,19 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme }) => {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const twText = useTypewriter(2000);
 
+  /* Live version from the latest GitHub release. Purely cosmetic — the
+     unauthenticated API allows 60 req/hr per IP, so on failure we simply
+     omit the label rather than blocking anything. */
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(RELEASE_API)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled && d?.tag_name) setVersion(d.tag_name); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const { val: val1, ref: ref1 } = useCountUp(2847);
   const { val: val2, ref: ref2 } = useCountUp(12);
   const { val: val3, ref: ref3 } = useCountUp(6.4, true);
@@ -261,7 +288,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme }) => {
           <button className="lp-theme-toggle" onClick={toggle}>
             {mode === 'dark' ? '☼ LIGHT' : '☾ DARK'}
           </button>
-          <a className="lp-btn-primary" href={import.meta.env.WINDOWS_EXE}>Download App</a>
+          <a className="lp-btn-primary" href={DL_PRIMARY}>Download App</a>
         </div>
       </nav>
 
@@ -285,7 +312,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme }) => {
             <div className="lp-hero-actions">
               <a
                 className="lp-btn-primary"
-                href={import.meta.env.WINDOWS_EXE}
+                href={DL_PRIMARY}
                 style={{ fontSize: 14, padding: '14px 28px' }}
               >
                 Download App →
@@ -418,7 +445,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme }) => {
             <div className="lp-empty-cta">
               <a
                 className="lp-btn-primary"
-                href={import.meta.env.WINDOWS_EXE}
+                href={DL_PRIMARY}
                 style={{ fontSize: 14, padding: '14px 24px' }}
               >
                 Download App →
@@ -519,10 +546,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme }) => {
               </svg>
             </div>
             <div className="lp-dl-os">WINDOWS</div>
-            <div className="lp-dl-ver">VERSION 1.1.0</div>
+            <div className="lp-dl-ver">{version ? `X64 · ${version}` : 'X64'}</div>
             <a
               className="lp-btn-primary"
-              href={import.meta.env.WINDOWS_EXE}
+              href={DL_WINDOWS}
               style={{ marginTop: 'auto', fontSize: 13, padding: '12px 24px' }}
             >
               Download .exe
@@ -537,13 +564,13 @@ const LandingPage: React.FC<LandingPageProps> = ({ theme, setTheme }) => {
               </svg>
             </div>
             <div className="lp-dl-os">MAC OS</div>
-            <div className="lp-dl-ver">APPLE SILICON / INTEL</div>
+            <div className="lp-dl-ver">{version ? `APPLE SILICON · ${version}` : 'APPLE SILICON'}</div>
             <a
               className="lp-btn-primary"
-              href={import.meta.env.MAC_EXE}
+              href={DL_MAC}
               style={{ marginTop: 'auto', fontSize: 13, padding: '12px 24px' }}
             >
-              Download .exe
+              Download .dmg
             </a>
           </div>
 
