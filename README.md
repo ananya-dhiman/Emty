@@ -10,31 +10,42 @@ Your inbox was not built to help you think. It was built to receive everything.
 
 Emty changes that. It reads your Gmail in the background, classifies each message, scores it against your personal priorities, and surfaces only what needs your attention — organized into three simple tiers: action required, top priority, and everything else.
 
+Around that ranking sit the parts that stop things slipping: it extracts deadlines from your email and [notifies you](#deadline-notifications) as they approach, lets you [pin and annotate](#tracking-an-email) anything you need to come back to, keeps [several Gmail accounts](#multiple-gmail-accounts) in one app, and puts your most urgent items in a [widget](#desktop-widget) on the corner of your screen.
+
 It does this without sending your sensitive emails to any cloud service. Emails that contain financial, health, legal, or personal information are processed entirely offline, on your machine, using a locally running AI model.
 
 ---
 
 ## How It Is Different from Gmail's Priority Inbox
 
-Gmail's Priority Inbox and Tabbed Inbox use machine learning to predict what you are likely to open or reply to. It is a good system for reducing noise. But it has a specific goal: predict your *engagement behavior* — what you will click.
+Gmail's Priority Inbox solves a real version of this problem, and solves it well. It ranks mail by the probability that you will interact with it, learned from signals like who you correspond with, which senders you reply to, and which terms appear in mail you act on. You can correct it with the importance markers, and those corrections feed back into your personal model.
 
-Emty has a different goal: surface what actually *requires your attention*, regardless of whether you have opened it before.
+So the difference is not that one system is intelligent and the other is not. It is **where the definition of "important" comes from**.
 
-Here is a direct comparison:
+Gmail derives your priorities from your behavior — importance is *inferred* from your history. Emty asks you to state them — importance is *declared*, and you can open the declaration and edit it whenever your priorities change.
+
+That distinction shows up in four practical places.
+
+**1. Mail you have no history with.** An inferred model needs a signal to learn from. The first email from an organization you have never corresponded with — an application confirmation, an interview invitation, a fee notice — carries almost no behavioral history. A declared profile applies to it the moment it arrives, because you already said that `application` and `deadline` matter to you.
+
+**2. Deadlines as a signal that strengthens over time.** Emty extracts dates from the email body and uses proximity to that date as a live score component, so a message's rank *rises* as its deadline approaches. Gmail does resurface mail you have not replied to, but that nudge is driven by how long the message has been sitting there, not by a date written inside it.
+
+**3. Priorities you can edit directly.** Your keywords, preferred domains, and label ordering are inputs you can open and change. Reorder your labels during exam season and every existing score is re-ranked against the new order immediately — no retraining, no waiting for a model to notice that your habits shifted.
+
+**4. Scores you can inspect.** Every email exposes its full breakdown: AI importance, label match, recency, and deadline boost. When something ranks wrongly, you can see which component caused it.
 
 | | Gmail Priority Inbox | Emty |
 |---|---|---|
-| **How priority is determined** | Predicts probability you will open or reply, based on past behavior | Scores each email against your stated goals, current deadlines, and label priorities |
-| **What it optimizes for** | Engagement — opens, replies, time-to-action | Actionability — deadlines, tasks, information that needs a response |
-| **Personalization source** | Learns from your click and reply history automatically | You define your priorities explicitly during onboarding, then refine through feedback |
-| **Deadline awareness** | Not directly surfaced in ranking | Detected and used as a scoring boost — emails with a closer deadline rank higher |
+| **Source of priority** | Inferred from your behavior and correspondence history | Declared by you up front, then refined by feedback |
+| **New or unknown senders** | Little history available to learn from | Your stated keywords and domains apply immediately |
+| **Deadline awareness** | A date inside the message is not a ranking signal | Extracted, and boosted further as the date approaches |
+| **Changing your priorities** | Change your behavior and wait for the model to follow | Edit keywords or reorder labels; scores re-rank at once |
+| **Score visibility** | A short reason is shown for a message being important | Itemized breakdown per email |
 | **Sensitive email handling** | Processed on Google's servers like all other email | Detected by keyword classifier and routed to a local, offline AI model — never leaves your machine |
-| **Transparency** | The ranking algorithm is a black box | Score breakdown is available: base score, label match, recency, deadline boost |
-| **Feedback mechanism** | Implicit — based on your open and reply patterns | Explicit — you boost or suppress individual emails, which updates your profile and training data |
 | **Data storage** | Email content stays on Google's servers | Email content, scores, and insights are stored only on your local machine |
 | **AI model** | Google's internal models | Groq cloud (fast, for normal emails) + Ollama local (private, for sensitive emails) |
 
-In short: Gmail predicts what you *would* engage with based on habit. Emty surfaces what you *should* engage with based on what you told it matters to you.
+Neither approach is strictly better. Inference is effortless and handles the routine cases without you ever configuring anything. Declaration costs you about three minutes of setup, and it pays that back on exactly the mail you cannot afford to miss — the message from a sender you have no history with, carrying a date you will otherwise find out about too late.
 
 ---
 
@@ -287,6 +298,53 @@ Each boost or suppress signal is saved to your local training dataset. This is t
 
 ---
 
+## Tracking an Email
+
+Ranking decides what you see first. Tracking is for the thing you have already seen, meant to deal with, and do not want to lose.
+
+Any email card has a track toggle. Tracking pins it to a Tracked list that stays visible on the dashboard and in the widget until you untrack it or mark it completed.
+
+You can also attach a **tracking note** to a pinned email — a short sticky note for the context that is not in the email itself. "Waiting on transcript before I reply." "Need manager approval first." The note lives on the pin, and toggling tracking off and on again preserves whatever note you had written.
+
+Tracking is stored locally alongside the rest of your email data, and pins are scoped to the account they belong to.
+
+---
+
+## Deadline Notifications
+
+Emty raises an email's score as its deadline approaches, but you do not have to be looking at the app for that to help you.
+
+The desktop shell polls the local backend every 30 seconds and raises a native OS notification for any deadline that has become urgent. Notifications fall into three tiers:
+
+| Tier | When it fires |
+|---|---|
+| **UPCOMING** | A detected deadline is within the next 48 hours |
+| **DUE TODAY** | The deadline is within 24 hours and falls on today's date |
+| **OVERDUE** | The deadline has passed and the email is not marked completed |
+
+Two rules keep this from becoming noise:
+
+- **Priority filtered.** Only emails with an importance score of 0.5 or higher can raise a notification. A newsletter that happens to mention a date will not interrupt you.
+- **Fired once.** Every notification has a stable ID, and IDs that have already been shown are written to `notifications.json` in the app data directory. You get told once per deadline, and restarting the app does not replay old alerts.
+
+Emails you have marked as completed stop generating notifications immediately.
+
+You also get a notification when a background sync finishes, with the number of emails processed.
+
+---
+
+## Multiple Gmail Accounts
+
+You can connect more than one Gmail account — a college address and a personal one, or work and personal — and switch between them from the Profile section without signing out.
+
+**Accounts stay separate.** Each connected account keeps its own ranking, its own label priorities, its own sync state, and its own tracked list. Switching the active account switches the entire view: dashboard tiers, label config, sync progress, and pins all follow the account you are currently on.
+
+This is deliberate. A merged feed would score your work mail and your college mail against a single priority list, and those are rarely the same list. What you get instead is one app instead of two browser tabs, with the ranking still tuned per inbox.
+
+Your active account is remembered between sessions. Removing an account purges that account's local data along with it.
+
+---
+
 ## Desktop Widget
 
 The widget is a small, frameless, transparent panel anchored to the bottom-right corner of your screen.
@@ -295,6 +353,16 @@ The widget is a small, frameless, transparent panel anchored to the bottom-right
 - Toggles on and off from the system tray icon
 - Clicking any card opens the full dashboard at that email
 - Polls the local backend for updates while a sync is in progress
+
+Three filter tabs control what it shows:
+
+| Tab | What it shows |
+|---|---|
+| **All** | Your top-ranked emails, with the Tracked list appended below |
+| **Urgent** | Only action-required emails, or anything scoring 0.6 and above |
+| **Tracked** | Just your pinned emails and their notes |
+
+Within each tab, cards are ordered by **closest deadline first**, then by score — so the widget answers "what is due soonest" rather than "what ranked highest overall".
 
 The widget is a separate window from the main app. It reads from the same local database, so it is always in sync with what you see on the dashboard.
 
